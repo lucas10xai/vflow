@@ -1,0 +1,151 @@
+{
+  "_note": "Quy tắc bỏ từ đệm cho chế độ clean. So khớp chữ thường, GIỮ dấu thanh, chỉ trên từ đứng riêng. 'always' bị bỏ ở mọi vị trí; 'contextual' chỉ bỏ ở vị trí trong remove_at và khi không gặp ngữ cảnh giữ (keep_before: từ ngay sau; keep_after: từ ngay trước). Vị trí tính trong một câu (ngắt bởi . ! ? …): initial = đầu câu, medial = giữa câu, final = cuối câu. Không bao giờ bỏ từ đệm ngữ cảnh khi nó đứng một mình hoặc ở cuối câu (thường là tiểu từ hỏi/đáp: 'thế à?', 'ừ.').",
+  "always": [
+    "ừm",
+    "ừmm",
+    "ờm",
+    "ưm",
+    "hmm",
+    "hm",
+    "uh",
+    "uhm",
+    "um",
+    "umm"
+  ],
+  "always_patterns": [
+    "^h+m+$",
+    "^u+h+m*$",
+    "^u+m+$",
+    "^ừ+m+$",
+    "^ờ+m+$"
+  ],
+  "keep_after_any": [
+    "chữ",
+    "âm",
+    "vần",
+    "dấu",
+    "từ",
+    "tiếng",
+    "kêu",
+    "nói",
+    "là"
+  ],
+  "contextual": {
+    "à": {
+      "remove_at": [
+        "initial",
+        "medial"
+      ],
+      "keep_before": [
+        "ra",
+        "quên",
+        "nhớ",
+        "đúng",
+        "phải",
+        "thế",
+        "vậy",
+        "này",
+        "há",
+        "ha",
+        "mà",
+        "còn",
+        "đây",
+        "đấy",
+        "thì",
+        "ừ",
+        "vâng"
+      ],
+      "keep_after": [
+        "rồi",
+        "thế",
+        "vậy",
+        "sao",
+        "hả",
+        "đó",
+        "đấy",
+        "nhé",
+        "chứ",
+        "hay",
+        "phải",
+        "đúng"
+      ]
+    },
+    "ừ": {
+      "remove_at": [
+        "medial"
+      ],
+      "keep_before": [
+        "thì",
+        "đúng",
+        "phải",
+        "rồi",
+        "được",
+        "đấy",
+        "nhé",
+        "ha",
+        "há",
+        "vậy",
+        "thế"
+      ],
+      "keep_after": [
+        "ừ",
+        "thì",
+        "nói"
+      ]
+    },
+    "ờ": {
+      "remove_at": [
+        "medial"
+      ],
+      "keep_before": [
+        "thì",
+        "đúng",
+        "phải",
+        "rồi",
+        "được",
+        "đấy",
+        "nhé",
+        "ha",
+        "há",
+        "vậy",
+        "thế"
+      ],
+      "keep_after": [
+        "ờ",
+        "thì"
+      ]
+    },
+    "ơ": {
+      "remove_at": [
+        "medial"
+      ],
+      "keep_before": [
+        "kìa",
+        "hay",
+        "này",
+        "sao",
+        "lạ"
+      ],
+      "keep_after": []
+    },
+    "ê": {
+      "remove_at": [
+        "medial"
+      ],
+      "keep_before": [
+        "này",
+        "mày",
+        "bạn",
+        "anh",
+        "chị",
+        "em",
+        "ông",
+        "bà",
+        "kìa"
+      ],
+      "keep_after": [
+        "ê"
+      ]
+    }
+  }
+}

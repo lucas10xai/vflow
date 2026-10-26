@@ -1,0 +1,40 @@
+01. Deploy bản mới lên staging giúp anh.
+02. Commit hết thay đổi rồi push lên nhánh main.
+03. Tạo một worktree mới từ branch feature login rồi chạy test.
+04. Agent ơi, đọc lại spec trong thư mục docs rồi tóm tắt cho anh ba ý chính.
+05. Cái Docker container của n8n cứ restart liên tục, xem log giúp anh xem lỗi gì.
+06. Webhook bên n8n trả về lỗi 500 từ tối qua, kiểm tra lại endpoint đi.
+07. Mở dashboard Supabase xem bảng users có bao nhiêu dòng.
+08. Port 5678 đang bị chiếm, kill tiến trình đó rồi chạy lại server.
+09. Tailscale trên máy Windows bị mất kết nối, ping thử xem còn sống không.
+10. Thêm rule firewall chỉ cho phép SSH từ mạng nội bộ.
+11. Merge pull request số 42 sau khi review xong nhé.
+12. Rebase nhánh này lên main rồi giải quyết conflict giúp anh.
+13. Có bug ở trang login, bấm nút đăng nhập thì không có phản hồi gì.
+14. Làm một hotfix cho production luôn, không đợi sprint sau.
+15. Prompt này dài quá, tốn khoảng hai nghìn token mỗi lần gọi API.
+16. Cài Node.js bản 22 rồi chạy npm install trong repo.
+17. Viết script Python đọc file JSON rồi đẩy vào Postgres.
+18. Chuyển project sang TypeScript nhưng giữ nguyên cấu trúc thư mục.
+19. Next.js build bị lỗi vì thiếu biến môi trường trên Vercel.
+20. Mở localhost:3000 xem giao diện đã lên chưa.
+21. Gọi endpoint /v1/chat/completions với model mới, đo xem latency bao nhiêu mili giây.
+22. Con VPS đang dùng hết 90% RAM, kiểm tra xem tiến trình nào ăn nhiều nhất.
+23. GPU trên server đang chạy benchmark, đừng deploy gì lên đó.
+24. Rollback về commit trước đi, bản mới làm hỏng database rồi.
+25. Orca đang có ba agent chạy song song, cái nào xong thì báo cáo cho anh.
+26. Cron job backup chạy lúc 2 giờ sáng mỗi ngày, kiểm tra xem tối qua có chạy không.
+27. Tạo API key mới cho staging rồi lưu vào file env, tuyệt đối đừng commit lên GitHub.
+28. Timeout của request đang để 8 giây, tăng lên 15 giây thử xem.
+29. Có cần dùng Redis làm cache cho queue này không?
+30. Ghi lại các bước migration database vào spec trước khi chạy.
+31. Thêm Whisper vào bảng benchmark, so sánh WER với model hiện tại.
+32. Dựng proxy Nginx trước backend, bật SSL cho domain mới.
+33. Frontend gọi backend bị lỗi CORS, sửa config phía server giúp anh.
+34. Chạy lại pipeline CI/CD, lần trước fail ở bước build.
+35. Ứng dụng có hotkey nào để chụp screenshot không?
+36. Bỏ Kubernetes ra khỏi kế hoạch, mình chỉ cần Docker Compose là đủ.
+37. MCP server của Supabase đang offline, kiểm tra lại token rồi kết nối lại.
+38. Anh muốn workflow này chạy realtime qua websocket thay vì polling mỗi 5 giây.
+39. Gửi tin nhắn Telegram báo cho anh khi deploy xong, kèm link dashboard.
+40. Tóm tắt cuộc họp hôm nay: ba issue còn mở, một release dự kiến thứ Sáu, và cần thêm một subagent để review code.
