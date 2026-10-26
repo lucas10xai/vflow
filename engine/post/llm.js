@@ -8,6 +8,22 @@ import { expandHome } from './config.js';
 export const LLM_ERROR_CODES = ['timeout', 'network', 'empty', 'bad_response', 'no_key', 'no_model', 'cloud_disabled'];
 
 /**
+ * Giọng điệu (settings.tone, contract/engine-api.md mục "Giọng điệu và nói nhỏ"): chỉ thêm MỘT
+ * dòng hướng dẫn phong cách vào system prompt của tidy/email — không đổi nghĩa/thêm thông tin,
+ * không ảnh hưởng guard (guard vẫn kiểm đầu ra như cũ, độc lập với tone).
+ * @type {Record<string, string>}
+ */
+export const TONE_LINES = {
+  formal: 'Giữ giọng văn trang trọng, lịch sự, đúng chuẩn mực công việc — không đổi ý nghĩa, không thêm thông tin.',
+  casual: 'Giữ giọng văn tự nhiên, gần gũi, thân mật nhưng vẫn rõ ràng, đúng ngữ pháp — không đổi ý nghĩa, không thêm thông tin.',
+};
+
+/** @param {string|undefined|null} tone @returns {string|null} */
+export function toneInstruction(tone) {
+  return (tone && TONE_LINES[tone]) || null;
+}
+
+/**
  * @typedef {{ url: string, model: string|null, timeout_ms: number, key_file: string|null }} RewriteConfig
  * @typedef {{ cloud_llm?: boolean, llm_model?: string|null, llm_timeout_ms?: number }} LlmSettings
  */

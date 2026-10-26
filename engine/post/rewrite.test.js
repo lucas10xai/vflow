@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { createPostProcessor } from './index.js';
 import { loadConfig } from './config.js';
+import { rewriteEmail } from './rewrite.js';
 
 // Khoá canh gác: giá trị nhận diện được, sinh mới mỗi lần chạy, chỉ sống trong thư mục tạm.
 const CANARY = `vflow-canary-${randomBytes(8).toString('hex')}`;
@@ -247,4 +248,23 @@ test('khoá canh gác KHÔNG xuất hiện trong kết quả, log, stdout/stderr
   // Log mặc định có chạy và chỉ chứa mã lỗi.
   assert.match(cap.output(), /"event":"rewrite_failed","code":"http_500"/);
   assert.ok(!cap.output().includes('deploy xong'), 'log chứa văn bản giọng nói');
+});
+
+test('tone: formal/casual thêm một dòng phong cách vào system prompt của email, neutral/không đặt không thêm gì', async (t) => {
+  const srv = await startServer(t);
+  const dir = mkdtempSync(join(tmpdir(), 'vflow-post-rewrite-tone-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const keyFile = join(dir, 'k');
+  writeFileSync(keyFile, `${CANARY}\n`);
+  const rewrite = { url: srv.url, model: 'ok', timeout_ms: 500, key_file: keyFile };
+  for (const tone of [undefined, 'neutral', 'formal', 'casual']) {
+    await rewriteEmail({ text: 'nội dung', rewrite, settings: tone ? { tone } : undefined });
+  }
+  const systems = srv.requests.map((r) => r.json.messages[0].content);
+  assert.equal(systems[0], systems[1], 'không đặt tone và tone="neutral" phải giống nhau');
+  assert.ok(systems[0].startsWith('Bạn là trợ lý biên tập'));
+  assert.ok(!systems[0].includes('trang trọng') && !systems[0].includes('gần gũi'));
+  assert.ok(systems[2].includes('trang trọng'), 'formal phải thêm dòng trang trọng');
+  assert.ok(systems[3].includes('gần gũi'), 'casual phải thêm dòng gần gũi');
+  for (const s of systems) assert.ok(s.includes('KHÔNG thêm thông tin'), 'quy tắc giữ nguyên ý vẫn còn dù tone nào');
 });

@@ -208,6 +208,19 @@ public final class HistoryStore: @unchecked Sendable {
     }
 }
 
+/// Câu dùng cho "Chèn lại câu vừa rồi" (menu thanh trạng thái/Dock, phím tắt ⌥⌘V mặc định) — thuần,
+/// test được. Lịch sử bật ⇒ lấy từ lịch sử (đúng mục mới nhất, kể cả sau khi khởi động lại app);
+/// lịch sử tắt ⇒ chỉ dùng bộ nhớ trong phiên chạy hiện tại (không ghi đĩa, mất khi thoát app).
+public enum LastSpokenText {
+    public static func resolve(historyEnabled: Bool, historyTopText: String?, inMemoryText: String?) -> String? {
+        let candidate = historyEnabled ? historyTopText : inMemoryText
+        guard let c = candidate, !c.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        return c
+    }
+
+    public static let noSentenceMessage = "Chưa có câu nào"
+}
+
 /// Quyết định có ghi một lần đọc chính tả vào lịch sử hay không — thuần, test được không cần tệp.
 public enum HistoryGate {
     /// `enabled`: công tắc "Lưu lịch sử". Kết quả lỗi/im lặng/rỗng không bao giờ vào lịch sử

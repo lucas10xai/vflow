@@ -4,15 +4,32 @@ import { readFileSync, statSync, writeFileSync, renameSync, mkdirSync, chmodSync
 import { dirname } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
+// `llm_timeout_ms` mặc định 3500 (trước là 8000 — quá lâu để người dùng chờ, xem contract/engine-api.md
+// mục "Thời hạn LLM"); người dùng đã tự đặt giá trị khác thì giữ nguyên (mặc định chỉ áp khi khoá
+// vắng mặt trong tệp cấu hình, xem pickSettings()).
 export const DEFAULT_SETTINGS = Object.freeze({
   cloud_llm: true,
   llm_model: null,
-  llm_timeout_ms: 8000,
+  llm_timeout_ms: 3500,
   actions_enabled: true,
+  stats_enabled: true,
+  app_rules: Object.freeze({}),
+  voice_punctuation: true,
+  tone: 'neutral',
+  whisper_mode: false,
+  learn_from_edits: true,
+  live_preview: false,
+  silence_stop_seconds: 0,
 });
 
 const SETTINGS_KEYS = Object.keys(DEFAULT_SETTINGS);
 const MAX_MODEL_LEN = 200;
+const MAX_APP_RULES = 100;
+/** Bundle id dạng reverse-DNS (ví dụ "com.apple.Terminal", "com.todesktop.230313mzl4w4u92"). */
+export const BUNDLE_ID_RE = /^[A-Za-z][A-Za-z0-9]*(\.[A-Za-z0-9][A-Za-z0-9_-]*)+$/;
+/** Chế độ hợp lệ cho một luật app_rules (không có "auto" — tránh đệ quy). */
+export const APP_RULE_MODES = ['normal', 'clean', 'dev', 'tidy', 'email'];
+export const TONES = ['neutral', 'formal', 'casual'];
 
 export class SettingsError extends Error {
   /** @param {string} message */
@@ -25,8 +42,22 @@ export class SettingsError extends Error {
 /** @param {unknown} v */
 const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 
+/** @param {unknown} rules */
+function validateAppRules(rules) {
+  if (!isObj(rules)) throw new SettingsError('app_rules phải là object { bundleId: chế độ }');
+  const entries = Object.entries(rules);
+  if (entries.length > MAX_APP_RULES) throw new SettingsError(`app_rules tối đa ${MAX_APP_RULES} mục`);
+  for (const [id, mode] of entries) {
+    if (!BUNDLE_ID_RE.test(id)) throw new SettingsError(`app_rules: bundle id không hợp lệ "${id}"`);
+    if (!APP_RULE_MODES.includes(mode)) {
+      throw new SettingsError(`app_rules["${id}"] phải là một trong: ${APP_RULE_MODES.join(', ')}`);
+    }
+  }
+  return { ...rules };
+}
+
 /**
- * Kiểm kiểu/giá trị bốn trường cài đặt. Ném SettingsError nếu sai.
+ * Kiểm kiểu/giá trị các trường cài đặt. Ném SettingsError nếu sai.
  * @param {Record<string, unknown>} v
  */
 function validateValues(v) {
@@ -38,6 +69,16 @@ function validateValues(v) {
     throw new SettingsError('llm_timeout_ms phải là số nguyên 1000–30000');
   }
   if (typeof v.actions_enabled !== 'boolean') throw new SettingsError('actions_enabled phải là boolean');
+  if (typeof v.stats_enabled !== 'boolean') throw new SettingsError('stats_enabled phải là boolean');
+  v.app_rules = validateAppRules(v.app_rules);
+  if (typeof v.voice_punctuation !== 'boolean') throw new SettingsError('voice_punctuation phải là boolean');
+  if (!TONES.includes(v.tone)) throw new SettingsError(`tone phải là một trong: ${TONES.join(', ')}`);
+  if (typeof v.whisper_mode !== 'boolean') throw new SettingsError('whisper_mode phải là boolean');
+  if (typeof v.learn_from_edits !== 'boolean') throw new SettingsError('learn_from_edits phải là boolean');
+  if (typeof v.live_preview !== 'boolean') throw new SettingsError('live_preview phải là boolean');
+  if (!Number.isInteger(v.silence_stop_seconds) || v.silence_stop_seconds < 0 || v.silence_stop_seconds > 60) {
+    throw new SettingsError('silence_stop_seconds phải là số nguyên 0–60');
+  }
   return v;
 }
 

@@ -161,32 +161,9 @@ export function createDictionary({ path, seedPath, now, log }) {
      * @returns {{ text: string, applied: Applied[] }}
      */
     apply(text) {
-      const toks = tokenize(text);
-      /** @type {Applied[]} */
-      const applied = [];
-      let out = '';
-      let cursor = 0;
-      for (let i = 0; i < toks.length; ) {
-        const hit = matchAt(toks, i, text, patterns);
-        if (!hit) {
-          i++;
-          continue;
-        }
-        const entry = entries[hit.index];
-        const start = toks[i].start;
-        const end = toks[i + hit.length - 1].end;
-        const from = text.slice(start, end);
-        let to = entry.term;
-        if (entry.case !== 'exact' && startsUpper(from) && startsLower(to)) to = capitalize(to);
-        out += text.slice(cursor, start) + to;
-        cursor = end;
-        applied.push({ type: 'dictionary', from, to });
-        entry.uses += 1;
-        entry.last_used = now().toISOString();
-        i += hit.length;
-      }
-      out += text.slice(cursor);
+      const { text: out, applied } = matchAndReplace(text, patterns, entries);
       if (applied.length > 0) {
+        for (const a of applied) a.entry.uses += 1, (a.entry.last_used = now().toISOString());
         try {
           save();
           fromSeed = false;
@@ -195,7 +172,17 @@ export function createDictionary({ path, seedPath, now, log }) {
           log({ event: 'dictionary_save_failed', code: /** @type {any} */ (err).code ?? 'unknown' });
         }
       }
-      return { text: out, applied };
+      return { text: out, applied: applied.map(({ entry, ...a }) => a) };
+    },
+
+    /**
+     * Như `apply()` nhưng KHÔNG có hiệu ứng phụ (không tăng `uses`, không ghi tệp) — dùng cho
+     * `/v1/partial` (item 9): xem trước nhiều lần/giây không được ghi đĩa liên tục.
+     * @param {string} text NFC
+     */
+    applyPreview(text) {
+      const { text: out, applied } = matchAndReplace(text, patterns, entries);
+      return { text: out, applied: applied.map(({ entry, ...a }) => a) };
     },
 
     /** Các thuật ngữ cần giữ nguyên hoa/thường (không viết hoa đầu câu). */
@@ -229,6 +216,38 @@ function compile(entries) {
  * @param {import('./text.js').Token[]} toks
  * @param {number} i
  * @param {string} text
+ * Thay các biến thể nói khớp bằng thuật ngữ; THUẦN (không tăng uses/last_used, không ghi tệp) —
+ * caller (apply/applyPreview) tự quyết định có áp hiệu ứng phụ không.
+ * @param {string} text NFC @param {Map<string, {tokens: string[], index: number}[]>} patterns @param {Entry[]} entries
+ */
+function matchAndReplace(text, patterns, entries) {
+  const toks = tokenize(text);
+  /** @type {(Applied & { entry: Entry })[]} */
+  const applied = [];
+  let out = '';
+  let cursor = 0;
+  for (let i = 0; i < toks.length; ) {
+    const hit = matchAt(toks, i, text, patterns);
+    if (!hit) {
+      i++;
+      continue;
+    }
+    const entry = entries[hit.index];
+    const start = toks[i].start;
+    const end = toks[i + hit.length - 1].end;
+    const from = text.slice(start, end);
+    let to = entry.term;
+    if (entry.case !== 'exact' && startsUpper(from) && startsLower(to)) to = capitalize(to);
+    out += text.slice(cursor, start) + to;
+    cursor = end;
+    applied.push({ type: 'dictionary', from, to, entry });
+    i += hit.length;
+  }
+  out += text.slice(cursor);
+  return { text: out, applied };
+}
+
+/**
  * @param {Map<string, {tokens: string[], index: number}[]>} patterns
  */
 function matchAt(toks, i, text, patterns) {

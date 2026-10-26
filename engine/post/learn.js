@@ -1,10 +1,18 @@
-// Gợi ý mục từ điển từ một lần người dùng sửa chữ (before -> after). Chỉ gợi ý, không ghi gì.
+// Gợi ý mục từ điển từ một lần người dùng sửa chữ (before -> after).
+// `suggestCorrections` chỉ gợi ý ngay (không ghi gì) — dùng cho POST /v1/corrections cũ.
+// `createCorrectionsStore` (item 8, contract/engine-api.md mục "Gợi ý từ điển") LƯU các cặp
+// before/after ngắn (≤ 5 từ, không lưu cả câu) vào $VFLOW_HOME/corrections.json (0600, tối đa 500
+// mục gần nhất), dùng để tổng hợp GET /v1/dictionary/suggestions (chỉ cặp xuất hiện ≥ 2 lần, chưa
+// có trong từ điển) — KHÔNG gửi gì lên mạng.
+import { readFileSync, existsSync } from 'node:fs';
 import { tokenize, fold } from './text.js';
+import { writePrivateJson } from './dictionary.js';
 
 const MAX_TOKENS = 300;
 const MAX_BEFORE_WORDS = 4;
 const MAX_AFTER_WORDS = 3;
 const MAX_HUNKS = 3;
+export const MAX_CORRECTIONS = 500;
 
 /**
  * @param {{ before: unknown, after: unknown }} input
@@ -92,4 +100,118 @@ function diffHunks(x, y) {
   }
   close();
   return hunks;
+}
+
+export class CorrectionsError extends Error {
+  /** @param {string} message */
+  constructor(message) {
+    super(message);
+    this.code = 'internal';
+  }
+}
+
+/** @param {string} path */
+function loadCorrectionsRaw(path) {
+  if (!existsSync(path)) return { version: 1, entries: [], dismissed: [] };
+  let raw;
+  try {
+    raw = readFileSync(path, 'utf8');
+  } catch (err) {
+    throw new CorrectionsError(`không đọc được tệp sửa lỗi (${/** @type {any} */ (err).code ?? 'lỗi'})`);
+  }
+  let json;
+  try {
+    json = JSON.parse(raw);
+  } catch {
+    throw new CorrectionsError('tệp sửa lỗi hỏng (JSON không hợp lệ)');
+  }
+  if (!json || typeof json !== 'object' || Array.isArray(json) || !Array.isArray(json.entries)) {
+    throw new CorrectionsError('tệp sửa lỗi hỏng (sai cấu trúc)');
+  }
+  return {
+    version: 1,
+    entries: json.entries.filter((e) => e && typeof e.term === 'string' && typeof e.spoken === 'string'),
+    dismissed: Array.isArray(json.dismissed) ? json.dismissed.filter((t) => typeof t === 'string') : [],
+  };
+}
+
+/**
+ * Lưu bền các sự sửa (before->after) ngắn để tổng hợp gợi ý từ điển (`GET /v1/dictionary/suggestions`).
+ * @param {{ path: string, now?: () => Date, log?: (e: object) => void }} opts
+ */
+export function createCorrectionsStore({ path, now = () => new Date(), log = () => {} }) {
+  if (typeof path !== 'string' || path === '') throw new TypeError('cần path');
+  let data = loadCorrectionsRaw(path);
+
+  function persist() {
+    try {
+      writePrivateJson(path, data);
+    } catch (err) {
+      log({ event: 'corrections_save_failed', code: /** @type {any} */ (err)?.code ?? 'unknown' });
+    }
+  }
+
+  return {
+    /**
+     * Rút các cặp (term, spoken) ngắn từ một lần sửa và lưu lại — dùng CHÍNH logic lọc nhiễu của
+     * `suggestCorrections` (không lưu cả câu, không lưu sửa số liệu/dấu thanh/hoa thường...).
+     * @param {unknown} before @param {unknown} after
+     */
+    record(before, after) {
+      try {
+        const { suggestions } = suggestCorrections({ before, after }, []);
+        if (suggestions.length === 0) return;
+        const at = now().toISOString();
+        for (const s of suggestions) for (const spoken of s.spoken) data.entries.push({ term: s.term, spoken, at });
+        if (data.entries.length > MAX_CORRECTIONS) data.entries = data.entries.slice(-MAX_CORRECTIONS);
+        persist();
+      } catch (err) {
+        log({ event: 'corrections_record_failed', code: /** @type {any} */ (err)?.code ?? 'unknown' });
+      }
+    },
+
+    /**
+     * Gộp theo (term, spoken); chỉ trả cặp xuất hiện ≥ 2 lần, chưa có trong từ điển, chưa bị dismiss.
+     * @param {{ term: string, spoken: string[] }[]} dictionaryEntries
+     * @returns {{ suggestions: { term: string, variants: string[], count: number, last_seen: string }[] }}
+     */
+    suggestions(dictionaryEntries = []) {
+      const known = new Map(dictionaryEntries.map((e) => [e.term, new Set(e.spoken.map(foldPhrase))]));
+      /** @type {Map<string, Map<string, { count: number, last_seen: string }>>} */
+      const byTerm = new Map();
+      for (const e of data.entries) {
+        if (known.get(e.term)?.has(foldPhrase(e.spoken))) continue;
+        const bySpoken = byTerm.get(e.term) ?? new Map();
+        const c = bySpoken.get(e.spoken) ?? { count: 0, last_seen: e.at };
+        c.count += 1;
+        if (e.at > c.last_seen) c.last_seen = e.at;
+        bySpoken.set(e.spoken, c);
+        byTerm.set(e.term, bySpoken);
+      }
+      const out = [];
+      for (const [term, bySpoken] of byTerm) {
+        const variants = [];
+        let count = 0;
+        let lastSeen = null;
+        for (const [spoken, c] of bySpoken) {
+          if (c.count < 2) continue;
+          variants.push(spoken);
+          count += c.count;
+          if (!lastSeen || c.last_seen > lastSeen) lastSeen = c.last_seen;
+        }
+        if (variants.length > 0 && !data.dismissed.includes(term)) out.push({ term, variants, count, last_seen: lastSeen });
+      }
+      return { suggestions: out };
+    },
+
+    /** Ghi nhớ đã bỏ qua một gợi ý theo `term` — không hiện lại ở suggestions() nữa. */
+    dismiss(term) {
+      if (typeof term !== 'string' || term.trim() === '') throw new CorrectionsError('term phải là chuỗi khác rỗng');
+      if (!data.dismissed.includes(term)) {
+        data.dismissed.push(term);
+        persist();
+      }
+      return { ok: true };
+    },
+  };
 }

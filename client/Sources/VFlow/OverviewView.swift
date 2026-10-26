@@ -18,6 +18,9 @@ struct OverviewView: View {
             if let error = model.lastError, !lastErrorDismissed {
                 DismissableErrorCard(text: error) { lastErrorDismissed = true }
             }
+            if let reminder = model.menuBarIconReminder {
+                MenuBarOcclusionCard(text: reminder, controller: controller)
+            }
 
             HeroCard(model: model, controller: controller)
             ShortcutsCard()
@@ -143,6 +146,36 @@ private struct DismissableErrorCard: View {
         }
         .padding(Theme.Spacing.md)
         .background(Color.red.opacity(0.12), in: RoundedRectangle(cornerRadius: Theme.cardCornerRadius, style: .continuous))
+    }
+}
+
+/// Thẻ nhắc "biểu tượng thanh menu bị che" (notch/thanh menu đầy, xem `VFlowCore.MenuBarOcclusion`)
+/// — đóng được, nhớ theo NGÀY (không đóng vĩnh viễn, xem `AppController.dismissMenuBarOcclusionReminder`).
+private struct MenuBarOcclusionCard: View {
+    let text: String
+    let controller: AppController
+
+    var body: some View {
+        HStack(alignment: .top, spacing: Theme.Spacing.sm) {
+            Image(systemName: "eye.slash").foregroundStyle(Color.orange)
+            VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                Text("Biểu tượng thanh menu có thể đang bị che").font(.callout.weight(.semibold))
+                // Ảnh chụp NGOÀI MÀN HÌNH ở giao diện TỐI vẽ dòng này mờ gần như vô hình dù đã thử cả
+                // `.secondary` LẪN ép tường minh `Color.primary` (không đổi gì cả) — cùng dạng giới
+                // hạn offscreen render đã biết với `List` (xem README mục "Công cụ chụp ảnh ngoài màn
+                // hình › Giới hạn đã biết"), KHÔNG PHẢI lỗi màu trong code này; `Color.primary` vẫn
+                // giữ vì đúng ý định hiển thị, chỉ chưa chắc khớp ảnh chụp.
+                Text(text).font(.footnote).foregroundStyle(Color.primary).fixedSize(horizontal: false, vertical: true)
+                Button("Mở Cài đặt › Chung") { controller.openSettingsWindow(tab: .general) }
+                    .buttonStyle(.link)
+            }
+            Spacer()
+            Button { controller.dismissMenuBarOcclusionReminder() } label: { Image(systemName: "xmark") }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Đóng thẻ nhắc biểu tượng bị che")
+        }
+        .padding(Theme.Spacing.md)
+        .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: Theme.cardCornerRadius, style: .continuous))
     }
 }
 

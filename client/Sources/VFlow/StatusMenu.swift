@@ -18,12 +18,22 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         menu.delegate = self
         menu.autoenablesItems = false
         item.menu = menu
+        setStableAutosaveName()
         refresh(model)
     }
 
     /// Công tắc "Hiện biểu tượng trên thanh menu" (Cài đặt). Biểu tượng vẫn tồn tại, chỉ ẩn/hiện —
     /// app luôn có chỗ đứng chính ở cửa sổ chính + Dock.
     func setVisible(_ visible: Bool) { item.isVisible = visible }
+
+    /// Khung cửa sổ THẬT của biểu tượng — dùng để dò bị che (notch/thanh menu đầy, xem
+    /// `VFlowCore.MenuBarOcclusion`); `nil` khi AppKit chưa gán cửa sổ (vd. mới khởi động).
+    var itemWindowFrame: NSRect? { item.button?.window?.frame }
+
+    /// `autosaveName` ổn định để macOS nhớ vị trí biểu tượng qua các lần chạy (cơ chế "Preferred
+    /// Position" không công khai, xem README mục Phím tắt/biểu tượng — chỉ đặt tên ổn định, KHÔNG
+    /// tự ghi đè vị trí mò vào defaults, vì chưa kiểm chứng được cơ chế đó hoạt động đúng).
+    func setStableAutosaveName() { item.autosaveName = "org.aios.vflow.statusItem" }
 
     /// Cùng một `StatusModel` với `StatusWindow`: menu và cửa sổ không bao giờ nói khác nhau.
     func refresh(_ model: StatusModel) {
@@ -61,12 +71,19 @@ final class StatusMenu: NSObject, NSMenuDelegate {
 
     private func rebuild() {
         menu.removeAllItems()
+        Self.populate(menu, model: model, controller: controller)
+    }
+
+    /// Nội dung menu — dùng CHUNG cho biểu tượng thanh menu VÀ menu Dock (`applicationDockMenu`,
+    /// xem `main.swift`) để hai nơi không bao giờ lệch mục/logic (xem mục 4a trong yêu cầu).
+    static func populate(_ menu: NSMenu, model: StatusModel, controller: AppController) {
         // Dòng trạng thái đầu menu — cùng câu với thẻ trạng thái lớn ở Tổng quan (một nguồn duy nhất).
-        menu.addItem(disabled("vflow — \(model.engineSummary)", symbol: statusLineSymbol()))
+        menu.addItem(disabled("vflow — \(model.engineSummary)", symbol: statusLineSymbol(model)))
         if let w = model.conflictWarning { menu.addItem(disabled(w, symbol: "exclamationmark.triangle.fill")) }
         if let e = model.lastError { menu.addItem(disabled("Lỗi gần nhất: \(e)", symbol: "exclamationmark.triangle")) }
         menu.addItem(.separator())
         menu.addItem(action("Mở cửa sổ vflow", symbol: "macwindow") { [weak controller] in controller?.openStatusWindow() })
+        menu.addItem(action("Chèn lại câu vừa rồi", symbol: "arrow.uturn.backward") { [weak controller] in controller?.reinsertLastSentence() })
 
         let missing = model.missingPermissions
         if !missing.isEmpty || !model.hotkeysActive {
@@ -114,6 +131,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         let login = action("Bật khi đăng nhập") { [weak controller] in controller?.toggleLaunchAtLogin() }
         login.state = model.launchAtLogin ? .on : .off
         menu.addItem(login)
+        menu.addItem(action("Cài đặt…", symbol: "gearshape") { [weak controller] in controller?.openSettingsWindow() })
         menu.addItem(action("Mở thư mục dữ liệu (~/.vflow)", symbol: "folder") { [weak controller] in controller?.openDataFolder() })
         menu.addItem(action("Hướng dẫn cấp quyền…", symbol: "questionmark.circle") { [weak controller] in controller?.openStatusWindow() })
         menu.addItem(.separator())
@@ -123,7 +141,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     /// Biểu tượng cho dòng trạng thái đầu menu — khớp cảm giác với huy hiệu thanh menu
     /// (`BrandIcon.statusImage`), không dựa vào `controller.phase` để tránh nhập nhằng với trạng
     /// thái đang ghi/dịch (dòng này chỉ nói engine/model, không nói đang ghi âm).
-    private func statusLineSymbol() -> String {
+    private static func statusLineSymbol(_ model: StatusModel) -> String {
         if model.engineHasFailed || model.conflictWarning != nil { return "exclamationmark.triangle" }
         if model.models.contains(where: \.loaded) { return "checkmark.circle" }
         return "ellipsis.circle"
@@ -131,16 +149,16 @@ final class StatusMenu: NSObject, NSMenuDelegate {
 
     /// Tiêu đề nhóm trong menu (macOS 14+: `NSMenuItem.sectionHeader`, chữ nhỏ không bấm được) —
     /// đỡ phải phân biệt mục nào thuộc mục nào chỉ bằng dấu phân cách.
-    private func sectionHeader(_ title: String) -> NSMenuItem { .sectionHeader(title: title) }
+    private static func sectionHeader(_ title: String) -> NSMenuItem { .sectionHeader(title: title) }
 
-    private func disabled(_ title: String, symbol: String? = nil) -> NSMenuItem {
+    private static func disabled(_ title: String, symbol: String? = nil) -> NSMenuItem {
         let it = NSMenuItem(title: title, action: nil, keyEquivalent: "")
         it.isEnabled = false
         if let symbol { it.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil) }
         return it
     }
 
-    private func action(_ title: String, symbol: String? = nil, key: String = "", _ run: @escaping @MainActor () -> Void) -> NSMenuItem {
+    private static func action(_ title: String, symbol: String? = nil, key: String = "", _ run: @escaping @MainActor () -> Void) -> NSMenuItem {
         let it = ClosureMenuItem(title: title, keyEquivalent: key, run: run)
         if let symbol { it.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil) }
         return it

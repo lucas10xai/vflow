@@ -181,3 +181,14 @@ test('hạt giống: biến thể một âm tiết không trùng từ tiếng Vi
     }
   }
 });
+
+test('applyPreview: thay đúng như apply() nhưng KHÔNG tăng uses/last_used, KHÔNG ghi tệp (dùng cho /v1/partial)', (t) => {
+  const { p, dictionaryPath } = setup(t, ENTRIES);
+  const before = readFileSync(dictionaryPath, 'utf8');
+  const beforeUses = p.dictionary.list().entries.find((e) => e.term === 'deploy').uses;
+  const r = p.dictionary.applyPreview('anh đi plôi bản mới');
+  assert.equal(r.text, 'anh deploy bản mới');
+  assert.deepEqual(r.applied, [{ type: 'dictionary', from: 'đi plôi', to: 'deploy' }]);
+  assert.equal(readFileSync(dictionaryPath, 'utf8'), before, 'không ghi tệp');
+  assert.equal(p.dictionary.list().entries.find((e) => e.term === 'deploy').uses, beforeUses, 'không tăng uses');
+});

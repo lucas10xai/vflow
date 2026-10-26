@@ -4,13 +4,14 @@ import VFlowCore
 /// Bốn mục của cửa sổ Cài đặt (`SettingsWindow.swift`) — xem mô tả từng mục ở từng `*SettingsTab`
 /// bên dưới. Giữ TOÀN BỘ hành vi/kết nối engine cũ (U1: chỉ sắp xếp lại vào cửa sổ chuẩn macOS).
 enum SettingsCategory: String, CaseIterable, Identifiable {
-    case general, cloud, historyPrivacy, advanced
+    case general, cloud, hotkeys, historyPrivacy, advanced
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .general: "Chung"
         case .cloud: "Đám mây"
+        case .hotkeys: "Phím tắt"
         case .historyPrivacy: "Lịch sử & riêng tư"
         case .advanced: "Nâng cao"
         }
@@ -20,6 +21,7 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
         switch self {
         case .general: "gearshape"
         case .cloud: "cloud"
+        case .hotkeys: "command"
         case .historyPrivacy: "lock.shield"
         case .advanced: "wrench.and.screwdriver"
         }
@@ -70,12 +72,135 @@ struct GeneralSettingsTab: View {
                     set: { controller.showMenuBarIcon = $0; showMenuBarIcon = $0 }))
                     .help("Biểu tượng thanh menu chỉ là phụ — cách điều khiển chính là cửa sổ \"vflow\" (Dock, ⌘-Tab).")
             }
+            Section("Micro") {
+                MicrophonePickerSection(controller: controller)
+                SilenceStopSection(model: model, controller: controller)
+            }
             Section {
                 Button("Thoát vflow") { NSApp.terminate(nil) }
                     .keyboardShortcut("q", modifiers: .command)
             }
         }
         .formStyle(.grouped)
+    }
+}
+
+/// Mục "Phím tắt": phím giữ-để-nói, phím thứ hai cho Command Mode, tổ hợp "Chèn lại câu vừa rồi" —
+/// áp dụng NGAY cho lần ghi kế tiếp (không ảnh hưởng lần ghi đang chạy, xem
+/// `VFlowCore.ActiveHotkeyConfig`); lưu qua `AppController.hotkeyConfig`/`reinsertChord`
+/// (UserDefaults, cô lập theo `VFLOW_HOME`).
+struct HotkeysSettingsTab: View {
+    let controller: AppController
+    @State private var holdKey: HoldModifierKey = .leftOption
+    @State private var commandKey: HoldModifierKey = .leftControl
+    @State private var reinsertPreset: ReinsertChordPreset = .optionCommandV
+
+    var body: some View {
+        Form {
+            Section("Giữ để nói") {
+                Picker("Phím giữ để nói", selection: $holdKey) {
+                    ForEach(HoldModifierKey.allCases, id: \.self) { Text($0.title).tag($0) }
+                }
+                .onChange(of: holdKey) { _, _ in save() }
+                Text("Giữ phím này, nói, nhả để chèn — đúp phím này để ghi hands-free.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+            Section("Command Mode (sửa/soạn văn bản bằng lời)") {
+                Picker("Phím thứ hai (cùng phím giữ để nói)", selection: $commandKey) {
+                    ForEach(HoldModifierKey.allCases, id: \.self) { Text($0.title).tag($0) }
+                }
+                .onChange(of: commandKey) { _, _ in save() }
+                Text("Giữ phím giữ-để-nói rồi bấm thêm phím này trong 400 ms đầu.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+            if let warning = HotkeyConfigValidation.conflictMessage(HotkeyKeyConfig(holdKey: holdKey, commandKey: commandKey)) {
+                Section { Text(warning).foregroundStyle(Color.red).font(.footnote) }
+            }
+            Section("Chèn lại câu vừa rồi") {
+                Picker("Tổ hợp phím", selection: $reinsertPreset) {
+                    ForEach(ReinsertChordPreset.allCases, id: \.self) { Text($0.title).tag($0) }
+                }
+                .onChange(of: reinsertPreset) { _, v in controller.reinsertChord = v.chord }
+            }
+            Section {
+                Button("Đặt lại mặc định") {
+                    controller.resetHotkeysToDefault()
+                    load()
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .task { load() }
+    }
+
+    private func load() {
+        let cfg = controller.hotkeyConfig
+        holdKey = cfg.holdKey
+        commandKey = cfg.commandKey
+        reinsertPreset = ReinsertChordPreset.matching(controller.reinsertChord) ?? .optionCommandV
+    }
+
+    private func save() {
+        controller.hotkeyConfig = HotkeyKeyConfig(holdKey: holdKey, commandKey: commandKey)
+    }
+}
+
+/// Chọn micro (Cài đặt › Chung) — danh sách thiết bị đầu vào + "Mặc định hệ thống", lưu theo UID
+/// (`AppController.micDeviceUID`); thiết bị biến mất ⇒ tự rơi về mặc định + báo một lần bằng HUD
+/// (xem `AppController.resolvedMicDeviceUIDForRecording`, `VFlowCore.MicrophoneSelection`).
+private struct MicrophonePickerSection: View {
+    let controller: AppController
+    @State private var selectedUID: String?
+    @State private var devices: [MicrophoneSelection.Device] = []
+
+    var body: some View {
+        Picker("Micro", selection: $selectedUID) {
+            Text("Mặc định hệ thống").tag(String?.none)
+            ForEach(devices, id: \.uid) { d in Text(d.name).tag(Optional(d.uid)) }
+        }
+        .onChange(of: selectedUID) { _, v in controller.micDeviceUID = v }
+        .task {
+            devices = controller.availableMicDevices()
+            selectedUID = controller.micDeviceUID
+        }
+    }
+}
+
+/// Tự dừng khi im lặng ở chế độ hands-free (Cài đặt › Chung) — `silence_stop_seconds` qua
+/// `GET/PUT /v1/settings` hiện có (0 = tắt), xem `VFlowCore.VoiceActivityDetector`.
+private struct SilenceStopSection: View {
+    let model: StatusModel
+    let controller: AppController
+    @State private var loaded = false
+    @State private var seconds = 0
+    @State private var saveError: String?
+
+    var body: some View {
+        Group {
+            if !model.engineReady {
+                Text("Đang chờ engine khởi động…").font(.footnote).foregroundStyle(.secondary)
+            } else {
+                Stepper(value: $seconds, in: 0...60) {
+                    Text(seconds == 0 ? "Tự dừng khi im lặng: Tắt" : "Tự dừng khi im lặng: \(seconds) giây")
+                }
+                .onChange(of: seconds) { _, v in Task { await save(v) } }
+                Text("Chỉ áp dụng cho ghi khoá (hands-free, đúp phím giữ-để-nói) — không áp dụng khi giữ phím thường.")
+                    .font(.footnote).foregroundStyle(.secondary)
+                if let e = saveError { Text(e).font(.footnote).foregroundStyle(Color.red) }
+            }
+        }
+        .task(id: model.engineReady) {
+            guard model.engineReady, !loaded else { return }
+            if case .success(let s) = await controller.fetchSettings() { seconds = s.silenceStopSeconds }
+            loaded = true
+        }
+    }
+
+    private func save(_ v: Int) async {
+        switch await controller.applySettingsPatch(.init(silenceStopSeconds: v)) {
+        case .success(let s): seconds = s.silenceStopSeconds; saveError = nil
+        case .failure(let e): saveError = ErrorText.message(e)
+        }
     }
 }
 

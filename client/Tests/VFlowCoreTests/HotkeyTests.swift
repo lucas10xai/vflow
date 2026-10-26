@@ -73,6 +73,20 @@ private func recording(at t0: Double = 0) -> HotkeyStateMachine {
         #expect(m.tick(at: 126, optionHeld: false) == .none)
     }
 
+    /// `AppController` đổi `maxRecording` MỖI LẦN bắt đầu ghi khoá (hands-free) theo giới hạn engine
+    /// báo (xem `RecordingLimit`, mục 7c) — xác nhận máy trạng thái THẬT SỰ dùng giá trị mới, không
+    /// còn cố định 120s cho mọi lượt.
+    @Test func maxRecordingCanBeExtendedForHandsFreeLongRecording() {
+        var m = HotkeyStateMachine()
+        m.maxRecording = 600 // engine báo max_audio_seconds lớn hơn ⇒ hands-free được ghi dài hơn
+        _ = m.handle(.leftOptionDown(othersHeld: false), at: 0)
+        _ = m.handle(.leftOptionUp, at: 0.1) // chạm nhanh
+        _ = m.handle(.leftOptionDown(othersHeld: false), at: 0.2)
+        #expect(m.handle(.leftOptionUp, at: 0.3) == .startRecording) // đúp ⇒ khoá
+        #expect(m.tick(at: 130, optionHeld: false) == .none, "chưa tới 600s thì KHÔNG được tự gửi sớm")
+        #expect(m.tick(at: 600.3, optionHeld: false) == .stopAndSend(.maxDuration))
+    }
+
     @Test func neverOverlapsWhileBusy() {
         var m = recording()
         _ = m.handle(.leftOptionUp, at: 1)
@@ -372,5 +386,87 @@ private func recording(at t0: Double = 0) -> HotkeyStateMachine {
     @Test func escapeKeyIsClassifiedSeparatelyFromOtherKeys() {
         #expect(K.classify(kind: .keyDown, keyCode: 53, flags: 0) == .escape)
         #expect(K.classify(kind: .keyDown, keyCode: 1, flags: 0) == .keyDown)
+    }
+
+    // MARK: cấu hình phím tuỳ chỉnh (giữ nguyên hành vi mặc định — xem các test trên — khi đổi phím)
+
+    @Test func rightControlAsHoldKeyBehavesLikeLeftOptionDidByDefault() {
+        let config = HotkeyKeyConfig(holdKey: .rightControl, commandKey: .leftOption)
+        let down = K.maskControl | K.deviceRightControl
+        #expect(K.classify(kind: .flagsChanged, keyCode: 62, flags: down, config: config) == .leftOptionDown(othersHeld: false))
+        #expect(K.classify(kind: .flagsChanged, keyCode: 62, flags: 0, config: config) == .leftOptionUp)
+        // Phím ⌥ trái (nay là commandKey) đi xuống ⇒ input logic "leftControlDown" (Command Mode).
+        #expect(K.classify(kind: .flagsChanged, keyCode: 58, flags: K.maskAlternate | K.deviceLeftOption, config: config) == .leftControlDown)
+        // Phím ⌥ trái cũ (nay KHÔNG còn vai trò nào) không còn được đặc cách — vẫn "phím khác".
+        let unconfigured = HotkeyKeyConfig(holdKey: .rightControl, commandKey: .rightOption)
+        #expect(K.classify(kind: .flagsChanged, keyCode: 58, flags: K.maskAlternate | K.deviceLeftOption, config: unconfigured) == .otherModifierDown)
+    }
+
+    @Test func othersHeldGeneralizesToWhicheverFourKeysAreNotTheHoldKey() {
+        let config = HotkeyKeyConfig(holdKey: .leftControl, commandKey: .rightControl)
+        // ⌥ trái (không còn liên quan) đang giữ khi ⌃ trái xuống ⇒ coi là combo, suppressed.
+        let down = K.maskControl | K.deviceLeftControl | K.maskAlternate | K.deviceLeftOption
+        #expect(K.classify(kind: .flagsChanged, keyCode: 59, flags: down, config: config) == .leftOptionDown(othersHeld: true))
+    }
+
+    @Test func defaultConfigIsUnchangedFromOriginalHardcodedBehavior() {
+        #expect(HotkeyKeyConfig.defaultConfig == HotkeyKeyConfig(holdKey: .leftOption, commandKey: .leftControl))
+        // classify() không truyền config ⇒ mặc định y hệt test cũ ở trên.
+        let down = K.maskAlternate | K.deviceLeftOption
+        #expect(K.classify(kind: .flagsChanged, keyCode: 58, flags: down) == K.classify(kind: .flagsChanged, keyCode: 58, flags: down, config: .defaultConfig))
+    }
+}
+
+@Suite struct HotkeyConfigValidationTests {
+    @Test func sameKeyForBothRolesIsAConflict() {
+        let conflict = HotkeyKeyConfig(holdKey: .leftOption, commandKey: .leftOption)
+        #expect(HotkeyConfigValidation.keysConflict(conflict))
+        #expect(HotkeyConfigValidation.conflictMessage(conflict) != nil)
+        #expect(HotkeyConfigValidation.conflictMessage(conflict)!.contains("⌥ trái"))
+    }
+
+    @Test func differentKeysAreValid() {
+        let ok = HotkeyKeyConfig(holdKey: .leftOption, commandKey: .rightControl)
+        #expect(!HotkeyConfigValidation.keysConflict(ok))
+        #expect(HotkeyConfigValidation.conflictMessage(ok) == nil)
+    }
+}
+
+@Suite struct ActiveHotkeyConfigTests {
+    @Test func appliesNewConfigImmediatelyWhenIdle() {
+        var state = ActiveHotkeyConfig()
+        state.desired = HotkeyKeyConfig(holdKey: .rightOption, commandKey: .rightControl)
+        state.refresh(isIdle: true)
+        #expect(state.active.holdKey == .rightOption)
+    }
+
+    @Test func keepsOldConfigWhileNotIdleEvenAfterDesiredChanges() {
+        var state = ActiveHotkeyConfig(HotkeyKeyConfig(holdKey: .leftOption, commandKey: .leftControl))
+        state.desired = HotkeyKeyConfig(holdKey: .rightOption, commandKey: .rightControl)
+        // Đang ghi âm (không rảnh) khi đổi cài đặt ⇒ cử chỉ hiện tại KHÔNG bị ảnh hưởng.
+        state.refresh(isIdle: false)
+        #expect(state.active.holdKey == .leftOption)
+        // Về rảnh ⇒ áp dụng cho lần sau.
+        state.refresh(isIdle: true)
+        #expect(state.active.holdKey == .rightOption)
+    }
+}
+
+@Suite struct HotkeyChordTests {
+    @Test func matchesExactModifierSetOnly() {
+        let chord = HotkeyChord.reinsertDefault // ⌘⌥V
+        let flags = KeyClassifier.maskCommand | KeyClassifier.maskAlternate
+        #expect(chord.matches(keyCode: 9, flags: flags))
+        // Thiếu ⌥ ⇒ không khớp.
+        #expect(!chord.matches(keyCode: 9, flags: KeyClassifier.maskCommand))
+        // Thừa ⇧ ⇒ không khớp (tránh bắt nhầm).
+        #expect(!chord.matches(keyCode: 9, flags: flags | KeyClassifier.maskShift))
+        // Sai phím chữ ⇒ không khớp.
+        #expect(!chord.matches(keyCode: 1, flags: flags))
+    }
+
+    @Test func conflictDetectsEqualChords() {
+        #expect(HotkeyChordValidation.conflict(.reinsertDefault, .reinsertDefault))
+        #expect(!HotkeyChordValidation.conflict(.reinsertDefault, HotkeyChord(command: true, option: true, keyCode: 1)))
     }
 }

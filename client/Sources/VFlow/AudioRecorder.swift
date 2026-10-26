@@ -1,4 +1,5 @@
 import AVFoundation
+import CoreAudio
 import VFlowCore
 
 /// Ghi micro bằng AVAudioEngine, đổi sang 16 kHz mono Int16 ngay trong RAM. Không bao giờ ghi đĩa.
@@ -17,9 +18,21 @@ final class AudioRecorder: @unchecked Sendable {
 
     static func requestPermission() async -> Bool { await AVCaptureDevice.requestAccess(for: .audio) }
 
+    /// Danh sách micro thật (Cài đặt › Chung) — `AVCaptureDevice.DiscoverySession`, không cần quyền
+    /// Micro để CHỈ liệt kê (tên/UID), chỉ cần quyền để ghi thật.
+    static func availableDevices() -> [MicrophoneSelection.Device] {
+        AVCaptureDevice.DiscoverySession(deviceTypes: [.microphone, .external], mediaType: .audio, position: .unspecified)
+            .devices.map { MicrophoneSelection.Device(uid: $0.uniqueID, name: $0.localizedName) }
+    }
+
+    /// `deviceUID` nil = mặc định hệ thống (hành vi CŨ, không đổi gì — xem `MicrophoneSelection`).
+    /// Có UID ⇒ cố gắng ghim micro đó vào `AVAudioEngine` bằng CoreAudio TRƯỚC khi đọc định dạng vào;
+    /// không tìm được thiết bị/ghim lỗi ⇒ bỏ qua ÊM, dùng mặc định hệ thống (không chặn ghi âm vì lỗi
+    /// chọn thiết bị — xem contract mục 7a).
     @MainActor
-    func start() throws {
+    func start(deviceUID: String? = nil) throws {
         let engine = AVAudioEngine() // mới mỗi lần: theo kịp đổi thiết bị
+        if let uid = deviceUID { Self.setPreferredInputDevice(uid: uid, on: engine) }
         let input = engine.inputNode
         let format = input.outputFormat(forBus: 0)
         guard format.sampleRate >= 8000, format.channelCount > 0 else {
@@ -85,5 +98,38 @@ final class AudioRecorder: @unchecked Sendable {
         self.engine = nil
         // Hàng đợi xử lý xong các khối đã nhận trước khi đọc kết quả.
         queue.sync {}
+    }
+
+    /// Ghim `engine.inputNode` vào đúng `AudioDeviceID` của `uid` qua CoreAudio
+    /// (`kAudioOutputUnitProperty_CurrentDevice`) — PHẢI gọi trước khi đọc `outputFormat`/tạo tap.
+    /// CHƯA kiểm được bằng micro ngoài thật (môi trường dựng không có micro ngoài để đổi) — xem
+    /// báo cáo cuối; lỗi bất kỳ bước nào đều bị bỏ qua êm, không chặn ghi âm.
+    private static func setPreferredInputDevice(uid: String, on engine: AVAudioEngine) {
+        guard let deviceID = audioDeviceID(forUID: uid), let audioUnit = engine.inputNode.audioUnit else { return }
+        var devID = deviceID
+        AudioUnitSetProperty(audioUnit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0,
+                             &devID, UInt32(MemoryLayout<AudioDeviceID>.size))
+    }
+
+    /// Dùng `withUnsafeMutablePointer` tường minh: con trỏ trong `AudioValueTranslation` phải CÒN
+    /// SỐNG đến hết lúc `AudioObjectGetPropertyData` chạy, không chỉ lúc khởi tạo struct (cảnh báo
+    /// "temporary pointer" của Swift nếu viết `&cfUID` trực tiếp trong initializer).
+    private static func audioDeviceID(forUID uid: String) -> AudioDeviceID? {
+        var cfUID = uid as CFString
+        var deviceID = AudioDeviceID(0)
+        var address = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDeviceForUID,
+                                                 mScope: kAudioObjectPropertyScopeGlobal,
+                                                 mElement: kAudioObjectPropertyElementMain)
+        var size = UInt32(MemoryLayout<AudioValueTranslation>.size)
+        let status = withUnsafeMutablePointer(to: &cfUID) { cfUIDPtr in
+            withUnsafeMutablePointer(to: &deviceID) { deviceIDPtr in
+                var translation = AudioValueTranslation(
+                    mInputData: cfUIDPtr, mInputDataSize: UInt32(MemoryLayout<CFString>.size),
+                    mOutputData: deviceIDPtr, mOutputDataSize: UInt32(MemoryLayout<AudioDeviceID>.size))
+                return AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &translation)
+            }
+        }
+        guard status == noErr, deviceID != 0 else { return nil }
+        return deviceID
     }
 }

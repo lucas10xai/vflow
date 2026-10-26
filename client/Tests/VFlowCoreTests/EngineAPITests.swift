@@ -109,6 +109,10 @@ private func err(_ code: String, _ msg: String) -> Data { json(#"{"error":{"code
         #expect(m.contains("clipboard"))
         #expect(DictationDecision.overlay(after: .pastedRestored, planned: .done) == .done)
     }
+
+    @Test func noFocusedInputShowsCopiedNotice() {
+        #expect(DictationDecision.overlay(after: .noFocusedInputTextKeptOnClipboard, planned: .done) == .notice("Đã chép — bấm ⌘V"))
+    }
 }
 
 @Suite struct RequestTests {

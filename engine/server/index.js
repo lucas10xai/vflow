@@ -4,16 +4,29 @@
  * - Âm thanh chỉ nằm trong RAM; log chỉ có id, thời lượng, thời gian, mã lỗi.
  */
 import http from 'node:http';
+import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { basename, join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import { decodeAudio, durationMs, isSilence } from '../stt/audio.js';
+import { applyAutoGain } from '../stt/gain.js';
 import { tokenMatches } from './token.js';
+import {
+  buildExport, validateImportPackage, mergeDictionary, mergeSnippets, mergeHistory,
+  MAX_IMPORT_BYTES,
+} from '../post/exportimport.js';
+import { buildDiagnostics } from '../post/diagnostics.js';
 
 export const VERSION = '0.1.0';
 export const DEFAULT_PORT = 7611;
-export const MAX_AUDIO_SECONDS = 120;
-/** Trần byte thân âm thanh (đọc trong RAM); thời lượng thật kiểm sau khi giải mã. */
+/** Ghi âm dài (item 10, contract/engine-api.md mục "Ghi âm dài"): tối đa 20 phút. */
+export const MAX_AUDIO_SECONDS = 1200;
+/** Trần byte thân âm thanh (đọc trong RAM); thời lượng thật kiểm sau khi giải mã.
+ * 16 kHz mono 16-bit × 1200s ≈ 38,4 MB — 48 MB đã đủ dư; định dạng nặng hơn (vd WAV 48kHz stereo)
+ * ở cùng độ dài sẽ tự bị chặn ở đây (payload_too_large) trước khi chạm MAX_AUDIO_SECONDS. */
 export const MAX_AUDIO_BYTES = 48 * 1024 * 1024;
+const MAX_RECENT_ERRORS = 50;
+const MAX_PARTIAL_AUDIO_SECONDS = 30;
 const MAX_JSON_BYTES = 4 * 1024 * 1024;
 /** Trần JSON cho các route cài đặt/snippets/command (nhỏ hơn: không mang âm thanh hay danh sách lớn). */
 const MAX_SETTINGS_JSON_BYTES = 1 * 1024 * 1024;
@@ -33,6 +46,7 @@ const STATUS = {
   unauthorized: 401, bad_audio: 400, bad_request: 400, model_unavailable: 503,
   timeout: 504, payload_too_large: 413, internal: 500,
   rewrite_unavailable: 503, cloud_disabled: 503,
+  busy: 429,
 };
 
 class HttpError extends Error {
@@ -160,9 +174,29 @@ const NOOP_SNIPPETS = {
   expand: (text) => ({ text, applied: [], matched: false }),
 };
 const NOOP_SETTINGS = {
-  get: () => ({ cloud_llm: true, llm_model: null, llm_timeout_ms: 8000, actions_enabled: true }),
+  get: () => ({
+    cloud_llm: true, llm_model: null, llm_timeout_ms: 3500, actions_enabled: true,
+    stats_enabled: true, app_rules: {}, voice_punctuation: true, tone: 'neutral',
+    whisper_mode: false, learn_from_edits: true, live_preview: false, silence_stop_seconds: 0,
+  }),
   update: () => { throw new HttpError('internal', 'Chưa cấu hình settings cho engine này.'); },
 };
+/** Dùng khi chưa truyền stats (ví dụ test cũ chưa cần route /v1/stats). */
+const NOOP_STATS = {
+  record: () => {},
+  summary: () => { throw new HttpError('internal', 'Chưa cấu hình thống kê cho engine này.'); },
+  clear: () => { throw new HttpError('internal', 'Chưa cấu hình thống kê cho engine này.'); },
+  daysCount: () => 0,
+  exportDays: () => ({ backfilled: true, days: {} }),
+  importDays: () => 0,
+};
+
+/**
+ * @typedef {{ record: (args: {text:string, audioMs?:number, app?:string|null}) => void,
+ *             summary: (args?: {weeks?:number}) => any, clear: () => {ok:boolean},
+ *             daysCount: () => number, exportDays: () => {backfilled:boolean, days:object},
+ *             importDays: (days: object, mode: 'merge'|'replace') => number }} StatsStore
+ */
 
 /**
  * @param {{
@@ -171,17 +205,32 @@ const NOOP_SETTINGS = {
  *   token: string,
  *   snippets?: SnippetStore,
  *   settings?: SettingsStore,
+ *   stats?: StatsStore,
+ *   home?: string,
  *   log?: (entry: Record<string, unknown>) => void,
  *   maxAudioSeconds?: number,
  *   requestTimeoutMs?: number,
  * }} opts
+ *   home: thư mục $VFLOW_HOME — dùng cho GET /v1/diagnostics (đếm history.jsonl, rút gọn đường
+ *   dẫn) và GET /v1/export (đọc history.jsonl khi include_history=1) / POST /v1/import (ghi lại).
+ *   Vắng mặt ⇒ các phần liên quan tới history trong export/import/diagnostics coi như rỗng.
  */
 export function createServer({
-  stt, post, token, snippets = NOOP_SNIPPETS, settings = NOOP_SETTINGS,
+  stt, post, token, snippets = NOOP_SNIPPETS, settings = NOOP_SETTINGS, stats = NOOP_STATS, home,
   log = () => {}, maxAudioSeconds = MAX_AUDIO_SECONDS, requestTimeoutMs = 60000,
 }) {
   if (!token) throw new Error('createServer cần token');
   const enqueue = serialQueue();
+  const startedAt = Date.now();
+  /** @type {{ at: string, route: string, status: number, code: string }[]} */
+  const recentErrors = [];
+  /** @param {Record<string, unknown>} entry */
+  function recordRecentError(entry) {
+    if (!entry.code) return;
+    recentErrors.push({ at: new Date().toISOString(), route: String(entry.route ?? ''), status: Number(entry.status), code: String(entry.code) });
+    if (recentErrors.length > MAX_RECENT_ERRORS) recentErrors.shift();
+  }
+  let partialBusy = false;
   /** @type {http.Server} */
   const server = http.createServer(handle);
   server.requestTimeout = requestTimeoutMs + 5000;
@@ -289,11 +338,68 @@ export function createServer({
         await command(req, res, entry);
         return;
       }
+      if (url.pathname === '/v1/stats') {
+        if (req.method === 'GET') {
+          const weeksParam = url.searchParams.get('weeks');
+          const weeks = weeksParam === null ? 16 : Number(weeksParam);
+          if (!Number.isInteger(weeks) || weeks < 1 || weeks > 104) {
+            throw new HttpError('bad_request', 'weeks phải là số nguyên 1–104.');
+          }
+          const s = await callPost(() => stats.summary({ weeks }));
+          sendJson(res, 200, { enabled: settings.get().stats_enabled !== false, ...s });
+        } else if (req.method === 'DELETE') {
+          sendJson(res, 200, await callPost(() => stats.clear()));
+        } else {
+          throw new HttpError('bad_request', 'Chỉ hỗ trợ GET hoặc DELETE.', 405);
+        }
+        entry.status = 200;
+        return;
+      }
+      if (url.pathname === '/v1/dictionary/suggestions') {
+        if (req.method !== 'GET') throw new HttpError('bad_request', 'Chỉ hỗ trợ GET.', 405);
+        if (typeof post.dictionary.suggestions !== 'function') throw new HttpError('internal', 'Chưa cấu hình gợi ý từ điển cho engine này.');
+        sendJson(res, 200, await callPost(() => post.dictionary.suggestions()));
+        entry.status = 200;
+        return;
+      }
+      if (url.pathname === '/v1/dictionary/suggestions/dismiss') {
+        if (req.method !== 'POST') throw new HttpError('bad_request', 'Chỉ hỗ trợ POST.', 405);
+        if (typeof post.dictionary.dismissSuggestion !== 'function') throw new HttpError('internal', 'Chưa cấu hình gợi ý từ điển cho engine này.');
+        const body = await readJson(req, MAX_SETTINGS_JSON_BYTES);
+        if (!body || typeof body.term !== 'string' || body.term.trim() === '') {
+          throw new HttpError('bad_request', 'Cần JSON dạng {"term": "…"}.');
+        }
+        sendJson(res, 200, await callPost(() => post.dictionary.dismissSuggestion(body.term)));
+        entry.status = 200;
+        return;
+      }
+      if (url.pathname === '/v1/export') {
+        if (req.method !== 'GET') throw new HttpError('bad_request', 'Chỉ hỗ trợ GET.', 405);
+        await exportHandler(res, url, entry);
+        return;
+      }
+      if (url.pathname === '/v1/import') {
+        if (req.method !== 'POST') throw new HttpError('bad_request', 'Chỉ hỗ trợ POST.', 405);
+        await importHandler(req, res, url, entry);
+        return;
+      }
+      if (url.pathname === '/v1/diagnostics') {
+        if (req.method !== 'GET') throw new HttpError('bad_request', 'Chỉ hỗ trợ GET.', 405);
+        sendJson(res, 200, await buildDiagnosticsNow());
+        entry.status = 200;
+        return;
+      }
+      if (url.pathname === '/v1/partial') {
+        if (req.method !== 'POST') throw new HttpError('bad_request', 'Chỉ hỗ trợ POST.', 405);
+        await partial(req, res, url, entry);
+        return;
+      }
       throw new HttpError('bad_request', 'Không có đường dẫn này.', 404);
     } catch (err) {
       const e = toHttpError(err);
       entry.status = e.status;
       entry.code = e.code;
+      recordRecentError(entry);
       // Thân yêu cầu chưa đọc hết (vd. quá lớn) ⇒ đóng kết nối sau khi trả lỗi.
       if (!req.complete) res.setHeader('connection', 'close');
       if (!res.headersSent) sendJson(res, e.status, { error: { code: e.code, message: e.message } });
@@ -388,7 +494,11 @@ export function createServer({
       // Kiểm model trước cả khi im lặng: model hỏng phải báo lỗi, không trả "im lặng" giả.
       await stt.ensure(model);
       if (isSilence(wave.samples, wave.sampleRate)) return { silent: true, sttMs: 0, textRaw: '' };
-      const r = await stt.transcribe(model, { pcm: wave.samples, sampleRate: wave.sampleRate });
+      // "Nói nhỏ" (item 6, contract/engine-api.md mục "Giọng điệu và nói nhỏ"): khuếch đại TRƯỚC
+      // STT, hoàn toàn trong máy. Dò im lặng ở TRÊN dùng audio gốc (gain không ảnh hưởng quyết định
+      // im lặng vì gain không khuếch đại được im lặng tuyệt đối — xem engine/stt/gain.js).
+      const pcm = settings.get().whisper_mode ? applyAutoGain(wave.samples, wave.sampleRate) : wave.samples;
+      const r = await stt.transcribe(model, { pcm, sampleRate: wave.sampleRate });
       return { silent: r.text === '', sttMs: r.stt_ms, textRaw: r.text };
     });
     const r = await withTimeout(work, requestTimeoutMs, 'Nhận dạng quá thời gian.');
@@ -421,11 +531,181 @@ export function createServer({
         applied: Array.isArray(postOut.applied) ? postOut.applied : [],
         actions: Array.isArray(postOut.actions) ? postOut.actions : [],
         rewrite: postOut.rewrite ?? { used: false, error: null },
+        degraded: postOut.degraded === true,
+        degraded_reason: typeof postOut.degraded_reason === 'string' ? postOut.degraded_reason : null,
       },
     };
     if (r.silent) body.silence = true;
+    // Thống kê (item 1): mỗi dictation THÀNH CÔNG (không rỗng, không Command Mode — route này
+    // không phải Command Mode) cộng bộ đếm, nếu stats_enabled (mặc định true).
+    if (!r.silent && typeof body.text === 'string' && body.text.trim() !== '' && settings.get().stats_enabled !== false) {
+      stats.record({ text: /** @type {string} */ (body.text), audioMs, app: app ?? null });
+    }
     sendJson(res, 200, body);
     entry.status = 200;
+  }
+
+  /** @returns {string|null} */
+  function historyPath() {
+    return home ? join(home, 'history.jsonl') : null;
+  }
+
+  /** Đọc history.jsonl (bỏ qua dòng hỏng, không ném lỗi — export/diagnostics chỉ cần đọc được gì có). */
+  function readHistoryEntries() {
+    const p = historyPath();
+    if (!p || !existsSync(p)) return [];
+    let raw;
+    try {
+      raw = readFileSync(p, 'utf8');
+    } catch {
+      return [];
+    }
+    const out = [];
+    for (const line of raw.split('\n')) {
+      const t = line.trim();
+      if (t === '') continue;
+      try {
+        out.push(JSON.parse(t));
+      } catch {
+        // dòng hỏng: bỏ qua (export/diagnostics không phải chỗ báo lỗi dữ liệu client).
+      }
+    }
+    return out;
+  }
+
+  /**
+   * GET /v1/export (item 2, contract/engine-api.md mục "Xuất/nhập").
+   * @param {http.ServerResponse} res @param {URL} url @param {Record<string, unknown>} entry
+   */
+  async function exportHandler(res, url, entry) {
+    const includeHistory = url.searchParams.get('include_history') === '1';
+    const dictionary = await callPost(() => post.dictionary.list());
+    const snippetsOut = await callPost(() => snippets.list());
+    const out = buildExport({
+      dictionary, snippets: snippetsOut, settings: settings.get(), stats: await callPost(() => stats.exportDays()),
+      history: includeHistory ? readHistoryEntries() : undefined,
+    });
+    sendJson(res, 200, out);
+    entry.status = 200;
+  }
+
+  /**
+   * POST /v1/import?mode=merge|replace (mặc định merge, item 2). Kiểm NGHIÊM TOÀN BỘ gói trước
+   * (validateImportPackage) rồi mới áp dụng — không nhập nửa vời. Áp `settings` TRƯỚC các phần
+   * khác: đó là bước duy nhất còn có thể ném lỗi sau khi đã kiểm (khoá lạ với bản settings hiện
+   * tại) — áp trước để không để lại thay đổi dở dang ở dictionary/snippets/stats/history nếu lỗi.
+   * @param {http.IncomingMessage} req @param {http.ServerResponse} res @param {URL} url @param {Record<string, unknown>} entry
+   */
+  async function importHandler(req, res, url, entry) {
+    const mode = url.searchParams.get('mode') === 'replace' ? 'replace' : 'merge';
+    const body = await readJson(req, MAX_IMPORT_BYTES);
+    const validated = await callPost(() => validateImportPackage(body));
+
+    const applied = { dictionary: 0, snippets: 0, settings: 0, stats_days: 0, history: 0 };
+    if (validated.settings !== null) {
+      await callPost(() => settings.update(validated.settings));
+      applied.settings = Object.keys(validated.settings).length;
+    }
+    if (validated.dictionary !== null) {
+      if (mode === 'replace') {
+        await callPost(() => post.dictionary.replaceAll(validated.dictionary));
+        applied.dictionary = validated.dictionary.length;
+      } else {
+        const current = (await callPost(() => post.dictionary.list())).entries;
+        const { result, applied: n } = mergeDictionary(current, validated.dictionary);
+        await callPost(() => post.dictionary.replaceAll(result));
+        applied.dictionary = n;
+      }
+    }
+    if (validated.snippets !== null) {
+      if (mode === 'replace') {
+        await callPost(() => snippets.replaceAll(validated.snippets));
+        applied.snippets = validated.snippets.length;
+      } else {
+        const current = (await callPost(() => snippets.list())).entries;
+        const { result, applied: n } = mergeSnippets(current, validated.snippets);
+        await callPost(() => snippets.replaceAll(result));
+        applied.snippets = n;
+      }
+    }
+    if (validated.statsDays !== null) {
+      applied.stats_days = await callPost(() => stats.importDays(validated.statsDays, mode));
+    }
+    if (validated.history !== null) {
+      const p = historyPath();
+      if (p) {
+        let nextEntries;
+        if (mode === 'replace') {
+          nextEntries = validated.history;
+          applied.history = validated.history.length;
+        } else {
+          const merged = mergeHistory(readHistoryEntries(), validated.history);
+          nextEntries = merged.result;
+          applied.history = merged.applied;
+        }
+        const body2 = nextEntries.map((e) => JSON.stringify(e)).join('\n') + (nextEntries.length ? '\n' : '');
+        try {
+          writeFileSync(p, body2, { mode: 0o600 });
+        } catch (err) {
+          throw toHttpError(err);
+        }
+      }
+    }
+    sendJson(res, 200, { ok: true, applied, ...(validated.ignoredSettingsKeys.length ? { ignored: validated.ignoredSettingsKeys } : {}) });
+    entry.status = 200;
+  }
+
+  /** GET /v1/diagnostics (item 3). */
+  async function buildDiagnosticsNow() {
+    const models = await stt.status();
+    const dictCount = (await callPost(() => post.dictionary.list())).entries.length;
+    const snippetsCount = (await callPost(() => snippets.list())).entries.length;
+    return buildDiagnostics({
+      version: VERSION, node: process.version, platform: `${process.platform}-${process.arch}`,
+      uptimeS: Math.round((Date.now() - startedAt) / 1000),
+      models, defaultModel: stt.defaultModel, settings: settings.get(),
+      counts: { dictionary: dictCount, snippets: snippetsCount, history: readHistoryEntries().length, stats_days: await callPost(() => stats.daysCount()) },
+      homeBasename: home ? basename(home) : null,
+      recentErrors, home,
+    });
+  }
+
+  /**
+   * POST /v1/partial (item 9): xem chữ chạy trực tiếp — chỉ từ điển (applyPreview, không hiệu ứng
+   * phụ), KHÔNG post xử lý nặng/LLM, KHÔNG ghi history/thống kê, tối đa 1 yêu cầu đồng thời.
+   * @param {http.IncomingMessage} req @param {http.ServerResponse} res @param {URL} url @param {Record<string, unknown>} entry
+   */
+  async function partial(req, res, url, entry) {
+    if (partialBusy) throw new HttpError('busy', 'Engine đang xử lý một yêu cầu xem trước khác.');
+    partialBusy = true;
+    try {
+      const model = url.searchParams.get('model') || stt.defaultModel;
+      if (!stt.isKnown(model)) throw new HttpError('bad_request', `Không có model "${model}".`);
+      let bytes = await readBody(req, MAX_AUDIO_BYTES);
+      let wave = decodeAudio(bytes, req.headers['content-type']);
+      bytes = new Uint8Array(0);
+      const maxSamples = Math.round(MAX_PARTIAL_AUDIO_SECONDS * wave.sampleRate);
+      if (wave.samples.length > maxSamples) {
+        // Dài hơn 30s: chỉ lấy 30s CUỐI (xem trước khi đang ghi dài, phần đầu đã xem trước rồi).
+        wave = { samples: wave.samples.subarray(wave.samples.length - maxSamples), sampleRate: wave.sampleRate };
+      }
+      const audioMs = durationMs(wave.samples.length, wave.sampleRate);
+      entry.audio_ms = audioMs;
+      await stt.ensure(model);
+      let text = '';
+      let sttMs = 0;
+      if (!isSilence(wave.samples, wave.sampleRate)) {
+        const r = await stt.transcribe(model, { pcm: wave.samples, sampleRate: wave.sampleRate });
+        text = r.text;
+        sttMs = r.stt_ms;
+      }
+      entry.stt_ms = sttMs;
+      const d = text === '' ? { text: '' } : await callPost(() => post.dictionary.applyPreview(text));
+      sendJson(res, 200, { text: d.text, audio_ms: audioMs, stt_ms: sttMs });
+      entry.status = 200;
+    } finally {
+      partialBusy = false;
+    }
   }
 
   return server;

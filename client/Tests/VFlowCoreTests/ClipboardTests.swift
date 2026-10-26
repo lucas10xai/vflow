@@ -64,6 +64,18 @@ final class FakePasteboard: PasteboardStore {
         #expect(!waited && pb.restoreCalls == 0)
     }
 
+    @Test func noFocusedInputKeepsTextWithoutPastingOrRestoring() async {
+        let pb = FakePasteboard()
+        pb.items = original
+        var pasted = false
+        let ins = ClipboardInserter(pasteboard: pb, sendPaste: { pasted = true; return true }, wait: { _ in },
+                                    hasFocusedTextInput: { false })
+        #expect(await ins.insert("xin chào") == .noFocusedInputTextKeptOnClipboard)
+        #expect(!pasted)
+        #expect(pb.restoreCalls == 0)
+        #expect(pb.items.first?.representations.first?.data == Data("xin chào".utf8))
+    }
+
     @Test func emptyTextTouchesNothing() async {
         let pb = FakePasteboard()
         pb.items = original

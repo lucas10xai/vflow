@@ -17,6 +17,12 @@ test('chưa có tệp ⇒ mặc định theo contract', (t) => {
   assert.deepEqual(store.get(), DEFAULT_SETTINGS);
 });
 
+test('llm_timeout_ms mặc định mới là 3500 (trước là 8000 — quá lâu để chờ)', (t) => {
+  const configPath = join(tmp(t), 'config.json');
+  const store = createSettingsStore({ configPath });
+  assert.equal(store.get().llm_timeout_ms, 3500);
+});
+
 test('update: kiểm kiểu/giá trị, từ chối khoá lạ, không ghi gì nếu sai', (t) => {
   const configPath = join(tmp(t), 'config.json');
   const store = createSettingsStore({ configPath });
@@ -31,6 +37,21 @@ test('update: kiểm kiểu/giá trị, từ chối khoá lạ, không ghi gì n
     { llm_timeout_ms: 1000.5 },
     { llm_timeout_ms: '8000' },
     { actions_enabled: 1 },
+    { stats_enabled: 'yes' },
+    { voice_punctuation: 1 },
+    { tone: 'angry' },
+    { whisper_mode: 'yes' },
+    { learn_from_edits: 'yes' },
+    { live_preview: 'yes' },
+    { silence_stop_seconds: -1 },
+    { silence_stop_seconds: 61 },
+    { silence_stop_seconds: 1.5 },
+    { app_rules: 'x' },
+    { app_rules: ['a'] },
+    { app_rules: { not_a_bundle_id: 'clean' } },
+    { app_rules: { 'com.apple.Terminal': 'auto' } }, // auto không hợp lệ cho app_rules (tránh đệ quy)
+    { app_rules: { 'com.apple.Terminal': 'nope' } },
+    { app_rules: Object.fromEntries(Array.from({ length: 101 }, (_, i) => [`com.example.app${i}`, 'clean'])) },
     { rewrite: { model: 'm' } },
     { unknown_key: 1 },
   ];
@@ -39,6 +60,14 @@ test('update: kiểm kiểu/giá trị, từ chối khoá lạ, không ghi gì n
   }
   assert.equal(readFileSync(configPath, 'utf8'), before);
   assert.equal(store.get().cloud_llm, false);
+});
+
+test('app_rules: luật hợp lệ được lưu và đọc lại đúng', (t) => {
+  const configPath = join(tmp(t), 'config.json');
+  const store = createSettingsStore({ configPath });
+  const next = store.update({ app_rules: { 'com.apple.Terminal': 'dev', 'com.apple.mail': 'tidy' } });
+  assert.deepEqual(next.app_rules, { 'com.apple.Terminal': 'dev', 'com.apple.mail': 'tidy' });
+  assert.deepEqual(store.get().app_rules, { 'com.apple.Terminal': 'dev', 'com.apple.mail': 'tidy' });
 });
 
 test('update nhận tập con, giữ các khoá khác của tệp (rewrite.*, auto.apps, default_model, …)', (t) => {
@@ -50,7 +79,7 @@ test('update nhận tập con, giữ các khoá khác của tệp (rewrite.*, au
   }));
   const store = createSettingsStore({ configPath });
   const next = store.update({ llm_model: 'ag/gemini-3.8-flash', llm_timeout_ms: 5000 });
-  assert.deepEqual(next, { cloud_llm: true, llm_model: 'ag/gemini-3.8-flash', llm_timeout_ms: 5000, actions_enabled: true });
+  assert.deepEqual(next, { ...DEFAULT_SETTINGS, llm_model: 'ag/gemini-3.8-flash', llm_timeout_ms: 5000 });
   const raw = JSON.parse(readFileSync(configPath, 'utf8'));
   assert.equal(raw.default_model, 'zipformer-vi-30m');
   assert.deepEqual(raw.rewrite, { url: 'http://127.0.0.1:20128/v1', model: 'ag/gemini-3.8-flash', timeout_ms: 8000, key_file: '~/.vflow/rewrite.key' });
@@ -67,7 +96,7 @@ test('get() phản ánh update() ngay (không cần khởi động lại)', (t) 
   store.update({ actions_enabled: false });
   assert.equal(store.get().actions_enabled, false);
   store.update({ actions_enabled: true, llm_model: 'm' });
-  assert.deepEqual(store.get(), { cloud_llm: true, llm_model: 'm', llm_timeout_ms: 8000, actions_enabled: true });
+  assert.deepEqual(store.get(), { ...DEFAULT_SETTINGS, llm_model: 'm' });
 });
 
 test('tệp bị sửa tay giữa chừng ⇒ get() thấy giá trị mới (kiểm bằng mtime)', (t) => {

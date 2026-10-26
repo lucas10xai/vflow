@@ -37,7 +37,6 @@ final class WelcomeWindowController: NSWindowController {
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate()
         startPolling()
-        if let window { WindowRectDebug.printIfRequested(window, label: "welcome") }
     }
 
     /// `--render-offscreen`: chụp cửa sổ Chào mừng THẬT — xem `OffscreenRender.captureRealWindow`.

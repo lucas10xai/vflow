@@ -8,8 +8,21 @@ final class HotkeyMonitor {
     var onInput: ((KeyInput) -> Void)?
     /// Hệ thống tắt tap (quá thời gian/đầu vào người dùng) — app phải reset máy trạng thái.
     var onTapDisabled: (() -> Void)?
+    /// Tổ hợp "Chèn lại câu vừa rồi" (mặc định ⌥⌘V) khớp trên một `keyDown` ⇒ gọi, độc lập hoàn
+    /// toàn với máy trạng thái "giữ để nói" (xem `HotkeyChord`).
+    var onReinsertChord: (() -> Void)?
     private var tap: CFMachPort?
     private var source: CFRunLoopSource?
+    /// Đổi cài đặt giữa lúc đang ghi KHÔNG được làm hỏng cử chỉ đang chạy — chỉ áp dụng ngay khi máy
+    /// trạng thái đang rảnh (xem `VFlowCore.ActiveHotkeyConfig`). `AppController` gán `isIdle`.
+    private var keyConfigState = ActiveHotkeyConfig()
+    var isIdle: (() -> Bool) = { true }
+    var reinsertChord: HotkeyChord = .reinsertDefault
+
+    var keyConfig: HotkeyKeyConfig {
+        get { keyConfigState.desired }
+        set { keyConfigState.desired = newValue }
+    }
 
     var isRunning: Bool { tap != nil }
 
@@ -42,6 +55,11 @@ final class HotkeyMonitor {
             onTapDisabled?()
             return
         }
+        // Cơ hội áp dụng cấu hình phím mới (chỉ khi đang rảnh — xem `ActiveHotkeyConfig`).
+        keyConfigState.refresh(isIdle: isIdle())
+        if type == .keyDown, reinsertChord.matches(keyCode: keyCode, flags: flags) {
+            onReinsertChord?()
+        }
         let kind: KeyClassifier.EventKind
         switch type {
         case .flagsChanged: kind = .flagsChanged
@@ -50,13 +68,13 @@ final class HotkeyMonitor {
         case .leftMouseDown, .rightMouseDown, .otherMouseDown: kind = .mouseDown
         default: kind = .other
         }
-        let input = KeyClassifier.classify(kind: kind, keyCode: keyCode, flags: flags)
+        let input = KeyClassifier.classify(kind: kind, keyCode: keyCode, flags: flags, config: keyConfigState.active)
         if input != .ignored { onInput?(input) }
     }
 
-    /// Trạng thái thật của ⌥ trái (để hồi phục khi mất sự kiện nhả phím).
-    static func leftOptionHeldNow() -> Bool {
-        CGEventSource.keyState(.combinedSessionState, key: CGKeyCode(KeyClassifier.keyCodeLeftOption))
+    /// Trạng thái thật của phím giữ ĐANG áp dụng (để hồi phục khi mất sự kiện nhả phím).
+    func leftOptionHeldNow() -> Bool {
+        CGEventSource.keyState(.combinedSessionState, key: CGKeyCode(keyConfigState.active.holdKey.keyCode))
     }
 }
 

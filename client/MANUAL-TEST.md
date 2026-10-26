@@ -169,3 +169,39 @@ D6b. Làm engine bỏ cuộc hẳn: `pkill -9 -f "vflow.js serve"` liên tục (
     **Dự kiến:** dòng "ký ổn định bằng "vflow Local Signing": quyền macOS được giữ qua các lần cài" thay vì cảnh báo ad-hoc. `codesign -dvvv client/build/VFlow.app | grep Authority` ra `Authority=vflow Local Signing`.
 49. Mở app đã ký ổn định lần đầu, cấp đủ 3 quyền macOS. Xoá `client/build/VFlow.app`, chạy lại `build-app.sh`, mở lại.
     **Dự kiến:** KHÔNG bị đòi cấp lại quyền (khác hẳn bản ad-hoc ở bước 28/31) — vì chữ ký (danh tính) giống hệt lần trước dù nhị phân có thể đổi byte.
+
+## I. U4: dán an toàn, chèn lại câu vừa rồi, dự phòng khi che biểu tượng, nút Cài đặt, phím tắt tuỳ chỉnh, micro/VAD
+60. Mở TextEdit, bấm vào vùng TRANG (không phải ô soạn — ví dụ bấm vào thanh tiêu đề cửa sổ hoặc chuyển sang Finder/desktop ngay trước khi nhả phím) sao cho KHÔNG có ô nhập chữ nào đang focus, rồi giữ ⌥ nói một câu.
+    **Dự kiến:** HUD "Đã chép — bấm ⌘V" (không phải "Xong"); ⌘V tay sau đó dán đúng câu đã nói; clipboard CŨ (trước khi nói) đã bị thay (không khôi phục) vì đây là trường hợp "không có ô nhập", khác với trường hợp thiếu quyền Trợ năng (bước 22, báo "thiếu quyền Trợ năng" + vẫn giữ nguyên trên clipboard).
+61. Đọc chính tả một câu bình thường vào Terminal (có ô nhập thật), kiểm tra vẫn "Xong" như cũ.
+    **Dự kiến:** KHÔNG bị ảnh hưởng bởi thay đổi ở bước 60 — Terminal/Notes/trình duyệt vẫn nhận ⌘V bình thường (xem giới hạn: bộ dò chỉ chặn vai trò AX CHẮC CHẮN không phải ô nhập, không chặn vai trò lạ/không đọc được).
+62. Đọc chính tả một câu bất kỳ, sau đó bấm biểu tượng thanh menu › "Chèn lại câu vừa rồi" (hoặc chuột phải biểu tượng Dock › cùng mục, hoặc ⌥⌘V) khi đang focus ô nhập khác.
+    **Dự kiến:** câu vừa nói được chèn lại đúng y nguyên vào ô đang focus (cùng cách dán/khôi phục clipboard như dictation). Cài đặt › Lịch sử & riêng tư tắt "Lưu lịch sử", lặp lại với MỘT câu mới nói trong phiên này ⇒ vẫn chèn lại được (nhớ trong RAM); thoát app rồi mở lại (lịch sử đang tắt) rồi bấm "Chèn lại câu vừa rồi" ngay ⇒ HUD "Chưa có câu nào" (bộ nhớ phiên đã mất).
+63. Chưa nói câu nào từ lúc mở app (lịch sử đang tắt) rồi bấm "Chèn lại câu vừa rồi".
+    **Dự kiến:** HUD "Chưa có câu nào", không dán gì, không đổi clipboard.
+64. Chuột phải (hoặc giữ) biểu tượng Dock của vflow.
+    **Dự kiến:** menu hiện ra CÙNG các mục với menu thanh trạng thái (dòng trạng thái, Chế độ có dấu tích, Chèn lại câu vừa rồi, Mở cửa sổ vflow, Cài đặt…, Thoát vflow…) — không thiếu mục nào, không có mục chỉ-riêng-Dock.
+65. Mở nhiều ứng dụng có biểu tượng thanh menu cho tới khi thanh menu chật (hoặc dùng MacBook có notch, kéo biểu tượng vflow về gần notch bằng ⌘-kéo) để biểu tượng vflow bị che/ẩn.
+    **Dự kiến:** tab Tổng quan tự hiện thẻ cam "Biểu tượng thanh menu có thể đang bị che" với đúng câu hướng dẫn, nút "Mở Cài đặt › Chung", và nút đóng (x). Đóng thẻ, khởi động lại app (biểu tượng vẫn bị che) ⇒ thẻ KHÔNG hiện lại trong cùng ngày; đợi qua ngày hôm sau (hoặc đổi giờ hệ thống — chỉ để thử) ⇒ hiện lại nếu vẫn bị che. Bỏ che (kéo biểu tượng ra, hoặc thoát vài app) ⇒ thẻ tự biến mất (không cần đóng tay).
+66. Cài đặt (⌘,): nhìn thanh công cụ.
+    **Dự kiến:** 5 tab (Chung/Đám mây/Phím tắt/Lịch sử & riêng tư/Nâng cao) — thêm "Phím tắt" so với trước.
+67. Cửa sổ chính "vflow": nhìn chân thanh bên và thanh công cụ.
+    **Dự kiến:** chân thanh bên có nút bánh răng "Cài đặt" kèm chữ "⌘," mờ bên phải; thanh công cụ (góc trên-phải cửa sổ) cũng có nút bánh răng riêng. Bấm MỘT trong hai (hoặc ⌘, hoặc menu/Dock) ⇒ luôn mở đúng MỘT cửa sổ Cài đặt (không có cửa sổ thứ hai).
+68. Cài đặt › Phím tắt: đổi "Phím giữ để nói" thành "⌃ trái", đổi "Phím Command Mode" thành "⌥ trái" (đảo ngược mặc định).
+    **Dự kiến:** không có cảnh báo trùng (hai phím khác nhau). Thử giữ ⌃ trái ở Terminal ⇒ ghi âm như trước đây ⌥ trái làm; giữ ⌃ trái rồi bấm thêm ⌥ trái trong 400ms đầu ⇒ vào Command Mode. ⌥ trái một mình giờ KHÔNG còn bắt đầu ghi nữa.
+69. Cài đặt › Phím tắt: đổi cả hai phím về CÙNG một phím (vd. cả hai đều "⌥ trái").
+    **Dự kiến:** hiện cảnh báo đỏ tiếng Việt về trùng phím ngay trong Cài đặt.
+70. Cài đặt › Phím tắt: bấm "Đặt lại mặc định".
+    **Dự kiến:** cả hai phím về ⌥ trái/⌃ trái, tổ hợp "Chèn lại câu vừa rồi" về ⌥⌘V.
+71. Đang giữ ⌥ trái ghi âm (chưa nhả), MỞ cửa sổ Cài đặt › Phím tắt ở một lúc khác đổi phím giữ sang "⌃ trái" (nếu máy cho tương tác cả hai cùng lúc — thử bằng cách đổi cài đặt rồi NGAY LẬP TỨC nhả ⌥ đang giữ).
+    **Dự kiến:** lượt ghi ĐANG CHẠY vẫn kết thúc đúng khi nhả ⌥ (không bị "mất nút nhả" vì đổi cấu hình giữa chừng) — cấu hình mới chỉ áp dụng cho LẦN SAU.
+72. Cài đặt › Chung › Micro: mở danh sách.
+    **Dự kiến:** thấy "Mặc định hệ thống" + micro trong máy (và micro ngoài nếu có cắm). Chọn micro trong máy (hoặc để mặc định), ghi thử ⇒ vẫn nghe/chèn chữ bình thường (KHÔNG có micro ngoài để thử đổi thật trong môi trường dựng — chủ dự án tự thử nếu có tai nghe/micro USB, xem giới hạn đã biết trong README).
+73. (Chỉ nếu có micro ngoài) Chọn micro ngoài ở Cài đặt, rút nó ra, rồi ghi thử.
+    **Dự kiến:** HUD báo một lần "Micro đã chọn không còn — dùng micro mặc định"; Cài đặt tự về "Mặc định hệ thống"; ghi âm vẫn hoạt động bằng micro trong máy.
+74. Cài đặt › Chung: đặt "Tự dừng khi im lặng" = 3 giây. Đúp ⌥ (ghi khoá), nói một câu ngắn, NGỪNG nói hẳn (im lặng thật, đừng gõ bàn phím gây ồn).
+    **Dự kiến:** sau ~2 giây im lặng HUD hiện đếm ngược ("Im lặng — tự dừng sau N giây"), tới khi hết thì TỰ gửi như bấm ⌥ lần nữa — không cần bấm gì. Lặp lại nhưng nói-ngừng ngắn (< 3s)-nói tiếp trong lúc đang đếm ngược ⇒ KHÔNG bị cắt giữa câu, đếm ngược biến mất rồi chỉ xuất hiện lại nếu im lặng đủ lâu sau khi nói xong.
+75. Cài đặt › Chung: đặt "Tự dừng khi im lặng" = Tắt (0). Đúp ⌥, nói rồi im lặng thật lâu (> 1 phút).
+    **Dự kiến:** KHÔNG tự dừng vì im lặng — chỉ tự dừng ở giới hạn thời gian ghi tối đa (xem bước 76).
+76. Đúp ⌥ (ghi khoá), giữ im lặng/nói liên tục quá 120 giây (engine chưa báo `max_audio_seconds` ⇒ dùng mặc định 120s).
+    **Dự kiến:** cảnh báo "Còn khoảng 30 giây sẽ tự gửi" ở giây ~90, rồi tự dừng+gửi đúng lúc 120s — không mất dữ liệu đã ghi.

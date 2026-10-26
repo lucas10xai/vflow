@@ -55,7 +55,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if let i = args.firstIndex(of: "--open-settings-tab"), args.count > i + 1 {
             guard let cat = SettingsCategory(rawValue: args[i + 1]) else {
-                FileHandle.standardError.write(Data("dùng: --open-settings-tab general|cloud|historyPrivacy|advanced\n".utf8))
+                FileHandle.standardError.write(Data("dùng: --open-settings-tab general|cloud|hotkeys|historyPrivacy|advanced\n".utf8))
                 exit(64)
             }
             c.openSettingsWindow(tab: cat)
@@ -259,7 +259,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 c.openStatusWindow(tab: tab)
                 await c.captureStatusWindowOffscreen(tab: tab, to: outPath)
             } else {
-                FileHandle.standardError.write(Data("dùng: --render-offscreen tongquan|lichsu|tudien|tudien:them-loi|snippet|caidat[:general|cloud|historyPrivacy|advanced]|welcome --out <path.png>\n".utf8))
+                FileHandle.standardError.write(Data("dùng: --render-offscreen tongquan|lichsu|tudien|tudien:them-loi|snippet|caidat[:general|cloud|hotkeys|historyPrivacy|advanced]|welcome --out <path.png>\n".utf8))
                 exit(64)
             }
             OffscreenRender.assertNoOnScreenWindow()
@@ -282,6 +282,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         controller?.openStatusWindow()
         return true
+    }
+
+    /// Menu Dock (chuột phải biểu tượng Dock) — CÙNG các mục với menu thanh trạng thái, xây từ
+    /// CÙNG một hàm (`StatusMenu.populate`) để không nhân đôi logic; lối vào dự phòng chính khi
+    /// biểu tượng thanh menu bị notch/thanh menu đầy che mất (xem mục 4a trong yêu cầu).
+    func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
+        guard let c = controller else { return nil }
+        let dockMenu = NSMenu()
+        StatusMenu.populate(dockMenu, model: c.statusModel, controller: c)
+        return dockMenu
     }
 
     /// Đóng cửa sổ trạng thái không được thoát app (chỉ còn menu bar).

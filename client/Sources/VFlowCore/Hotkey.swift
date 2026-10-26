@@ -78,7 +78,10 @@ public struct HotkeyStateMachine: Sendable {
     public static let defaultCommandWindow: TimeInterval = 0.4
 
     public let holdThreshold: TimeInterval
-    public let maxRecording: TimeInterval
+    /// Ghi khoá (hands-free) có thể dài hơn giữ-phím-thường tuỳ engine báo (xem contract mục 7c,
+    /// `VFlowCore.RecordingLimit`) — vì vậy KHÔNG còn `let`: `AppController` đổi giá trị này MỖI
+    /// LẦN bắt đầu một lượt ghi mới (lúc máy đang `.idle`, không ảnh hưởng lượt đang chạy).
+    public var maxRecording: TimeInterval
     public let busyTimeout: TimeInterval
     public let doubleTapGap: TimeInterval
     public let commandWindow: TimeInterval
@@ -320,6 +323,154 @@ public struct HotkeyStateMachine: Sendable {
     }
 }
 
+/// Một trong 4 phím bổ trợ ĐƠN an toàn chọn được cho "giữ để nói"/Command Mode (Cài đặt › Phím
+/// tắt). CỐ Ý loại ⇧ và ⌘ (dễ gõ nhầm khi dùng bình thường) và Fn (không đọc được ổn định trên mọi
+/// loại bàn phím/máy qua CGEvent — chưa kiểm được trong môi trường này, xem README).
+public enum HoldModifierKey: String, CaseIterable, Codable, Sendable {
+    case leftOption, rightOption, leftControl, rightControl
+
+    public var title: String {
+        switch self {
+        case .leftOption: return "⌥ trái"
+        case .rightOption: return "⌥ phải"
+        case .leftControl: return "⌃ trái"
+        case .rightControl: return "⌃ phải"
+        }
+    }
+
+    public var keyCode: Int64 {
+        switch self {
+        case .leftOption: return KeyClassifier.keyCodeLeftOption
+        case .rightOption: return 61
+        case .leftControl: return KeyClassifier.keyCodeLeftControl
+        case .rightControl: return 62
+        }
+    }
+
+    public var deviceBit: UInt64 {
+        switch self {
+        case .leftOption: return KeyClassifier.deviceLeftOption
+        case .rightOption: return KeyClassifier.deviceRightOption
+        case .leftControl: return KeyClassifier.deviceLeftControl
+        case .rightControl: return KeyClassifier.deviceRightControl
+        }
+    }
+}
+
+/// Cấu hình phím "giữ để nói" + phím thứ hai bật Command Mode — hai phím PHẢI khác nhau (xem
+/// `HotkeyConfigValidation`). Mặc định giữ ĐÚNG hành vi cũ (⌥ trái / ⌃ trái).
+public struct HotkeyKeyConfig: Equatable, Sendable, Codable {
+    public var holdKey: HoldModifierKey
+    public var commandKey: HoldModifierKey
+
+    public init(holdKey: HoldModifierKey = .leftOption, commandKey: HoldModifierKey = .leftControl) {
+        self.holdKey = holdKey
+        self.commandKey = commandKey
+    }
+
+    public static let defaultConfig = HotkeyKeyConfig()
+}
+
+/// Áp dụng cấu hình phím nóng mới NGAY khi máy trạng thái đang RẢNH; đổi cài đặt giữa lúc đang ghi
+/// KHÔNG được làm hỏng cử chỉ đang chạy — cử chỉ hiện tại tiếp tục dùng `active` cho tới khi về rảnh
+/// (xem contract mục Phím tắt tuỳ chỉnh, test "giữ khi đổi phím lúc đang ghi âm").
+public struct ActiveHotkeyConfig: Sendable {
+    public private(set) var active: HotkeyKeyConfig
+    public var desired: HotkeyKeyConfig
+
+    public init(_ config: HotkeyKeyConfig = .defaultConfig) {
+        self.active = config
+        self.desired = config
+    }
+
+    /// Gọi mỗi khi có dịp (mỗi sự kiện phím) kèm biết máy đang rảnh hay không; chỉ copy
+    /// `desired` sang `active` khi đang rảnh.
+    public mutating func refresh(isIdle: Bool) {
+        if isIdle { active = desired }
+    }
+}
+
+/// Kiểm hợp lệ cấu hình phím tắt (Cài đặt › Phím tắt) — thuần, test được.
+public enum HotkeyConfigValidation {
+    /// Hai phím (giữ để nói, Command Mode) không được giống nhau.
+    public static func keysConflict(_ config: HotkeyKeyConfig) -> Bool {
+        config.holdKey == config.commandKey
+    }
+
+    /// Thông điệp tiếng Việt khi trùng phím, `nil` khi hợp lệ.
+    public static func conflictMessage(_ config: HotkeyKeyConfig) -> String? {
+        guard keysConflict(config) else { return nil }
+        return "Phím \"giữ để nói\" và phím Command Mode đang trùng nhau (\(config.holdKey.title)) — chọn hai phím khác nhau."
+    }
+}
+
+/// Một tổ hợp phím bổ trợ + một phím chữ/số thường (vd. ⌥⌘V) — dùng cho "Chèn lại câu vừa rồi",
+/// khác hẳn kiểu "giữ phím đơn" ở trên (đây là tổ hợp bấm-nhả một lần, không phải giữ).
+public struct HotkeyChord: Equatable, Sendable, Codable {
+    public var command: Bool
+    public var option: Bool
+    public var control: Bool
+    public var shift: Bool
+    /// Mã phím ảo (virtual keycode) của phím chữ/số chính, vd. 9 = "V".
+    public var keyCode: Int64
+
+    public init(command: Bool = false, option: Bool = false, control: Bool = false, shift: Bool = false, keyCode: Int64) {
+        self.command = command
+        self.option = option
+        self.control = control
+        self.shift = shift
+        self.keyCode = keyCode
+    }
+
+    /// Mặc định ⌥⌘V cho "Chèn lại câu vừa rồi".
+    public static let reinsertDefault = HotkeyChord(command: true, option: true, keyCode: 9)
+
+    /// Có khớp một sự kiện keyDown (mã phím ảo + cờ CGEventFlags thô) không — so khớp CHÍNH XÁC
+    /// bộ phím bổ trợ (không khớp nếu có thêm phím bổ trợ khác đang giữ, tránh bắt nhầm).
+    public func matches(keyCode: Int64, flags: UInt64) -> Bool {
+        guard keyCode == self.keyCode else { return false }
+        let hasCommand = flags & KeyClassifier.maskCommand != 0
+        let hasOption = flags & KeyClassifier.maskAlternate != 0
+        let hasControl = flags & KeyClassifier.maskControl != 0
+        let hasShift = flags & KeyClassifier.maskShift != 0
+        return hasCommand == command && hasOption == option && hasControl == control && hasShift == shift
+    }
+}
+
+/// Hai tổ hợp phím tắt (vd. Command Mode dạng tổ hợp + Chèn lại câu vừa rồi) trùng nhau không —
+/// dùng ở Cài đặt › Phím tắt để cảnh báo.
+public enum HotkeyChordValidation {
+    public static func conflict(_ a: HotkeyChord, _ b: HotkeyChord) -> Bool { a == b }
+}
+
+/// Vài tổ hợp cố định chọn được cho "Chèn lại câu vừa rồi" ở Cài đặt › Phím tắt — KHÔNG phải một ô
+/// ghi phím tự do (an toàn hơn: không có nguy cơ ghi nhầm/ghi phím không hợp lệ khi không kiểm thử
+/// được bàn phím thật trong môi trường này).
+public enum ReinsertChordPreset: String, CaseIterable, Sendable {
+    case optionCommandV, controlCommandV, optionCommandR
+
+    public var chord: HotkeyChord {
+        switch self {
+        case .optionCommandV: return .reinsertDefault
+        case .controlCommandV: return HotkeyChord(command: true, control: true, keyCode: 9)
+        case .optionCommandR: return HotkeyChord(command: true, option: true, keyCode: 15)
+        }
+    }
+
+    public var title: String {
+        switch self {
+        case .optionCommandV: return "⌥⌘V (mặc định)"
+        case .controlCommandV: return "⌃⌘V"
+        case .optionCommandR: return "⌥⌘R"
+        }
+    }
+
+    /// `nil` khi `chord` không khớp preset nào (vd. dữ liệu cũ/hỏng) — Cài đặt rơi về mặc định.
+    public static func matching(_ chord: HotkeyChord) -> ReinsertChordPreset? {
+        allCases.first { $0.chord == chord }
+    }
+}
+
 /// Phân loại sự kiện CGEvent thô (mã phím ảo + cờ) thành `KeyInput`. Thuần để test.
 public enum KeyClassifier {
     public enum EventKind: Sendable { case flagsChanged, keyDown, keyUp, mouseDown, other }
@@ -343,41 +494,51 @@ public enum KeyClassifier {
     public static let keyCodeLeftOption: Int64 = 58
     public static let keyCodeLeftControl: Int64 = 59
     public static let keyCodeEscape: Int64 = 53
-    /// Mã phím ảo của các phím bổ trợ khác (trừ ⌃ trái, ⌥ trái — tách riêng) ⇒ bit nhận biết “đang xuống”.
-    static let otherModifierBits: [Int64: UInt64] = [
+    /// Mã phím ảo ⇒ bit nhận biết “đang xuống” của MỌI phím bổ trợ (kể cả 4 phím chọn được ở
+    /// `HoldModifierKey`) — dùng làm phương án dự phòng khi một phím KHÔNG được chọn làm vai trò
+    /// giữ/Command Mode hiện tại (vd. đổi phím giữ sang ⌃ trái ⇒ ⌥ trái rơi về "phím khác" bình thường).
+    static let allModifierBits: [Int64: UInt64] = [
         54: deviceRightCommand, 55: deviceLeftCommand,
         56: deviceLeftShift, 60: deviceRightShift,
-        62: deviceRightControl,
-        61: deviceRightOption, 63: maskSecondaryFn, 57: maskAlphaShift,
+        58: deviceLeftOption, 61: deviceRightOption,
+        59: deviceLeftControl, 62: deviceRightControl,
+        63: maskSecondaryFn, 57: maskAlphaShift,
     ]
+    /// Bit của 4 phím CHỌN ĐƯỢC (xem `HoldModifierKey`) — dùng để tính `othersHeld` tổng quát.
+    private static let candidateBits: UInt64 = HoldModifierKey.allCases.reduce(0) { $0 | $1.deviceBit }
 
-    public static func classify(kind: EventKind, keyCode: Int64, flags: UInt64) -> KeyInput {
+    public static func classify(kind: EventKind, keyCode: Int64, flags: UInt64,
+                                config: HotkeyKeyConfig = .defaultConfig) -> KeyInput {
         switch kind {
         case .keyDown: return keyCode == keyCodeEscape ? .escape : .keyDown
         case .mouseDown: return .mouseDown
         case .keyUp, .other: return .ignored
         case .flagsChanged:
-            if keyCode == keyCodeLeftOption {
-                guard flags & deviceLeftOption != 0 else { return .leftOptionUp }
-                return .leftOptionDown(othersHeld: othersHeld(flags))
+            let hold = config.holdKey
+            let cmd = config.commandKey
+            if keyCode == hold.keyCode {
+                guard flags & hold.deviceBit != 0 else { return .leftOptionUp }
+                return .leftOptionDown(othersHeld: othersHeld(flags, holdBit: hold.deviceBit))
             }
-            if keyCode == keyCodeLeftControl {
-                return flags & deviceLeftControl != 0 ? .leftControlDown : .leftControlUp
+            if keyCode == cmd.keyCode {
+                return flags & cmd.deviceBit != 0 ? .leftControlDown : .leftControlUp
             }
-            if let bit = otherModifierBits[keyCode] {
-                if keyCode == 57 { return .otherModifierDown } // Caps Lock: mỗi lần bấm đều là “phím khác”
+            if keyCode == 57 { return .otherModifierDown } // Caps Lock: mỗi lần bấm đều là “phím khác”
+            if let bit = allModifierBits[keyCode] {
                 return flags & bit != 0 ? .otherModifierDown : .otherModifierUp
             }
             return .ignored
         }
     }
 
-    /// ⌘/⌃/⇧/⌥ phải đang giữ (bỏ qua Caps Lock và fn vì chúng có thể bật sẵn).
-    public static func othersHeld(_ flags: UInt64) -> Bool {
-        flags & (maskCommand | maskControl | maskShift | deviceRightOption) != 0
+    /// Có phím bổ trợ KHÁC (⌘/⇧ luôn, hoặc bất kỳ phím nào trong 4 phím chọn được trừ chính phím
+    /// giữ) đang giữ SẴN tại thời điểm phím giữ vừa xuống không — combo như vậy huỷ cử chỉ ngay
+    /// (vd. ⌥-click, ⌥←, hoặc ⌃ đã giữ trước ⌥ thì không tính là khởi động Command Mode đúng thứ tự).
+    public static func othersHeld(_ flags: UInt64, holdBit: UInt64 = deviceLeftOption) -> Bool {
+        flags & (maskCommand | maskShift | (candidateBits & ~holdBit)) != 0
     }
 
-    public static func leftOptionHeld(_ flags: UInt64) -> Bool {
-        flags & deviceLeftOption != 0
+    public static func leftOptionHeld(_ flags: UInt64, holdBit: UInt64 = deviceLeftOption) -> Bool {
+        flags & holdBit != 0
     }
 }

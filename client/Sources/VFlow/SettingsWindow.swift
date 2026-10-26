@@ -35,7 +35,6 @@ final class SettingsWindowController: NSWindowController {
         guard !OffscreenRender.enabled else { return }
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate()
-        if let window { WindowRectDebug.printIfRequested(window, label: "settings-\(viewModel.selectedTab.rawValue)") }
     }
 
     /// `--render-offscreen`: chụp cửa sổ Cài đặt THẬT (`window`/`SettingsRootView`, đúng `TabView`/
@@ -71,6 +70,9 @@ struct SettingsRootView: View {
             CloudSettingsSection(model: viewModel.model, controller: viewModel.controller)
                 .tabItem { Label(SettingsCategory.cloud.title, systemImage: SettingsCategory.cloud.symbol) }
                 .tag(SettingsCategory.cloud)
+            HotkeysSettingsTab(controller: viewModel.controller)
+                .tabItem { Label(SettingsCategory.hotkeys.title, systemImage: SettingsCategory.hotkeys.symbol) }
+                .tag(SettingsCategory.hotkeys)
             HistoryPrivacySettingsTab(controller: viewModel.controller)
                 .tabItem { Label(SettingsCategory.historyPrivacy.title, systemImage: SettingsCategory.historyPrivacy.symbol) }
                 .tag(SettingsCategory.historyPrivacy)

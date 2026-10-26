@@ -12,6 +12,11 @@ import { LOCAL_MODELS } from './registry.js';
 import { resolveModelFiles } from './models.js';
 import { SttError, modelUnavailable } from './errors.js';
 import { TARGET_RATE, durationMs, resample, toFloat32 } from './audio.js';
+import { transcribeChunked, DEFAULT_CHUNK_SECONDS, DEFAULT_OVERLAP_SECONDS } from './chunked.js';
+
+/** Audio dài hơn ngần này mới xử lý theo đoạn (contract/engine-api.md mục "Ghi âm dài") — dictation
+ * ngắn bình thường (đa số < 30s) đi thẳng qua đường một lần như trước, không thêm chi phí/độ trễ. */
+const CHUNK_THRESHOLD_SECONDS = 35;
 
 const require = createRequire(import.meta.url);
 
@@ -102,11 +107,17 @@ export function createLocalProvider({ home, numThreads = defaultThreads(), sherp
       }
       const t0 = performance.now();
       const samples = prepare(pcm, sampleRate);
-      const stream = recognizer.createStream();
-      stream.acceptWaveform({ samples, sampleRate: TARGET_RATE });
-      const result = await recognizer.decodeAsync(stream);
+      const decodeOnce = async (chunk) => {
+        const stream = recognizer.createStream();
+        stream.acceptWaveform({ samples: chunk, sampleRate: TARGET_RATE });
+        const result = await recognizer.decodeAsync(stream);
+        return normalizeModelText(result?.text);
+      };
+      const text = samples.length > CHUNK_THRESHOLD_SECONDS * TARGET_RATE
+        ? await transcribeChunked(samples, TARGET_RATE, decodeOnce, { chunkSeconds: DEFAULT_CHUNK_SECONDS, overlapSeconds: DEFAULT_OVERLAP_SECONDS })
+        : await decodeOnce(samples);
       return {
-        text: normalizeModelText(result?.text),
+        text,
         audio_ms: durationMs(samples.length, TARGET_RATE),
         stt_ms: Math.round(performance.now() - t0),
       };

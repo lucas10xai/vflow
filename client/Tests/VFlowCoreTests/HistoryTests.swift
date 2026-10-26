@@ -125,3 +125,19 @@ import Testing
         #expect(HistoryGate.shouldRecord(enabled: true, insertedText: "xin chào"))
     }
 }
+
+@Suite struct LastSpokenTextTests {
+    @Test func usesHistoryWhenHistoryEnabled() {
+        #expect(LastSpokenText.resolve(historyEnabled: true, historyTopText: "câu từ lịch sử", inMemoryText: "câu trong bộ nhớ") == "câu từ lịch sử")
+    }
+
+    @Test func usesInMemoryWhenHistoryDisabled() {
+        #expect(LastSpokenText.resolve(historyEnabled: false, historyTopText: "câu từ lịch sử", inMemoryText: "câu trong bộ nhớ") == "câu trong bộ nhớ")
+    }
+
+    @Test func nilOrEmptyMeansNoSentence() {
+        #expect(LastSpokenText.resolve(historyEnabled: true, historyTopText: nil, inMemoryText: "x") == nil)
+        #expect(LastSpokenText.resolve(historyEnabled: true, historyTopText: "   ", inMemoryText: "x") == nil)
+        #expect(LastSpokenText.resolve(historyEnabled: false, historyTopText: "x", inMemoryText: nil) == nil)
+    }
+}

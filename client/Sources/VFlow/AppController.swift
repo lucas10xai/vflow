@@ -29,6 +29,16 @@ final class AppController: NSObject {
     private var commandSelectionTask: Task<String?, Never>?
     /// Đã hiện cảnh báo "còn ~20s" cho lần ghi hiện tại chưa (tránh lặp lại mỗi tick).
     private var warnedApproachingLimit = false
+    /// Văn bản cuối cùng đã chèn (dictation hoặc Command Mode) — CHỈ TRONG PHIÊN CHẠY (không ghi
+    /// đĩa), dùng cho "Chèn lại câu vừa rồi" khi Lưu lịch sử đang TẮT (xem `VFlowCore.LastSpokenText`).
+    private var lastSpokenTextMemory: String?
+    /// UID micro đã báo "không còn" một lần trong phiên này (tránh báo lặp lại mỗi lần ghi).
+    private var warnedMissingMicUIDs: Set<String> = []
+    /// VAD đang chạy CHỈ khi ghi khoá (hands-free) và `silence_stop_seconds` > 0 (xem contract mục 7b).
+    private var vad: VoiceActivityDetector?
+    private var lastVadTickAt: TimeInterval?
+    /// Giây đã báo đếm ngược gần nhất (tránh hiện lại cùng một số).
+    private var lastAnnouncedVadCountdown: Int?
     /// Cache của `GET/PUT /v1/settings` — dùng để quyết định gửi Enter (xem `EnterAction`); mặc
     /// định khớp `DEFAULT_SETTINGS` của engine cho tới khi đọc được bản thật.
     private(set) var cachedSettings = AppSettings(cloudLlm: true, llmModel: nil, llmTimeoutMs: 8000, actionsEnabled: true)
@@ -77,16 +87,109 @@ final class AppController: NSObject {
         set { defaults.set(newValue, forKey: "showWindowOnLaunch") }
     }
 
+    /// Phím "giữ để nói" + phím Command Mode (Cài đặt › Phím tắt) — mặc định giữ ĐÚNG hành vi cũ
+    /// (⌥ trái / ⌃ trái). Đổi áp dụng ngay (xem `HotkeyMonitor.keyConfig`/`ActiveHotkeyConfig`).
+    var hotkeyConfig: HotkeyKeyConfig {
+        get {
+            HotkeyKeyConfig(holdKey: HoldModifierKey(rawValue: defaults.string(forKey: "hotkeyHoldKey") ?? "") ?? .leftOption,
+                            commandKey: HoldModifierKey(rawValue: defaults.string(forKey: "hotkeyCommandKey") ?? "") ?? .leftControl)
+        }
+        set {
+            defaults.set(newValue.holdKey.rawValue, forKey: "hotkeyHoldKey")
+            defaults.set(newValue.commandKey.rawValue, forKey: "hotkeyCommandKey")
+            hotkeys.keyConfig = newValue
+        }
+    }
+
+    /// Tổ hợp "Chèn lại câu vừa rồi" (mặc định ⌥⌘V) — Cài đặt › Phím tắt.
+    var reinsertChord: HotkeyChord {
+        get {
+            guard let data = defaults.data(forKey: "hotkeyReinsertChord"),
+                  let chord = try? JSONDecoder().decode(HotkeyChord.self, from: data) else { return .reinsertDefault }
+            return chord
+        }
+        set {
+            if let data = try? JSONEncoder().encode(newValue) { defaults.set(data, forKey: "hotkeyReinsertChord") }
+            hotkeys.reinsertChord = newValue
+        }
+    }
+
+    /// Đặt lại phím tắt về mặc định (nút "Đặt lại mặc định" ở Cài đặt › Phím tắt).
+    func resetHotkeysToDefault() {
+        hotkeyConfig = .defaultConfig
+        reinsertChord = .reinsertDefault
+    }
+
+    // MARK: micro (Cài đặt › Chung, xem contract mục 7a)
+
+    /// UID micro đã chọn — `nil` = "Mặc định hệ thống".
+    var micDeviceUID: String? {
+        get { defaults.string(forKey: "micDeviceUID") }
+        set { defaults.set(newValue, forKey: "micDeviceUID") }
+    }
+
+    func availableMicDevices() -> [MicrophoneSelection.Device] { AudioRecorder.availableDevices() }
+
+    /// UID thật sự dùng khi bắt đầu ghi — thiết bị đã chọn biến mất ⇒ rơi về mặc định VÀ báo một
+    /// lần bằng HUD (không lặp lại mỗi lần ghi); gọi ngay trước `recorder.start()`.
+    private func resolvedMicDeviceUIDForRecording() -> String? {
+        switch MicrophoneSelection.resolve(configuredUID: micDeviceUID, availableDevices: availableMicDevices()) {
+        case .systemDefault: return nil
+        case .configured(let d): return d.uid
+        case .fallbackDeviceMissing(let previousUID):
+            if !warnedMissingMicUIDs.contains(previousUID) {
+                warnedMissingMicUIDs.insert(previousUID)
+                overlay.show(.notice("Micro đã chọn không còn — dùng micro mặc định"), thenRestore: currentListeningOverlay())
+            }
+            micDeviceUID = nil
+            return nil
+        }
+    }
+
     /// Mô hình thuần dùng chung cho menu và cửa sổ trạng thái — một nguồn duy nhất.
     var statusModel: StatusModel {
         StatusModel.build(engineState: engineState, configError: configError, lastError: lastError,
                            permissions: PermissionKind.items, mode: mode, canRetryLast: canRetry,
                            launchAtLogin: launchAtLogin, conflictWarning: conflictWarning(), hotkeysActive: hotkeysActive,
-                           modelBootstrapStatus: modelBootstrapStatus)
+                           modelBootstrapStatus: modelBootstrapStatus, menuBarIconReminder: menuBarIconReminderMessage())
     }
 
     private func conflictWarning() -> String? {
         ConflictText.warning(for: conflictDetector.detect(runningBundleIDs: runningApps.runningBundleIDs()))
+    }
+
+    /// Biểu tượng thanh menu có đang bị che (notch, hoặc hệ thống co về 0 vì thanh menu đầy) không —
+    /// xem `VFlowCore.MenuBarOcclusion`; `false` khi công tắc "Hiện biểu tượng" đang TẮT (không có
+    /// gì để che) hoặc chưa đọc được khung cửa sổ/màn hình.
+    var isMenuBarIconOccluded: Bool {
+        // CHỈ để chụp ảnh thẻ nhắc (U4) — không có tác dụng gì khi không đặt, không bao giờ dùng
+        // khi chạy thật (giống `VFLOW_DEMO_PERMISSIONS`); toạ độ màn hình thật lúc kiểm tự động
+        // không đoán trước được có notch/đủ chật để tự nhiên bị che hay không.
+        if ProcessInfo.processInfo.environment["VFLOW_DEMO_MENUBAR_OCCLUDED"] == "1" { return true }
+        guard showMenuBarIcon, let screen = NSScreen.main, let itemFrame = menu?.itemWindowFrame else { return false }
+        func rect(_ r: NSRect) -> MenuBarOcclusion.Rect { .init(minX: r.minX, maxX: r.maxX) }
+        return MenuBarOcclusion.isOccluded(itemFrame: rect(itemFrame), screenFrame: rect(screen.frame),
+                                           auxiliaryLeft: screen.auxiliaryTopLeftArea.map(rect),
+                                           auxiliaryRight: screen.auxiliaryTopRightArea.map(rect))
+    }
+
+    /// Ngày đóng gần nhất của thẻ nhắc "biểu tượng bị che" ở Tổng quan (xem `MenuBarOcclusionReminder`).
+    var menuBarOcclusionReminderDismissedDay: String? {
+        get { defaults.string(forKey: "menuBarOcclusionReminderDismissedDay") }
+        set { defaults.set(newValue, forKey: "menuBarOcclusionReminderDismissedDay") }
+    }
+
+    private func menuBarIconReminderMessage() -> String? {
+        let today = MenuBarOcclusionReminder.dayKey(for: Date())
+        guard MenuBarOcclusionReminder.shouldShow(isOccluded: isMenuBarIconOccluded, todayKey: today,
+                                                  dismissedOnDayKey: menuBarOcclusionReminderDismissedDay) else { return nil }
+        return MenuBarOcclusionReminder.message
+    }
+
+    /// Đóng thẻ nhắc "biểu tượng bị che" — nhớ theo NGÀY (hiện lại hôm sau nếu vẫn bị che).
+    func dismissMenuBarOcclusionReminder() {
+        menuBarOcclusionReminderDismissedDay = MenuBarOcclusionReminder.dayKey(for: Date())
+        refreshUI()
     }
 
     override init() {
@@ -112,10 +215,14 @@ final class AppController: NSObject {
         statusWindow = StatusWindowController(controller: self, initialTab: initialTab)
         settingsWindow = SettingsWindowController(controller: self)
         welcomeWindow = WelcomeWindowController(controller: self)
-        recorder.onLevel = { [weak self] l in self?.overlay.setLevel(l) }
+        recorder.onLevel = { [weak self] l in self?.overlay.setLevel(l); self?.processVoiceActivity(level: l) }
         recorder.onInterrupted = { [weak self] why in self?.micInterrupted(why) }
         hotkeys.onInput = { [weak self] input in self?.handle(input) }
         hotkeys.onTapDisabled = { [weak self] in self?.tapDisabled() }
+        hotkeys.onReinsertChord = { [weak self] in self?.reinsertLastSentence() }
+        hotkeys.isIdle = { [weak self] in self?.machine.phase == .idle }
+        hotkeys.keyConfig = hotkeyConfig
+        hotkeys.reinsertChord = reinsertChord
 
         if AudioRecorder.permission() == .notDetermined { PermissionKind.microphone.request() }
         startHotkeys()
@@ -139,6 +246,12 @@ final class AppController: NSObject {
                 MainActor.assumeIsolated { if let s = self?.supervisor { Task { await s.refresh() } } }
             }
             Task { _ = await self.fetchSettings() } // best-effort; cachedSettings giữ mặc định nếu lỗi
+        }
+        // Màn hình/menu thay đổi (cắm/rút màn hình ngoài, đổi độ phân giải…) ⇒ dò lại ngay xem
+        // biểu tượng thanh menu có bị che không (xem mục 4b trong yêu cầu).
+        NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
+                                               object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refreshUI() }
         }
         refreshUI()
         if showWindowOnLaunch { openStatusWindow() }
@@ -347,7 +460,7 @@ final class AppController: NSObject {
     }
 
     private func tapDisabled() {
-        perform(machine.reset(optionHeld: HotkeyMonitor.leftOptionHeldNow()))
+        perform(machine.reset(optionHeld: hotkeys.leftOptionHeldNow()))
         updateTicking()
     }
 
@@ -356,7 +469,7 @@ final class AppController: NSObject {
             tickTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
                 MainActor.assumeIsolated {
                     guard let self else { return }
-                    self.perform(self.machine.tick(at: Self.now, optionHeld: HotkeyMonitor.leftOptionHeldNow()))
+                    self.perform(self.machine.tick(at: Self.now, optionHeld: self.hotkeys.leftOptionHeldNow()))
                     self.checkApproachingLimit()
                     self.updateTicking()
                 }
@@ -367,11 +480,14 @@ final class AppController: NSObject {
         }
     }
 
-    /// Cảnh báo một lần khi còn ~20 s (giây 100/120) trước khi tự gửi — không cần giữ với ghi khoá.
+    /// Cảnh báo một lần trước khi tự gửi vì hết giờ — giữ phím thường ở ~20s còn lại (giây 100/120,
+    /// không đổi hành vi cũ); ghi khoá (hands-free, có thể dài hơn 120s — xem contract mục 7c) ở
+    /// ~30s còn lại (`RecordingLimit.warnAtRemainingSeconds`).
     private func checkApproachingLimit() {
-        guard let remaining = machine.secondsRemaining(at: Self.now), remaining <= 20, !warnedApproachingLimit else { return }
+        let warnAt: TimeInterval = machine.isLocked ? TimeInterval(RecordingLimit.warnAtRemainingSeconds) : 20
+        guard let remaining = machine.secondsRemaining(at: Self.now), remaining <= warnAt, !warnedApproachingLimit else { return }
         warnedApproachingLimit = true
-        overlay.show(.notice("Còn khoảng 20 giây sẽ tự gửi"), thenRestore: currentListeningOverlay())
+        overlay.show(.notice("Còn khoảng \(Int(warnAt)) giây sẽ tự gửi"), thenRestore: currentListeningOverlay())
     }
 
     private func currentListeningOverlay() -> OverlayState {
@@ -403,7 +519,7 @@ final class AppController: NSObject {
     }
 
     private func abortRecording(_ error: ClientError) {
-        _ = machine.reset(optionHeld: HotkeyMonitor.leftOptionHeldNow())
+        _ = machine.reset(optionHeld: hotkeys.leftOptionHeldNow())
         commandSelectionTask?.cancel()
         commandSelectionTask = nil
         recorder.cancel()
@@ -427,7 +543,7 @@ final class AppController: NSObject {
         }
         targetApp = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
         do {
-            try recorder.start()
+            try recorder.start(deviceUID: resolvedMicDeviceUIDForRecording())
         } catch let e as ClientError {
             return abortRecording(e)
         } catch {
@@ -435,6 +551,17 @@ final class AppController: NSObject {
         }
         recordingStartedAt = Self.now
         warnedApproachingLimit = false
+        // Ghi khoá (hands-free) được phép dài hơn 120s nếu engine báo giới hạn lớn hơn, và CHỈ ghi
+        // khoá mới chạy VAD tự dừng khi im lặng (xem contract mục 7b/7c) — giữ phím thường KHÔNG đổi.
+        if machine.isLocked {
+            machine.maxRecording = Double(RecordingLimit.resolve(engineMaxAudioSeconds: currentMaxAudioSeconds))
+            vad = cachedSettings.silenceStopSeconds > 0 ? VoiceActivityDetector() : nil
+        } else {
+            machine.maxRecording = HotkeyStateMachine.defaultMaxRecording
+            vad = nil
+        }
+        lastVadTickAt = nil
+        lastAnnouncedVadCountdown = nil
         overlay.setLevel(0)
         overlay.show(machine.isLocked ? .listeningLocked(level: 0) : .listening(level: 0))
         refreshUI()
@@ -456,7 +583,7 @@ final class AppController: NSObject {
         }
         targetApp = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
         do {
-            try recorder.start()
+            try recorder.start(deviceUID: resolvedMicDeviceUIDForRecording())
         } catch let e as ClientError {
             return abortRecording(e)
         } catch {
@@ -464,6 +591,10 @@ final class AppController: NSObject {
         }
         recordingStartedAt = Self.now
         warnedApproachingLimit = false
+        // Command Mode không dùng giới hạn/VAD mở rộng — đảm bảo không "ăn ké" cấu hình còn sót lại
+        // từ lượt ghi khoá trước đó.
+        machine.maxRecording = HotkeyStateMachine.defaultMaxRecording
+        vad = nil
         overlay.setLevel(0)
         overlay.show(.listeningCommand(level: 0))
         refreshUI()
@@ -477,6 +608,40 @@ final class AppController: NSObject {
                 sendCopy: { CopyKeystroke.send() },
                 now: { Self.now },
                 sleep: { try? await Task.sleep(for: $0) })
+        }
+    }
+
+    /// Giới hạn ghi của engine hiện biết (`max_audio_seconds` ở `/healthz`, chưa có trong contract
+    /// hiện tại ⇒ thường `nil` — xem `RecordingLimit.resolve`).
+    private var currentMaxAudioSeconds: Int? {
+        if case .running(_, let h) = engineState { return h.maxAudioSeconds }
+        return nil
+    }
+
+    /// VAD năng lượng CHỈ áp dụng cho ghi khoá (hands-free, đúp ⌥) — KHÔNG áp dụng cho kiểu giữ
+    /// phím thường (xem contract mục 7b). Tự dừng = feed `.leftOptionUp` logic, Y HỆT hiệu ứng khi
+    /// người dùng bấm phím giữ một lần nữa để kết thúc ghi khoá.
+    private func processVoiceActivity(level: Float) {
+        guard machine.isLocked, vad != nil else { return }
+        let now = Self.now
+        let dt = lastVadTickAt.map { now - $0 } ?? 0.1
+        lastVadTickAt = now
+        vad?.process(level: level, chunkSeconds: dt)
+        guard let v = vad else { return }
+        let limit = Double(cachedSettings.silenceStopSeconds)
+        if let remaining = v.secondsUntilStop(limitSeconds: limit) {
+            let whole = Int(remaining.rounded(.up))
+            if whole <= 5, whole != lastAnnouncedVadCountdown {
+                lastAnnouncedVadCountdown = whole
+                overlay.show(.notice("Im lặng — tự dừng sau \(whole) giây"), thenRestore: currentListeningOverlay())
+            }
+        } else {
+            lastAnnouncedVadCountdown = nil
+        }
+        if v.shouldStop(afterSilenceSeconds: limit) {
+            vad = nil
+            perform(machine.handle(.leftOptionUp, at: now))
+            updateTicking()
         }
     }
 
@@ -546,6 +711,32 @@ final class AppController: NSObject {
     var canRetry: Bool {
         var r = retry
         return r.current(at: Self.now) != nil && machine.phase == .idle
+    }
+
+    /// "Chèn lại câu vừa rồi" (menu thanh trạng thái/Dock, phím tắt ⌥⌘V mặc định) — dùng CÙNG
+    /// nguồn/đường chèn với dictation (xem `VFlowCore.LastSpokenText`). Im lặng bỏ qua nếu đang ghi
+    /// âm/dịch (không chồng lên việc khác đang chạy).
+    func reinsertLastSentence() {
+        guard machine.phase == .idle else { return }
+        let historyTop = (try? historyStore.list())?.entries.first?.text
+        guard let text = LastSpokenText.resolve(historyEnabled: historyEnabled, historyTopText: historyTop, inMemoryText: lastSpokenTextMemory) else {
+            overlay.show(.notice(LastSpokenText.noSentenceMessage))
+            return
+        }
+        guard machine.beginExternalJob(at: Self.now) else { return }
+        updateTicking()
+        Task { @MainActor in
+            let inserter = ClipboardInserter(pasteboard: pasteboard, sendPaste: { PasteKeystroke.send() },
+                                             wait: { try? await Task.sleep(for: $0) },
+                                             hasFocusedTextInput: Self.hasFocusedTextInputOrUnknown)
+            let outcome = await inserter.insert(text)
+            let overlayState = DictationDecision.overlay(after: outcome, planned: .done)
+            if case .error(let m) = overlayState { lastError = m } else { lastError = nil }
+            overlay.show(overlayState)
+            machine.finished(optionHeld: hotkeys.leftOptionHeldNow())
+            updateTicking()
+            refreshUI()
+        }
     }
 
     private func send(pcm: Data, mode: DictationMode, app: String?) {
@@ -619,6 +810,14 @@ final class AppController: NSObject {
         }
     }
 
+    /// Chỉ tin kết quả dò ô nhập khi ĐÃ có quyền Trợ năng; thiếu quyền thì coi là "có" để nhường cho
+    /// đường cũ `PasteKeystroke.send()` → `.pasteFailedTextLeftOnClipboard` báo đúng lý do (thiếu
+    /// quyền), không lẫn với thông báo "Đã chép — bấm ⌘V" của trường hợp không có ô nhập.
+    private static func hasFocusedTextInputOrUnknown() -> Bool {
+        guard CGPreflightPostEventAccess() else { return true }
+        return FocusedInputProbe.hasFocusedTextInput()
+    }
+
     private func deliver(_ result: Result<TranscribeResult, ClientError>) async {
         inflight = nil
         let plan = DictationDecision.plan(for: result)
@@ -626,7 +825,8 @@ final class AppController: NSObject {
         var overlayState = plan.overlay
         if let text = plan.insert {
             let inserter = ClipboardInserter(pasteboard: pasteboard, sendPaste: { PasteKeystroke.send() },
-                                             wait: { try? await Task.sleep(for: $0) })
+                                             wait: { try? await Task.sleep(for: $0) },
+                                             hasFocusedTextInput: Self.hasFocusedTextInputOrUnknown)
             let outcome = await inserter.insert(text)
             overlayState = DictationDecision.overlay(after: outcome, planned: plan.overlay)
             let pasted = outcome == .pastedRestored || outcome == .pastedNotRestoredUserChanged
@@ -636,9 +836,10 @@ final class AppController: NSObject {
             }
         }
         if case .error(let m) = overlayState { lastError = m } else { lastError = nil }
+        if let text = plan.insert { lastSpokenTextMemory = text }
         recordHistoryIfNeeded(result: result, insertedText: plan.insert)
         overlay.show(overlayState)
-        machine.finished(optionHeld: HotkeyMonitor.leftOptionHeldNow())
+        machine.finished(optionHeld: hotkeys.leftOptionHeldNow())
         updateTicking()
         refreshUI()
     }
@@ -663,15 +864,17 @@ final class AppController: NSObject {
             } else {
                 let cmd = r.command!
                 let inserter = ClipboardInserter(pasteboard: pasteboard, sendPaste: { PasteKeystroke.send() },
-                                                 wait: { try? await Task.sleep(for: $0) })
+                                                 wait: { try? await Task.sleep(for: $0) },
+                                                 hasFocusedTextInput: Self.hasFocusedTextInputOrUnknown)
                 let outcome = await inserter.insert(cmd.text)
                 let overlayState = DictationDecision.overlay(after: outcome, planned: .done)
                 if case .error(let m) = overlayState { lastError = m } else { lastError = nil }
+                lastSpokenTextMemory = cmd.text
                 overlay.show(overlayState)
                 recordCommandHistory(instruction: r.instruction, command: cmd, audioMs: r.audioMs)
             }
         }
-        machine.finished(optionHeld: HotkeyMonitor.leftOptionHeldNow())
+        machine.finished(optionHeld: hotkeys.leftOptionHeldNow())
         updateTicking()
         refreshUI()
     }

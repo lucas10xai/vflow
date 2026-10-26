@@ -131,6 +131,15 @@ public struct ModelStatus: Equatable, Sendable {
 public struct Health: Equatable, Sendable {
     public var version: String
     public var models: [ModelStatus]
+    /// `max_audio_seconds` ở `/healthz` nếu engine có báo (chưa có trong contract hiện tại ⇒ thường
+    /// `nil` — xem `RecordingLimit.resolve`, KHÔNG suy đoán khi vắng mặt).
+    public var maxAudioSeconds: Int?
+
+    public init(version: String, models: [ModelStatus], maxAudioSeconds: Int? = nil) {
+        self.version = version
+        self.models = models
+        self.maxAudioSeconds = maxAudioSeconds
+    }
 }
 
 public enum EngineAPI {
@@ -294,7 +303,10 @@ public enum EngineAPI {
             return .failure(.badResponse(status: status, detail: "thiếu trường cài đặt"))
         }
         let llmModel = obj["llm_model"] as? String
-        return .success(AppSettings(cloudLlm: cloudLlm, llmModel: llmModel, llmTimeoutMs: llmTimeoutMs, actionsEnabled: actionsEnabled))
+        // Khoá chưa tồn tại (engine cũ chưa có `silence_stop_seconds`) ⇒ coi là 0 (tắt), KHÔNG lỗi.
+        let silenceStopSeconds = obj["silence_stop_seconds"] as? Int ?? 0
+        return .success(AppSettings(cloudLlm: cloudLlm, llmModel: llmModel, llmTimeoutMs: llmTimeoutMs,
+                                    actionsEnabled: actionsEnabled, silenceStopSeconds: silenceStopSeconds))
     }
 
     // MARK: Command Mode
@@ -367,7 +379,7 @@ public enum EngineAPI {
             guard let id = m["id"] as? String else { return nil }
             return ModelStatus(id: id, kind: m["kind"] as? String ?? "?",
                                loaded: m["loaded"] as? Bool ?? false, reason: m["reason"] as? String)
-        })
+        }, maxAudioSeconds: obj["max_audio_seconds"] as? Int)
     }
 
     /// Dòng hiển thị trong menu cho một model.

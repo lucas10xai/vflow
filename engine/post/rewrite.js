@@ -1,6 +1,6 @@
 // Chế độ email: viết lại qua endpoint OpenAI-compatible (POST {url}/chat/completions), dùng chung
 // client llm.js. Chỉ gửi VĂN BẢN. `settings` (tuỳ chọn) áp cloud_llm/llm_model/llm_timeout_ms.
-import { callLlm } from './llm.js';
+import { callLlm, toneInstruction } from './llm.js';
 
 export const EMAIL_SYSTEM_PROMPT = [
   'Bạn là trợ lý biên tập thư công việc.',
@@ -23,9 +23,11 @@ export const REWRITE_ERRORS = ['timeout', 'network', 'empty', 'bad_response', 'n
  * @returns {Promise<{ text: string, error: null } | { text: null, error: string }>}
  */
 export async function rewriteEmail({ text, rewrite, settings, fetchImpl = fetch }) {
+  const toneLine = toneInstruction(settings?.tone);
+  const systemContent = toneLine ? `${EMAIL_SYSTEM_PROMPT}\n${toneLine}` : EMAIL_SYSTEM_PROMPT;
   return callLlm({
     messages: [
-      { role: 'system', content: EMAIL_SYSTEM_PROMPT },
+      { role: 'system', content: systemContent },
       { role: 'user', content: text },
     ],
     rewrite,

@@ -2,7 +2,7 @@
 // qua endpoint OpenAI-compatible, với GUARD sau LLM (bất biến 6, contract/engine-api.md) để chặn
 // mô hình thêm ý/số/thuật ngữ không có trong lời nói. Lỗi LLM hoặc guard từ chối ⇒ caller (index.js)
 // dùng văn bản dự phòng (dictionary + devspeech + clean), KHÔNG thử lại và KHÔNG trả thành công giả.
-import { callLlm } from './llm.js';
+import { callLlm, toneInstruction } from './llm.js';
 import { tokenize } from './text.js';
 
 export const TIDY_SYSTEM_PROMPT = [
@@ -44,8 +44,10 @@ const FEW_SHOT = [
  * @param {number} fewShotCount Số ví dụ few-shot đưa vào (mặc định toàn bộ). Chỉ dùng để ĐO ở
  * eval/tidy-bench.js (so sánh prompt ngắn/dài); vflow thật (index.js) luôn dùng mặc định.
  */
-function buildMessages(text, fewShotCount = FEW_SHOT.length) {
-  const messages = [{ role: 'system', content: TIDY_SYSTEM_PROMPT }];
+function buildMessages(text, fewShotCount = FEW_SHOT.length, tone) {
+  const toneLine = toneInstruction(tone);
+  const systemContent = toneLine ? `${TIDY_SYSTEM_PROMPT}\n${toneLine}` : TIDY_SYSTEM_PROMPT;
+  const messages = [{ role: 'system', content: systemContent }];
   for (const ex of FEW_SHOT.slice(0, fewShotCount)) {
     messages.push({ role: 'user', content: ex.user }, { role: 'assistant', content: ex.assistant });
   }
@@ -205,7 +207,7 @@ export function checkGuard(input, output, guard) {
  */
 export async function tidyRaw({ text, rewrite, settings, fetchImpl = fetch, fewShotCount }) {
   return callLlm({
-    messages: buildMessages(text, fewShotCount), rewrite, settings, fetchImpl,
+    messages: buildMessages(text, fewShotCount, settings?.tone), rewrite, settings, fetchImpl,
     temperature: 0, maxTokens: estimateMaxTokens(text),
   });
 }

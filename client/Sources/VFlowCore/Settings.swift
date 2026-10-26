@@ -8,12 +8,16 @@ public struct AppSettings: Equatable, Sendable {
     public var llmModel: String?
     public var llmTimeoutMs: Int
     public var actionsEnabled: Bool
+    /// Tự dừng ghi khi im lặng ở chế độ hands-free (0 = tắt, 1–60 giây); khoá chưa tồn tại ở engine
+    /// cũ ⇒ coi là 0 (xem `EngineAPI.parseSettings`).
+    public var silenceStopSeconds: Int
 
-    public init(cloudLlm: Bool, llmModel: String?, llmTimeoutMs: Int, actionsEnabled: Bool) {
+    public init(cloudLlm: Bool, llmModel: String?, llmTimeoutMs: Int, actionsEnabled: Bool, silenceStopSeconds: Int = 0) {
         self.cloudLlm = cloudLlm
         self.llmModel = llmModel
         self.llmTimeoutMs = llmTimeoutMs
         self.actionsEnabled = actionsEnabled
+        self.silenceStopSeconds = silenceStopSeconds
     }
 }
 
@@ -23,12 +27,15 @@ public struct SettingsPatch: Sendable {
     public var llmModel: String??  // Optional-of-Optional: nil = không đổi; .some(nil) = đặt về trống.
     public var llmTimeoutMs: Int?
     public var actionsEnabled: Bool?
+    public var silenceStopSeconds: Int?
 
-    public init(cloudLlm: Bool? = nil, llmModel: String?? = nil, llmTimeoutMs: Int? = nil, actionsEnabled: Bool? = nil) {
+    public init(cloudLlm: Bool? = nil, llmModel: String?? = nil, llmTimeoutMs: Int? = nil, actionsEnabled: Bool? = nil,
+                silenceStopSeconds: Int? = nil) {
         self.cloudLlm = cloudLlm
         self.llmModel = llmModel
         self.llmTimeoutMs = llmTimeoutMs
         self.actionsEnabled = actionsEnabled
+        self.silenceStopSeconds = silenceStopSeconds
     }
 
     public var jsonObject: [String: Any] {
@@ -37,6 +44,7 @@ public struct SettingsPatch: Sendable {
         if let v = llmModel { obj["llm_model"] = v ?? NSNull() }
         if let v = llmTimeoutMs { obj["llm_timeout_ms"] = v }
         if let v = actionsEnabled { obj["actions_enabled"] = v }
+        if let v = silenceStopSeconds { obj["silence_stop_seconds"] = v }
         return obj
     }
 }
@@ -58,6 +66,14 @@ public enum SettingsValidation {
     public static func validateModel(_ model: String?) -> Result<Void, SettingsValidationError> {
         guard let model, model.count > maxModelLen else { return .success(()) }
         return .failure(.init("Tên model tối đa \(maxModelLen) ký tự"))
+    }
+
+    /// `0` = tắt tự dừng khi im lặng; `1–60` = số giây (khớp luật engine `engine/post/settings.js`).
+    public static func validateSilenceStopSeconds(_ seconds: Int) -> Result<Void, SettingsValidationError> {
+        guard seconds >= 0, seconds <= 60 else {
+            return .failure(.init("Thời gian im lặng để tự dừng phải từ 0 (tắt) đến 60 giây"))
+        }
+        return .success(())
     }
 }
 

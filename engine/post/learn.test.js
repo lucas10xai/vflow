@@ -1,9 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createPostProcessor } from './index.js';
+import { createCorrectionsStore } from './learn.js';
 
 function setup(t) {
   const dir = mkdtempSync(join(tmpdir(), 'vflow-post-learn-'));
@@ -66,4 +67,90 @@ test('learnCorrection gộp biến thể trùng và bỏ biến thể đã có',
   assert.deepEqual(r.suggestions, []); // sửa hai chỗ chiếm quá nửa câu ⇒ coi là viết lại
   const r2 = p.dictionary.learnCorrection({ before: 'mở lại cái pun ri quét số năm hôm qua cho anh', after: 'mở lại cái pull request số năm hôm qua cho anh' });
   assert.deepEqual(r2.suggestions, [{ term: 'pull request', spoken: ['pun ri quét'] }]);
+});
+
+function corrTmp(t) {
+  const dir = mkdtempSync(join(tmpdir(), 'vflow-post-corrections-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  return join(dir, 'corrections.json');
+}
+
+test('corrections store: record() lưu cặp term/spoken ngắn, suggestions() chỉ trả khi xuất hiện ≥ 2 lần', (t) => {
+  const path = corrTmp(t);
+  const store = createCorrectionsStore({ path });
+  store.record('xu pa bết', 'Supabase');
+  assert.deepEqual(store.suggestions([]).suggestions, [], 'mới 1 lần, chưa đủ ngưỡng');
+  store.record('xu pa bết', 'Supabase');
+  const s = store.suggestions([]);
+  assert.deepEqual(s.suggestions, [{ term: 'Supabase', variants: ['xu pa bết'], count: 2, last_seen: s.suggestions[0].last_seen }]);
+  assert.ok(typeof s.suggestions[0].last_seen === 'string' && !Number.isNaN(Date.parse(s.suggestions[0].last_seen)));
+});
+
+test('corrections store: không lưu gì khi before/after là viết lại cả câu (dùng cùng bộ lọc suggestCorrections)', (t) => {
+  const store = createCorrectionsStore({ path: corrTmp(t) });
+  store.record('mở cái này ra rồi đóng cái kia lại luôn nhé', 'tắt hết mọi thứ và nghỉ ngơi đi thôi');
+  store.record('mở cái này ra rồi đóng cái kia lại luôn nhé', 'tắt hết mọi thứ và nghỉ ngơi đi thôi');
+  assert.deepEqual(store.suggestions([]).suggestions, []);
+});
+
+test('corrections store: bỏ gợi ý đã có trong từ điển (so theo term+spoken đã fold)', (t) => {
+  const store = createCorrectionsStore({ path: corrTmp(t) });
+  for (let i = 0; i < 3; i++) store.record('đi plôi', 'deploy');
+  assert.deepEqual(store.suggestions([{ term: 'deploy', spoken: ['đi plôi', 'đì ploi'] }]).suggestions, []);
+  assert.equal(store.suggestions([]).suggestions.length, 1, 'không có trong từ điển khác thì vẫn gợi ý');
+});
+
+test('corrections store: dismiss(term) ⇒ không hiện lại gợi ý của term đó nữa', (t) => {
+  const store = createCorrectionsStore({ path: corrTmp(t) });
+  for (let i = 0; i < 2; i++) store.record('xu pa bết', 'Supabase');
+  assert.equal(store.suggestions([]).suggestions.length, 1);
+  assert.deepEqual(store.dismiss('Supabase'), { ok: true });
+  assert.deepEqual(store.suggestions([]).suggestions, []);
+  // ghi thêm nữa sau khi dismiss vẫn không hiện lại.
+  store.record('xu pa bết', 'Supabase');
+  assert.deepEqual(store.suggestions([]).suggestions, []);
+});
+
+test('corrections store: tối đa 500 mục gần nhất, ghi 0600, không chứa cả câu gốc', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'vflow-post-corrections-cap-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const path = join(dir, 'corrections.json');
+  const store = createCorrectionsStore({ path });
+  for (let i = 0; i < 600; i++) store.record(`từ số ${i} lạ`, `TermNo${i}`);
+  const raw = JSON.parse(readFileSync(path, 'utf8'));
+  assert.ok(raw.entries.length <= 500, `phải <= 500 mục, được ${raw.entries.length}`);
+  if (process.platform !== 'win32') assert.equal(statSync(path).mode & 0o777, 0o600);
+});
+
+test('corrections store: tệp hỏng ⇒ lỗi rõ ràng, không âm thầm coi là rỗng', (t) => {
+  const path = corrTmp(t);
+  writeFileSync(path, '{ bad json');
+  assert.throws(() => createCorrectionsStore({ path }), { code: 'internal' });
+});
+
+test('createPostProcessor + corrections: learnCorrection ghi vào corrections (khi learn_from_edits bật) rồi suggestions()/dismissSuggestion() hoạt động qua post.dictionary', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'vflow-post-learn-wired-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const dictionaryPath = join(dir, 'dictionary.json');
+  writeFileSync(dictionaryPath, JSON.stringify({ entries: [] }));
+  const correctionsPath = join(dir, 'corrections.json');
+  const corrections = createCorrectionsStore({ path: correctionsPath });
+  const p = createPostProcessor({ dictionaryPath, corrections, log: () => {} });
+  p.dictionary.learnCorrection({ before: 'xu pa bết', after: 'Supabase' });
+  p.dictionary.learnCorrection({ before: 'xu pa bết', after: 'Supabase' });
+  assert.deepEqual(p.dictionary.suggestions(), { suggestions: [{ term: 'Supabase', variants: ['xu pa bết'], count: 2, last_seen: p.dictionary.suggestions().suggestions[0].last_seen }] });
+  assert.deepEqual(p.dictionary.dismissSuggestion('Supabase'), { ok: true });
+  assert.deepEqual(p.dictionary.suggestions(), { suggestions: [] });
+});
+
+test('createPostProcessor + corrections: learn_from_edits=false (qua settings) ⇒ learnCorrection KHÔNG ghi vào corrections', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'vflow-post-learn-off-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const dictionaryPath = join(dir, 'dictionary.json');
+  writeFileSync(dictionaryPath, JSON.stringify({ entries: [] }));
+  const corrections = createCorrectionsStore({ path: join(dir, 'corrections.json') });
+  const settings = { get: () => ({ learn_from_edits: false }) };
+  const p = createPostProcessor({ dictionaryPath, corrections, settings, log: () => {} });
+  for (let i = 0; i < 3; i++) p.dictionary.learnCorrection({ before: 'xu pa bết', after: 'Supabase' });
+  assert.deepEqual(p.dictionary.suggestions(), { suggestions: [] });
 });

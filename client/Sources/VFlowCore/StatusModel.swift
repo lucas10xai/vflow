@@ -133,11 +133,14 @@ public struct StatusModel: Equatable, Sendable {
     /// (không áp dụng, hoặc đã xong êm từ trước); có giá trị khi đang chép hoặc chép lỗi, hiện ở
     /// tab Tổng quan.
     public var modelBootstrapStatus: String?
+    /// Thẻ nhắc "biểu tượng thanh menu bị che" ở Tổng quan — `nil` = không hiện (không bị che, hoặc
+    /// đã đóng hôm nay — xem `MenuBarOcclusionReminder`); có giá trị = thông điệp cần hiện.
+    public var menuBarIconReminder: String?
 
     public init(engineSummary: String, models: [ModelStatus], permissions: [PermissionItem], mode: DictationMode,
                 lastError: String?, canRetryLast: Bool, launchAtLogin: Bool, conflictWarning: String?,
                 hotkeysActive: Bool, engineHasFailed: Bool, engineReady: Bool, engineBlocked: Bool,
-                modelBootstrapStatus: String? = nil) {
+                modelBootstrapStatus: String? = nil, menuBarIconReminder: String? = nil) {
         self.engineSummary = engineSummary
         self.models = models
         self.permissions = permissions
@@ -151,6 +154,7 @@ public struct StatusModel: Equatable, Sendable {
         self.engineReady = engineReady
         self.engineBlocked = engineBlocked
         self.modelBootstrapStatus = modelBootstrapStatus
+        self.menuBarIconReminder = menuBarIconReminder
     }
 
     public var missingPermissions: [PermissionItem] { permissions.filter { !$0.granted } }
@@ -158,7 +162,7 @@ public struct StatusModel: Equatable, Sendable {
     public static func build(engineState: EngineState, configError: ClientError?, lastError: String?,
                               permissions: [PermissionItem], mode: DictationMode, canRetryLast: Bool,
                               launchAtLogin: Bool, conflictWarning: String?, hotkeysActive: Bool,
-                              modelBootstrapStatus: String? = nil) -> StatusModel {
+                              modelBootstrapStatus: String? = nil, menuBarIconReminder: String? = nil) -> StatusModel {
         let (summary, models) = engineSummaryAndModels(engineState: engineState, configError: configError)
         let failed: Bool
         if case .failed = engineState { failed = true } else { failed = false }
@@ -169,7 +173,8 @@ public struct StatusModel: Equatable, Sendable {
         return StatusModel(engineSummary: summary, models: models, permissions: permissions, mode: mode,
                             lastError: lastError, canRetryLast: canRetryLast, launchAtLogin: launchAtLogin,
                             conflictWarning: conflictWarning, hotkeysActive: hotkeysActive, engineHasFailed: failed,
-                            engineReady: ready, engineBlocked: blocked, modelBootstrapStatus: modelBootstrapStatus)
+                            engineReady: ready, engineBlocked: blocked, modelBootstrapStatus: modelBootstrapStatus,
+                            menuBarIconReminder: menuBarIconReminder)
     }
 
     static func engineSummaryAndModels(engineState: EngineState, configError: ClientError?) -> (String, [ModelStatus]) {

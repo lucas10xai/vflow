@@ -115,6 +115,37 @@ test('timeout: model quá chậm', async (t) => {
   assert.ok(Date.now() - started < 2000);
 });
 
+test('tone: formal/casual thêm một dòng hướng dẫn phong cách vào system prompt, neutral không thêm gì', async (t) => {
+  const srv = await startServer(t);
+  const keyFile = setup(t);
+  for (const tone of [undefined, 'neutral', 'formal', 'casual']) {
+    await tidyText({
+      text: RAW, rewrite: { url: srv.url, model: 'ok', timeout_ms: 500, key_file: keyFile },
+      settings: tone ? { tone } : undefined, guard: GUARD,
+    });
+  }
+  const systems = srv.requests.map((r) => r.json.messages[0].content);
+  assert.equal(systems[0], systems[1], 'không truyền tone và tone="neutral" phải giống nhau (không thêm dòng)');
+  assert.ok(systems[0].startsWith('Bạn làm gọn lại'), 'prompt gốc không đổi');
+  assert.ok(!systems[0].includes('trang trọng') && !systems[0].includes('gần gũi'));
+  assert.ok(systems[2].includes('trang trọng'), 'formal phải thêm dòng trang trọng');
+  assert.ok(systems[3].includes('gần gũi'), 'casual phải thêm dòng gần gũi');
+  // Phần còn lại của prompt (quy tắc KHÔNG được làm, bao gồm guard) không đổi theo tone.
+  for (const s of systems) assert.ok(s.includes('KHÔNG đổi, dịch hay diễn giải'));
+});
+
+test('tone KHÔNG ảnh hưởng guard: đầu ra thêm nội dung vẫn bị guard_rejected dù đặt formal/casual', async (t) => {
+  const srv = await startServer(t);
+  const keyFile = setup(t);
+  for (const tone of ['formal', 'casual']) {
+    const r = await tidyText({
+      text: RAW, rewrite: { url: srv.url, model: 'hallucinate', timeout_ms: 500, key_file: keyFile },
+      settings: { tone }, guard: GUARD,
+    });
+    assert.deepEqual(r, { text: null, error: 'guard_rejected' }, tone);
+  }
+});
+
 test('cloud_llm=false ⇒ cloud_disabled, không gọi mạng', async (t) => {
   const srv = await startServer(t);
   const keyFile = setup(t);

@@ -32,6 +32,9 @@ public enum PasteOutcome: Equatable, Sendable {
     case pastedNotRestoredUserChanged
     /// Không tổng hợp được ⌘V (thiếu quyền) ⇒ chữ để lại trên clipboard.
     case pasteFailedTextLeftOnClipboard
+    /// Không có phần tử nhập chữ nào đang được focus (theo Accessibility) ⇒ không thử dán, giữ
+    /// nguyên chữ trên clipboard, KHÔNG khôi phục clipboard cũ.
+    case noFocusedInputTextKeptOnClipboard
     /// Văn bản rỗng ⇒ không đụng clipboard.
     case nothingToPaste
 }
@@ -49,19 +52,29 @@ public struct ClipboardInserter {
     /// Tổng hợp ⌘V; trả false nếu không gửi được.
     public let sendPaste: () -> Bool
     public let wait: (Duration) async -> Void
+    /// Có phần tử nhập chữ đang được focus (theo Accessibility) không — mặc định `true` (giữ đúng
+    /// hành vi cũ khi không truyền vào, ví dụ ở test hiện có).
+    public let hasFocusedTextInput: () -> Bool
 
     public init(pasteboard: PasteboardStore,
                 restoreDelay: Duration = defaultRestoreDelay,
                 sendPaste: @escaping () -> Bool,
-                wait: @escaping (Duration) async -> Void) {
+                wait: @escaping (Duration) async -> Void,
+                hasFocusedTextInput: @escaping () -> Bool = { true }) {
         self.pasteboard = pasteboard
         self.restoreDelay = restoreDelay
         self.sendPaste = sendPaste
         self.wait = wait
+        self.hasFocusedTextInput = hasFocusedTextInput
     }
 
     public func insert(_ text: String) async -> PasteOutcome {
         guard !text.isEmpty else { return .nothingToPaste }
+        guard hasFocusedTextInput() else {
+            // Không có nơi nào để nhận chữ: giữ nguyên trên clipboard, không thử ⌘V, không khôi phục.
+            _ = pasteboard.writeText(text, markerTypes: Self.markerTypes)
+            return .noFocusedInputTextKeptOnClipboard
+        }
         let saved = pasteboard.snapshot()
         let ours = pasteboard.writeText(text, markerTypes: Self.markerTypes)
         guard sendPaste() else { return .pasteFailedTextLeftOnClipboard }

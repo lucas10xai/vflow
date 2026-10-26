@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { encodeWav } from '../engine/stt/audio.js';
+import { DEFAULT_SETTINGS } from '../engine/post/settings.js';
 
 const CLI = fileURLToPath(new URL('./vflow.js', import.meta.url));
 let home;
@@ -88,7 +89,7 @@ test('snippets list|add|remove đọc/ghi ~/.vflow/snippets.json qua VFLOW_HOME'
 test('settings get|set đọc/ghi ~/.vflow/config.json qua VFLOW_HOME, kiểm giá trị, giữ khoá khác', () => {
   fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({ default_model: 'zipformer-vi-30m' }));
   const get0 = JSON.parse(run(['settings', 'get']).out);
-  assert.deepEqual(get0, { cloud_llm: true, llm_model: null, llm_timeout_ms: 8000, actions_enabled: true });
+  assert.deepEqual(get0, DEFAULT_SETTINGS);
   const set = run(['settings', 'set', 'cloud_llm', 'false']);
   assert.equal(set.code, 0, set.err);
   assert.equal(JSON.parse(set.out).cloud_llm, false);

@@ -34,6 +34,8 @@ public enum DictationDecision {
         case .pastedNotRestoredUserChanged: return planned
         case .pasteFailedTextLeftOnClipboard:
             return .error("Không dán được (thiếu quyền Trợ năng); chữ đã nằm trong clipboard, bấm ⌘V")
+        case .noFocusedInputTextKeptOnClipboard:
+            return .notice("Đã chép — bấm ⌘V")
         }
     }
 }

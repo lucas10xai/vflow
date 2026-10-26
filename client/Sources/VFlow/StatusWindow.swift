@@ -54,7 +54,7 @@ final class StatusWindowController: NSObject, NSWindowDelegate {
     func update(_ model: StatusModel) { viewModel.model = model }
 
     /// Chọn mục thanh bên KHÔNG hiện cửa sổ — dùng cho test hồi quy bố cục & `--snapshot` (U3), nơi
-    /// `show(tab:)` không phù hợp vì nó `startPermissionPolling()`/ghi `VFLOW_PRINT_WINDOW_RECT`.
+    /// `show(tab:)` không phù hợp vì nó `startPermissionPolling()`.
     func selectTabForTesting(_ tab: MainTab) { viewModel.selectedTab = tab }
 
     /// `--render-offscreen tudien:them-loi`: mở sẵn sheet Thêm mục từ điển với lỗi hợp lệ (có thuật
@@ -76,7 +76,6 @@ final class StatusWindowController: NSObject, NSWindowDelegate {
         guard !OffscreenRender.enabled else { return }
         window.makeKeyAndOrderFront(nil)
         startPermissionPolling()
-        WindowRectDebug.printIfRequested(window, label: "main-\(viewModel.selectedTab.rawValue)", forceHeight: 680)
     }
 
     /// `--render-offscreen`: chụp cửa sổ chính THẬT (`window`/`MainWindowView`, đúng
@@ -182,14 +181,23 @@ struct MainWindowView: View {
                 Text(viewModel.selectedTab.title).font(.headline)
             }
         }
+        // (b) Nút bánh răng Cài đặt ở thanh công cụ, phía phải — cùng cửa sổ Cài đặt duy nhất với
+        // nút ở chân thanh bên/menu (xem mục 5 trong yêu cầu).
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button { controller.openSettingsWindow() } label: { Image(systemName: "gearshape") }
+                    .help("Cài đặt… (⌘,)")
+                    .accessibilityLabel("Cài đặt")
+            }
+        }
         .background(keyboardShortcuts)
         .defaultAppStorage(controller.appStorageDefaults)
     }
 
     private var sidebar: some View {
-        SidebarContent(selectedTab: viewModel.selectedTab, missingPermissionsCount: model.missingPermissions.count) { tab in
-            viewModel.selectedTab = tab
-        }
+        SidebarContent(selectedTab: viewModel.selectedTab, missingPermissionsCount: model.missingPermissions.count,
+                       onSelect: { tab in viewModel.selectedTab = tab },
+                       onOpenSettings: { controller.openSettingsWindow() })
     }
 
     /// ⌘1…⌘4 chuyển mục thanh bên (nút ẩn, chỉ mang phím tắt — `MainTab.keyboardShortcutDigit`).
@@ -218,6 +226,7 @@ private struct SidebarContent: View {
     let selectedTab: MainTab
     let missingPermissionsCount: Int
     let onSelect: (MainTab) -> Void
+    let onOpenSettings: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -234,6 +243,26 @@ private struct SidebarContent: View {
                 }
             }
             Spacer(minLength: 0)
+            Divider().padding(.horizontal, Theme.Spacing.sm)
+            // (a) Nút bánh răng Cài đặt cố định ở chân thanh bên (xem mục 5 trong yêu cầu) — cùng
+            // cửa sổ Cài đặt duy nhất với nút thanh công cụ/menu, không nhân bản.
+            Button(action: onOpenSettings) {
+                HStack(spacing: Theme.Spacing.sm) {
+                    Image(systemName: "gearshape").frame(width: 18).font(.body)
+                    Text("Cài đặt").font(.body)
+                    Spacer()
+                    Text("⌘,").font(.caption).foregroundStyle(.tertiary)
+                }
+                .padding(.horizontal, Theme.Spacing.sm)
+                .padding(.vertical, 6)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, Theme.Spacing.sm)
+            .padding(.top, 2)
+            .accessibilityLabel("Cài đặt")
+            .accessibilityHint("⌘,")
         }
         .padding(.vertical, Theme.Spacing.sm)
         .frame(maxHeight: .infinity, alignment: .top)

@@ -130,17 +130,19 @@ async function cmdServe(args) {
   const { createPostProcessor } = await import('../engine/post/index.js');
   const { createSnippetStore } = await import('../engine/post/snippets.js');
   const { createSettingsStore } = await import('../engine/post/settings.js');
+  const { createStatsStore } = await import('../engine/post/stats.js');
+  const { createCorrectionsStore } = await import('../engine/post/learn.js');
   const snippets = createSnippetStore({ path: path.join(home, 'snippets.json') });
   const settings = createSettingsStore({ configPath: path.join(home, 'config.json') });
-  // Lưu ý: createPostProcessor hiện tại có thể chưa nhận snippets/settings (đang ghép dần với
-  // worker khác); truyền sẵn để có hiệu lực ngay khi tham số đó được thêm, không gây lỗi nếu chưa.
+  const log = (e) => err(JSON.stringify({ ts: new Date().toISOString(), ...e }));
+  const stats = createStatsStore({ path: path.join(home, 'stats.json'), historyPath: path.join(home, 'history.jsonl'), log });
+  const corrections = createCorrectionsStore({ path: path.join(home, 'corrections.json'), log });
   const post = createPostProcessor({
     dictionaryPath: path.join(home, 'dictionary.json'), config, fetchImpl: fetch, now: () => new Date(),
-    snippets, settings,
+    snippets, settings, corrections,
   });
   const stt = createStt({ home, config });
-  const log = (e) => err(JSON.stringify({ ts: new Date().toISOString(), ...e }));
-  const server = createServer({ stt, post, token, snippets, settings, log });
+  const server = createServer({ stt, post, token, snippets, settings, stats, home, log });
   const real = await listen(server, port);
   err(`vflow engine đang nghe http://127.0.0.1:${real} (token: ${path.join(home, 'token')}${created ? ', vừa tạo' : ''})`);
   try {
