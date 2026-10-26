@@ -53,9 +53,55 @@ test('đặt tên biến chèn giữa câu: dừng ở dấu câu, phần trư�
   assert.equal(r.text, 'tạo biến a_b_c, rồi dùng nó');
 });
 
-test('đặt tên biến không có dấu câu phân tách: nuốt luôn phần còn lại của câu (giới hạn đã biết)', () => {
+test('đặt tên biến không có dấu câu phân tách: dừng ở từ nối "rồi", giữ nguyên phần sau', () => {
   const r = applyDevspeech('viết thường nối gạch dưới a b c rồi dùng nó');
-  assert.equal(r.text, 'a_b_c_rôi_dung_no');
+  assert.equal(r.text, 'a_b_c rồi dùng nó');
+});
+
+test('bug thật: "sửa cái biến viết thường nối gạch dưới user name rồi commit lại" không nuốt "rồi commit lại"', () => {
+  const r = applyDevspeech('sửa cái biến viết thường nối gạch dưới user name rồi commit lại');
+  assert.equal(r.text, 'sửa cái biến user_name rồi commit lại');
+});
+
+test('đặt tên biến dừng ở các từ nối/chuyển ý thông dụng khác (và, thì, xong, để, cho, nhé, nữa, hay, hoặc, là, mà, nhưng, sau đó)', () => {
+  const CASES = [
+    ['viết thường nối gạch dưới a b và c đi', 'a_b và c đi'],
+    ['viết thường nối gạch dưới a b thì sao', 'a_b thì sao'],
+    ['viết thường nối gạch dưới a b xong rồi', 'a_b xong rồi'],
+    ['viết thường nối gạch dưới a b để dùng', 'a_b để dùng'],
+    ['viết thường nối gạch dưới a b cho tôi', 'a_b cho tôi'],
+    ['viết thường nối gạch dưới a b nhé anh', 'a_b nhé anh'],
+    ['viết thường nối gạch dưới a b nữa thôi', 'a_b nữa thôi'],
+    ['viết thường nối gạch dưới a b hay là', 'a_b hay là'],
+    ['viết thường nối gạch dưới a b hoặc c', 'a_b hoặc c'],
+    ['viết thường nối gạch dưới a b là xong', 'a_b là xong'],
+    ['viết thường nối gạch dưới a b mà thôi', 'a_b mà thôi'],
+    ['viết thường nối gạch dưới a b nhưng thôi', 'a_b nhưng thôi'],
+    ['viết thường nối gạch dưới a b sau đó dùng', 'a_b sau đó dùng'],
+  ];
+  for (const [input, expected] of CASES) assert.equal(applyDevspeech(input).text, expected, input);
+});
+
+test('đặt tên biến: chỉ nuốt tối đa 6 từ, từ thứ 7 trở đi giữ nguyên dù không gặp từ nối/dấu câu', () => {
+  const r = applyDevspeech('viết thường nối gạch dưới a b c d e f g h i');
+  assert.equal(r.text, 'a_b_c_d_e_f g h i');
+});
+
+test('đặt tên biến: đúng 6 từ không có phần dư vẫn ra tên đủ 6 từ', () => {
+  const r = applyDevspeech('viết thường nối gạch dưới a b c d e f');
+  assert.equal(r.text, 'a_b_c_d_e_f');
+});
+
+test('ca nhập nhằng: từ nối xuất hiện ngay sau cụm trigger (không có đối số nào trước nó) ⇒ không áp quy tắc, giữ nguyên văn', () => {
+  for (const input of ['camel case rồi thôi', 'pascal case là xong']) {
+    assert.equal(applyDevspeech(input).text, input, input);
+  }
+});
+
+test('ca nhập nhằng: từ nối đứng xa sau nhiều từ khác không bị hiểu lầm là một phần tên biến ở câu không có cụm trigger', () => {
+  for (const input of ['anh làm xong rồi báo em nhé', 'cái này để tôi làm cho']) {
+    assert.equal(applyDevspeech(input).text, input, input);
+  }
 });
 
 test('applied ghi type devspeech', () => {

@@ -1,6 +1,20 @@
 // Quy tắc đọc kiểu lập trình (chế độ dev, và dùng trong tidy trước khi gửi LLM). Thuần quy tắc,
 // không gọi gì ra ngoài. Bảng cụm->ký hiệu khai báo ở DATA bên dưới, không rải mã rải rác.
+import { readFileSync } from 'node:fs';
 import { fold, tokenize, capitalize } from './text.js';
+
+/** @typedef {{ compound_max_words: number, compound_stop_words: string[] }} DevspeechData */
+
+/** @returns {DevspeechData} */
+function loadDevspeechData(path = new URL('./devspeech.data.json', import.meta.url)) {
+  return JSON.parse(readFileSync(path, 'utf8'));
+}
+
+const DATA = loadDevspeechData();
+/** Số từ tối đa một cụm đặt tên biến nuốt (xem devspeech.data.json). */
+const COMPOUND_MAX_WORDS = DATA.compound_max_words;
+/** Từ nối/chuyển ý thông dụng: cụm đặt tên biến dừng NGAY trước từ này, giữ nguyên văn phần sau. */
+const COMPOUND_STOP_WORDS = DATA.compound_stop_words.map((p) => p.split(' ').map(fold));
 
 /** Cụm cố định -> ký hiệu. Sắp theo số từ giảm dần để khớp cụm dài nhất trước. */
 const SYMBOL_RULES = [
@@ -95,6 +109,16 @@ function matchSymbolRule(toks, i) {
 /** Cuối một mệnh đề: dấu câu giữa hai token kề nhau. */
 const CLAUSE_END_RE = /[.,!?;:…]/;
 
+/** Từ nối/chuyển ý (COMPOUND_STOP_WORDS) bắt đầu đúng tại vị trí j? @param {import('./text.js').Token[]} toks @param {number} j */
+function matchStopWordAt(toks, j) {
+  for (const sw of COMPOUND_STOP_WORDS) {
+    const n = sw.length;
+    if (j + n > toks.length) continue;
+    if (sw.every((w, k) => toks[j + k].folded === w)) return true;
+  }
+  return false;
+}
+
 /** @param {import('./text.js').Token[]} toks @param {number} i @param {string} text */
 function matchCompoundRule(toks, i, text) {
   for (const rule of COMPOUND_RULES) {
@@ -106,6 +130,8 @@ function matchCompoundRule(toks, i, text) {
     const words = [];
     for (let j = argsStart; j < toks.length; j++) {
       if (j > argsStart && CLAUSE_END_RE.test(text.slice(toks[j - 1].end, toks[j].start))) break;
+      if (words.length >= COMPOUND_MAX_WORDS) break;
+      if (matchStopWordAt(toks, j)) break;
       words.push(toks[j].folded);
       end = j;
     }

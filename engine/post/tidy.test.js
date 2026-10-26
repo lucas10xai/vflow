@@ -6,7 +6,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
-import { tidyText, checkGuard } from './tidy.js';
+import { tidyText, checkGuard, vietnameseNumberValues } from './tidy.js';
 
 const CANARY = `vflow-canary-tidy-${randomBytes(8).toString('hex')}`;
 const GUARD = { min_token_overlap: 0.85, min_length_ratio: 0.3, max_length_ratio: 1.4 };
@@ -152,4 +152,36 @@ test('checkGuard: backtrack hợp lệ (bỏ phần nói nhầm) KHÔNG bị t�
   const input = 'em sẽ gửi báo cáo vào thứ sáu à nhầm thứ năm cho anh';
   const output = 'Em sẽ gửi báo cáo vào thứ Năm cho anh.';
   assert.equal(checkGuard(input, output, GUARD), true);
+});
+
+test('vietnameseNumberValues: số đếm, hàng chục, trăm, nghìn, thập phân tách bởi "chấm"', () => {
+  assert.deepEqual([...vietnameseNumberValues('mười')].sort((a, b) => a - b), [10]);
+  assert.ok(vietnameseNumberValues('hai mươi lăm').has(25));
+  assert.ok(vietnameseNumberValues('ba mươi').has(30));
+  assert.ok(vietnameseNumberValues('một trăm').has(100));
+  assert.ok(vietnameseNumberValues('một trăm linh năm').has(105));
+  assert.ok(vietnameseNumberValues('hai nghìn không trăm hai mươi sáu').has(2026));
+  const hcb = vietnameseNumberValues('hai chấm ba');
+  assert.ok(hcb.has(2) && hcb.has(3), '"chấm" không thuộc số nào ⇒ tách "hai"=2 và "ba"=3 riêng');
+  assert.deepEqual([...vietnameseNumberValues('deploy production')], []);
+});
+
+test('checkGuard: cho phép LLM chuyển số-chữ hợp lệ sang số-số (hàng chục, trăm, thập phân)', () => {
+  const CASES = [
+    ['tôi có hai mươi lăm con gà', 'Tôi có 25 con gà.'],
+    ['phiên bản hai chấm ba vừa ra mắt', 'Phiên bản 2.3 vừa ra mắt.'],
+    ['deploy xong lúc ba mươi phút', 'Deploy xong lúc 30 phút.'],
+    ['năm nay là hai nghìn không trăm hai mươi sáu', 'Năm nay là 2026.'],
+  ];
+  for (const [input, output] of CASES) assert.equal(checkGuard(input, output, GUARD), true, input);
+});
+
+test('checkGuard: vẫn chặn số KHÔNG có nguồn trong lời nói dù tỉ lệ overlap cao (cả khi gần một số-chữ có thật)', () => {
+  const CASES = [
+    ['tôi có hai mươi lăm con gà', 'Tôi có 26 con gà.'], // gần 25 nhưng không phải 25
+    ['tôi có hai mươi lăm con gà', 'Tôi có 999 con gà.'],
+    ['deploy bản mới hôm nay', 'Deploy bản 2.3 hôm nay.'], // input không nói số nào cả
+    ['phiên bản ba', 'Phiên bản 30.'], // "ba"=3 có nguồn nhưng "30" (ba mươi) thì không
+  ];
+  for (const [input, output] of CASES) assert.equal(checkGuard(input, output, GUARD), false, input);
 });

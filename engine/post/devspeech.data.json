@@ -1,0 +1,20 @@
+{
+  "_note": "Giới hạn cụm đặt tên biến (viết thường nối gạch dưới/viết hoa nối/camel case/pascal case/kebab case) trong devspeech.js: chỉ nuốt tối đa compound_max_words từ phía sau cụm trigger, và dừng sớm hơn nếu gặp một trong compound_stop_words (từ nối/chuyển ý thông dụng, so khớp đã bỏ dấu thanh qua fold()) hoặc dấu câu. Tránh nuốt hết phần còn lại của câu khi người dùng không ngắt câu sau khi đặt tên biến.",
+  "compound_max_words": 6,
+  "compound_stop_words": [
+    "rồi",
+    "và",
+    "thì",
+    "sau đó",
+    "xong",
+    "để",
+    "cho",
+    "nhé",
+    "nữa",
+    "hay",
+    "hoặc",
+    "là",
+    "mà",
+    "nhưng"
+  ]
+}

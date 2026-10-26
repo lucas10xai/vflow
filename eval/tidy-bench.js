@@ -12,11 +12,19 @@ import { tidyRaw, checkGuard } from '../engine/post/tidy.js';
 import { DEFAULT_CONFIG, expandHome } from '../engine/post/config.js';
 import { percentile } from './metrics.js';
 
-const CANDIDATES = ['ag/gemini-3.8-flash', 'ag/gemini-3.8-flash-low', 'gh/claude-haiku-4.5', 'deepseek-v4-flash', 'gh/gpt-5.4-mini-free-auto'];
+/**
+ * Dò qua eval/tidy/discover-models.js (2026-10-26, v2 — xem eval/tidy/results-2026-10-26-v2.md mục
+ * dò model để biết chi tiết đầy đủ, kể cả các model trông như "gọi được" nhưng thật ra chỉ trả một
+ * thông báo ngừng hoạt động cố định — KHÔNG phải phản hồi thật): trong ~36 model ứng viên thử, chỉ
+ * 3 gọi được thật qua 9Router hiện tại (`ag/gemini-3-flash`, `ag/gemini-3.8-flash-low`,
+ * `ag/gemini-3.8-flash`); `ag/gemini-3.8-flash` (không có hậu tố mức suy luận) bị loại khỏi danh
+ * sách đo ở đây vì quá chậm dù đã tối ưu (9/30 ca timeout 8s — xem báo cáo), chỉ còn lại 2.
+ */
+const CANDIDATES = ['ag/gemini-3-flash', 'ag/gemini-3.8-flash-low'];
 
 /** @param {string[]} argv */
 function parseArgs(argv) {
-  const out = { out: fileURLToPath(new URL('./tidy/results-2026-10-26.md', import.meta.url)), maxRequests: 120 };
+  const out = { out: fileURLToPath(new URL('./tidy/results-2026-10-26-v2.md', import.meta.url)), maxRequests: 120 };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--out') out.out = argv[++i];
     else if (argv[i] === '--max-requests') out.maxRequests = Number(argv[++i]);
@@ -115,10 +123,10 @@ async function main() {
     lines.push(
       `| ${model} | ${s.n} | ${errStr} | ${(guardRate * 100).toFixed(0)}% | ${(expRate * 100).toFixed(0)}% | ${s.answeredQuestion} | ${fmtLatency(s.latenciesOk)} |`,
     );
-    scored.push({ model, guardRate, expRate, p95, qualifies: guardRate >= 0.9 && expRate >= 0.8 && p95 !== null && p95 < 4000 });
+    scored.push({ model, guardRate, expRate, p95, qualifies: guardRate >= 0.9 && expRate >= 0.8 && p95 !== null && p95 < 3000 });
   }
   lines.push('');
-  lines.push(`Tiêu chí chọn mặc định: qua guard ≥ 90%, đạt kỳ vọng ≥ 80%, p95 < 4000ms (xem eval/tidy-bench.js).`);
+  lines.push(`Tiêu chí chọn mặc định: qua guard ≥ 90%, đạt kỳ vọng ≥ 80%, p95 < 3000ms (xem eval/tidy-bench.js).`);
   const winners = scored.filter((s) => s.qualifies).sort((a, b) => b.expRate - a.expRate || (a.p95 ?? 0) - (b.p95 ?? 0));
   lines.push('');
   if (winners.length > 0) {

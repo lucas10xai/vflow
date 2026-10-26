@@ -73,34 +73,48 @@ function sendJson(res, status, body) {
 
 /**
  * Đọc thân yêu cầu vào RAM với trần byte.
+ *
+ * Khi `Content-Length` tự khai đã vượt trần, client coi như đã tự thừa nhận vi phạm nên trả lỗi
+ * ngay (không cần đợi — client có thể không gửi đủ số byte đã khai, chờ sẽ treo tới hết
+ * `requestTimeout`). Khi KHÔNG biết trước độ dài (chunked) và việc vượt trần chỉ phát hiện được
+ * lúc đang đọc, phải rút hết phần thân còn lại (có giới hạn trên) RỒI MỚI báo lỗi: trả 413 và đóng
+ * kết nối khi client còn đang gửi dở (ví dụ do backpressure trên loopback) khiến client nhận
+ * ECONNRESET/EPIPE ngẫu nhiên — không phải lỗi logic, mà do đóng socket trước khi đọc hết dữ liệu
+ * đang bay trên dây. Rút cho hết rồi đóng tránh hẳn race này.
  * @param {http.IncomingMessage} req @param {number} limit
  * @returns {Promise<Uint8Array>}
  */
 function readBody(req, limit) {
   return new Promise((resolve, reject) => {
+    const tooLarge = () => new HttpError('payload_too_large', `Thân yêu cầu quá lớn (tối đa ${limit} byte).`);
     const declared = Number(req.headers['content-length']);
     if (Number.isFinite(declared) && declared > limit) {
-      reject(new HttpError('payload_too_large', `Thân yêu cầu quá lớn (tối đa ${limit} byte).`));
+      reject(tooLarge());
       req.resume();
       return;
     }
     /** @type {Buffer[]} */
     const chunks = [];
     let size = 0;
-    let failed = false;
+    let overflowed = false;
+    let settled = false;
+    const finish = (fn) => { if (!settled) { settled = true; fn(); } };
+    // Rút phần vượt trần có giới hạn trên: không buffer vô hạn nếu client chunked gửi mãi.
+    const DRAIN_LIMIT = Math.max(limit * 4, 8 * 1024 * 1024);
+    let drained = 0;
     req.on('data', (c) => {
-      if (failed) return;
-      size += c.length;
-      if (size > limit) {
-        failed = true;
-        chunks.length = 0;
-        reject(new HttpError('payload_too_large', `Thân yêu cầu quá lớn (tối đa ${limit} byte).`));
+      if (overflowed) {
+        drained += c.length;
+        if (drained > DRAIN_LIMIT) { finish(() => reject(tooLarge())); req.destroy(); }
         return;
       }
+      size += c.length;
+      if (size > limit) { overflowed = true; chunks.length = 0; drained = size; return; }
       chunks.push(c);
     });
-    req.on('end', () => { if (!failed) resolve(new Uint8Array(Buffer.concat(chunks))); });
-    req.on('error', (e) => { if (!failed) { failed = true; reject(e); } });
+    req.on('end', () => finish(() => (overflowed ? reject(tooLarge()) : resolve(new Uint8Array(Buffer.concat(chunks))))));
+    req.on('error', (e) => finish(() => (overflowed ? reject(tooLarge()) : reject(e))));
+    req.on('close', () => finish(() => reject(overflowed ? tooLarge() : new HttpError('bad_request', 'Kết nối đóng giữa chừng khi đang đọc thân yêu cầu.'))));
   });
 }
 

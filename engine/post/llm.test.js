@@ -160,6 +160,15 @@ test('cloud_llm=false ⇒ cloud_disabled, KHÔNG gọi mạng', async (t) => {
   assert.equal(srv.requests.length, 0);
 });
 
+test('maxTokens: chỉ gửi max_tokens khi được truyền, không có mặc định ép buộc', async (t) => {
+  const srv = await startServer(t);
+  const keyFile = setup(t);
+  await callLlm({ messages: MSGS, rewrite: { url: srv.url, model: 'json_ok', timeout_ms: 500, key_file: keyFile } });
+  assert.equal('max_tokens' in srv.requests[0].json, false);
+  await callLlm({ messages: MSGS, rewrite: { url: srv.url, model: 'json_ok', timeout_ms: 500, key_file: keyFile }, maxTokens: 123 });
+  assert.equal(srv.requests[1].json.max_tokens, 123);
+});
+
 test('settings.llm_model ưu tiên hơn rewrite.model', async (t) => {
   const srv = await startServer(t);
   const keyFile = setup(t);

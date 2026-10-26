@@ -29,10 +29,10 @@ function readKey(keyFile) {
 /**
  * Gọi endpoint OpenAI-compatible. Không ném lỗi: mọi thất bại trả về `{ text: null, error }`.
  * @param {{ messages: {role:string, content:string}[], rewrite: RewriteConfig, settings?: LlmSettings,
- *           fetchImpl?: typeof fetch, maxOutputChars?: number, temperature?: number }} args
+ *           fetchImpl?: typeof fetch, maxOutputChars?: number, temperature?: number, maxTokens?: number }} args
  * @returns {Promise<{ text: string, error: null } | { text: null, error: string }>}
  */
-export async function callLlm({ messages, rewrite, settings, fetchImpl = fetch, maxOutputChars, temperature = 0.2 }) {
+export async function callLlm({ messages, rewrite, settings, fetchImpl = fetch, maxOutputChars, temperature = 0.2, maxTokens }) {
   const cloudLlm = settings?.cloud_llm ?? true;
   if (!cloudLlm) return { text: null, error: 'cloud_disabled' };
 
@@ -51,7 +51,7 @@ export async function callLlm({ messages, rewrite, settings, fetchImpl = fetch, 
       res = await fetchImpl(`${rewrite.url.replace(/\/+$/, '')}/chat/completions`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
-        body: JSON.stringify({ model, temperature, stream: false, messages }),
+        body: JSON.stringify({ model, temperature, stream: false, messages, ...(maxTokens ? { max_tokens: maxTokens } : {}) }),
         signal: controller.signal,
         redirect: 'error',
       });
