@@ -43,11 +43,32 @@ Quy tắc: `text_raw` luôn là chữ gốc do STT trả về, không đổi. `t
 - `normal`: STT + từ điển.
 - `clean`: như `normal` + bỏ từ đệm (ừm, à, ờ, uh…) và sửa dấu cách/chấm câu cơ bản; thuần quy tắc, không gọi LLM.
 - `email`: STT + từ điển + viết lại thành thư chuyên nghiệp qua endpoint OpenAI-compatible (`/chat/completions`); chỉ gửi **văn bản** (không âm thanh).
-- `auto`: chọn theo `app`: ứng dụng thư → `email`, ứng dụng nhắn tin/terminal → `clean`, còn lại → `normal`.
+- `auto`: chọn theo `app` qua `auto.apps` (mặc định: ứng dụng thư → `email`; terminal/IDE như Terminal, iTerm2, Warp, VS Code, Cursor → `dev`; ứng dụng nhắn tin → `tidy`; còn lại → `normal`).
+- `tidy` ("Gọn"): STT + từ điển + snippets + quy tắc đọc kiểu lập trình + **LLM làm gọn** qua endpoint OpenAI-compatible: tự thêm dấu câu và viết hoa, bỏ từ đệm, hiểu tự sửa giữa câu (backtrack: "…thứ Sáu, à nhầm, thứ Năm" chỉ giữ "thứ Năm"), định dạng danh sách khi người nói liệt kê. Chỉ gửi **văn bản**. KHÔNG được thêm ý, số, tên hay thuật ngữ không có trong lời nói. Lỗi/quá giờ/bị chặn bởi guard ⇒ `text` = văn bản đã qua từ điển và `clean` bằng quy tắc (không LLM), `rewrite = {used:false, error:"<mã>"}` (mã thêm: `guard_rejected`, `cloud_disabled`).
+- `dev` ("Lập trình"): như `clean` + quy tắc đọc kiểu lập trình (thuần quy tắc, không LLM, không gửi gì ra ngoài): "gạch dưới" → `_`, "gạch ngang" → `-`, "gạch chéo" → `/`, "hai chấm" → `:`, "chấm" giữa hai định danh (hoặc trước đuôi tệp đã biết) → `.`, "viết thường nối gạch dưới a b c" → `a_b_c` (snake_case), "camel case a b c" → `aBC` đúng quy ước, v.v. Chỉ áp dụng ở dạng cụm không nhập nhằng; không đổi từ tiếng Việt thường.
+
+## Hành động sau khi dán (`post.actions`)
+Phản hồi `post` có thêm `actions: string[]` (mặc định rỗng). Hiện chỉ có `"enter"`: khi lời nói KẾT THÚC bằng cụm "nhấn enter" hoặc "bấm enter" (đúng ở cuối, bỏ dấu/viết hoa/dấu câu khi so khớp) và `actions_enabled` bật, engine cắt cụm đó khỏi `text` và trả `actions:["enter"]`; client dán rồi gửi phím Return. Không hành động nào khác được tạo từ lời nói.
+
+## Snippets (đoạn văn mẫu gọi bằng lời)
+`GET /v1/snippets` → `{ "entries": [ { "trigger": "link lịch hẹn", "text": "https://…", "uses": 3, "last_used": "…" } ] }`. `PUT /v1/snippets` thay toàn bộ (kiểm schema: `trigger` 1–60 ký tự, `text` 1–5.000 ký tự có thể nhiều dòng, trigger không trùng sau khi bỏ dấu/hoa thường, tối đa 500 mục). Lưu `~/.vflow/snippets.json` (0600), không nằm trong repo. Mở rộng: khi cả câu nói (bỏ dấu/hoa thường/dấu câu) bằng một trigger, HOẶC có dạng "chèn <trigger>" ở bất kỳ vị trí nào trong câu ⇒ thay bằng `text` nguyên văn (không qua từ điển, làm gọn hay viết lại); `post.applied` có `{type:"snippet", from:"<trigger>", to:"snippet"}` (không ghi nội dung snippet vào log). Không mở rộng ở nơi khác để tránh kích hoạt nhầm.
+
+## Command Mode (sửa/soạn văn bản bằng lời)
+Client ghi âm lệnh, gọi `POST /v1/transcribe` (`mode=normal`) để lấy chữ, rồi gọi `POST /v1/command` JSON `{ "instruction": "<lệnh>", "selection": "<đoạn đang chọn, có thể rỗng>", "context": "<văn bản xung quanh, tuỳ chọn>", "app": "<bundle id>" }` ⇒ 200 `{ "text": "<văn bản thay thế/soạn mới>", "kind": "edit|draft", "timings_ms": { "llm": 900 } }`. Có `selection` ⇒ `edit` (chỉ trả đoạn thay thế, không lời dẫn). Không có ⇒ `draft`. Giới hạn 20.000 ký tự mỗi trường. Lỗi (không đặt model, thiếu khoá, `cloud_disabled`, quá giờ, phản hồi rỗng/lạ) ⇒ HTTP 502/503 `{ "error": { "code": "rewrite_unavailable|cloud_disabled|timeout|bad_request", "message": "<tiếng Việt>" } }`, KHÔNG trả văn bản giả; client không dán gì.
+
+## Cài đặt người dùng (`GET/PUT /v1/settings`)
+`GET` → `{ "cloud_llm": true, "llm_model": "ag/gemini-3.8-flash" | null, "llm_timeout_ms": 8000, "actions_enabled": true }` (không bao giờ trả khoá). `PUT` nhận tập con các trường (kiểm kiểu/giá trị; `llm_timeout_ms` 1.000–30.000; `llm_model` chuỗi ≤ 200 ký tự hoặc null), ghi vào `~/.vflow/config.json`, có hiệu lực ngay không cần khởi động lại. `cloud_llm=false` ⇒ `tidy`, `email` và `/v1/command` không gọi LLM: `tidy`/`email` trả `rewrite.error="cloud_disabled"` và dùng văn bản đã qua từ điển; `/v1/command` trả `cloud_disabled`. Chế độ `normal`, `clean`, `dev` không bao giờ gọi LLM.
+
+## Ghi chú LLM (endpoint OpenAI-compatible, ví dụ 9Router)
+Luôn gửi `"stream": false`. Máy chủ đã thấy trả luồng SSE (`data: {...}` từng dòng) dù không yêu cầu stream: client LLM của engine phải đọc được CẢ phản hồi JSON thường LẪN SSE (ghép `delta.content`), nếu không đọc được ⇒ `bad_response`. Khoá lấy từ `rewrite.key_file` (mặc định `~/.vflow/rewrite.key`), không bao giờ vào log/phản hồi/lỗi. `llm_model` trong `/v1/settings` ưu tiên hơn `rewrite.model` trong cấu hình.
 
 ## Bất biến cần test
 1. Âm thanh không bao giờ được ghi xuống đĩa; log không chứa văn bản.
-2. Viết lại lỗi ⇒ `text` là văn bản đã qua từ điển (chưa viết lại), `text_raw` giữ nguyên chữ STT gốc, và `rewrite.error` có giá trị.
+2. Viết lại/làm gọn lỗi ⇒ `text` là văn bản đã qua từ điển và quy tắc (chưa qua LLM), `text_raw` giữ nguyên chữ STT gốc, và `rewrite.error` có giá trị.
 3. Thiếu/sai token ⇒ 401 `unauthorized`; `Host` lạ ⇒ từ chối.
 4. Model thiếu/hỏng ⇒ `model_unavailable` kèm lý do, không rơi về model khác một cách âm thầm.
 5. Khoá viết lại không xuất hiện trong bất kỳ log/phản hồi/lỗi nào.
+6. LLM làm gọn không được thêm nội dung: nếu đầu ra có từ/số/thuật ngữ không có trong đầu vào (ngoài dấu câu và dấu đánh số) quá ngưỡng thì bị `guard_rejected`.
+7. `snippet` không bao giờ bị sửa bởi từ điển/làm gọn/viết lại; chỉ mở rộng đúng hai dạng đã nêu.
+8. `actions:["enter"]` chỉ xuất hiện khi cụm đứng ĐÚNG ở cuối lời nói và `actions_enabled` bật.
+9. `cloud_llm=false` ⇒ không có yêu cầu mạng nào tới endpoint LLM (kiểm bằng máy chủ giả đếm yêu cầu).
