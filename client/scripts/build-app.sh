@@ -1,10 +1,22 @@
 #!/bin/bash
 # Dựng client/build/VFlow.app (bản release), ký ad-hoc và kiểm chữ ký.
-# Dùng: client/scripts/build-app.sh [--clean]   (--clean: xoá .build trung gian sau khi dựng)
+# Dùng: client/scripts/build-app.sh [--clean] [--no-bundle]
+#   --clean       xoá .build trung gian sau khi dựng
+#   --no-bundle   bỏ qua bundle-engine.sh (dựng nhanh khi phát triển; app sẽ cần repo + Node hệ
+#                 thống như trước M4b, không tự đủ)
 set -euo pipefail
 
 CLIENT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 APP="$CLIENT_DIR/build/VFlow.app"
+BUNDLE_ENGINE=1
+CLEAN=0
+for arg in "$@"; do
+  case "$arg" in
+    --no-bundle) BUNDLE_ENGINE=0 ;;
+    --clean) CLEAN=1 ;;
+    *) echo "LỖI: cờ không rõ: $arg" >&2; exit 64 ;;
+  esac
+done
 cd "$CLIENT_DIR"
 
 echo "• swift build -c release (VFlow)…"
@@ -45,12 +57,18 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 PLIST
 plutil -lint "$APP/Contents/Info.plist" >/dev/null
 
-echo "• ký ad-hoc…"
+if [ "$BUNDLE_ENGINE" = "1" ]; then
+  "$CLIENT_DIR/scripts/bundle-engine.sh" "$APP"
+else
+  echo "• --no-bundle: bỏ qua đóng gói engine (app cần repo + Node hệ thống như trước M4b)"
+fi
+
+echo "• ký ad-hoc (cả bundle, sau khi engine/node/*.node/*.dylib đã được ký riêng ở bước trên)…"
 codesign --force --deep -s - --identifier org.aios.vflow "$APP"
 codesign --verify --deep --strict "$APP"
 echo "• chữ ký OK"
 
-if [ "${1:-}" = "--clean" ]; then
+if [ "$CLEAN" = "1" ]; then
   rm -rf "$CLIENT_DIR/.build"
   echo "• đã xoá client/.build"
 fi

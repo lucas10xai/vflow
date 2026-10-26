@@ -86,6 +86,53 @@ import Testing
         #expect(m.engineSummary.contains("ngừng khởi động lại"))
     }
 
+    // MARK: engineReady/engineBlocked (hồi quy M4b/Phần 1 — tab Từ điển dựa vào hai cờ này để
+    // phân biệt "đang chờ" / "sẵn sàng" / "lỗi thật", không gọi engine quá sớm và không treo chờ
+    // vô thời hạn khi engine sẽ không bao giờ tự lên).
+
+    @Test func startingIsWaitingNeitherReadyNorBlocked() {
+        let m = StatusModel.build(engineState: .starting, configError: nil, lastError: nil,
+                                   permissions: permissions(), mode: .auto, canRetryLast: false,
+                                   launchAtLogin: false, conflictWarning: nil, hotkeysActive: true)
+        #expect(!m.engineReady)
+        #expect(!m.engineBlocked, "đang khởi động không phải là lỗi — tab Từ điển phải hiện 'đang chờ', không phải đỏ")
+    }
+
+    @Test func restartingIsStillWaitingNotBlocked() {
+        let m = StatusModel.build(engineState: .restarting(attempt: 1, delay: .seconds(1)), configError: nil,
+                                   lastError: nil, permissions: permissions(), mode: .auto, canRetryLast: false,
+                                   launchAtLogin: false, conflictWarning: nil, hotkeysActive: true)
+        #expect(!m.engineReady)
+        #expect(!m.engineBlocked, "engine tự khởi động lại vẫn có thể lên được, không phải lỗi chặn")
+    }
+
+    @Test func runningIsReadyAndNotBlocked() {
+        let m = StatusModel.build(engineState: .running(owned: true, health: Self.readyHealth), configError: nil,
+                                   lastError: nil, permissions: permissions(), mode: .auto, canRetryLast: false,
+                                   launchAtLogin: false, conflictWarning: nil, hotkeysActive: true)
+        #expect(m.engineReady)
+        #expect(!m.engineBlocked)
+    }
+
+    @Test func failedEngineIsBlockedNotReady() {
+        let m = StatusModel.build(engineState: .failed(.engineGaveUp("x")), configError: nil, lastError: nil,
+                                   permissions: permissions(), mode: .auto, canRetryLast: false,
+                                   launchAtLogin: false, conflictWarning: nil, hotkeysActive: true)
+        #expect(!m.engineReady)
+        #expect(m.engineBlocked)
+    }
+
+    @Test func configErrorIsBlockedAndNeverCountsAsReady() {
+        // Dù (trên thực tế không xảy ra) engineState trông như đang chạy, configError nghĩa là
+        // không có cổng/engine thật để tin — không được coi là "sẵn sàng".
+        let m = StatusModel.build(engineState: .running(owned: true, health: Self.readyHealth),
+                                   configError: .configInvalid("chưa biết repo vflow"), lastError: nil,
+                                   permissions: permissions(), mode: .auto, canRetryLast: false,
+                                   launchAtLogin: false, conflictWarning: nil, hotkeysActive: true)
+        #expect(!m.engineReady)
+        #expect(m.engineBlocked)
+    }
+
     // MARK: nút "Thử lại lần cuối"
 
     @Test func retryButtonEnabledOnlyWhenBufferHasAudio() {

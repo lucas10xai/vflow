@@ -72,8 +72,10 @@ D4. Tab Cài đặt › tắt "Lưu lịch sử", đọc chính tả một câu,
     **Dự kiến:** lúc tắt, câu mới KHÔNG xuất hiện ở tab Lịch sử (và `~/.vflow/history.jsonl` không có dòng mới — kiểm bằng `wc -l`); lịch sử cũ vẫn còn nguyên, không bị xoá chỉ vì tắt công tắc.
 D5. Mở tab "Từ điển", bấm "Thêm mục…", nhập thuật ngữ + vài cách nói (mỗi dòng một cách), Lưu.
     **Dự kiến:** mục mới xuất hiện trong danh sách, số lần dùng 0. Thử Lưu với thuật ngữ trùng mục có sẵn ⇒ báo lỗi tiếng Việt rõ ràng (không đè, không nuốt lỗi). Sửa một mục (đổi cách nói), Xoá một mục (có xác nhận) — số mục cập nhật đúng ngay.
-D6. Tắt engine (Tổng quan › "Khởi động lại engine" trong lúc đang tắt, hoặc `pkill -9 -f "vflow.js serve"` rồi nhanh tay mở tab Từ điển trước khi engine con tự khởi động lại), mở tab "Từ điển".
-    **Dự kiến:** hiện rõ chữ đỏ "Không kết nối được engine: …" — KHÔNG hiện danh sách trống như thể từ điển thật sự rỗng.
+D6. (M4b) `pkill -9 -f "vflow.js serve"` rồi NHANH TAY mở tab "Từ điển" trong lúc engine con đang tự khởi động lại (vài trăm ms tới vài giây).
+    **Dự kiến:** chữ xám "Đang chờ engine khởi động…" (KHÔNG phải lỗi đỏ, vì engine đang tự hồi phục) — danh sách tự tải lại (không cần bấm gì) ngay khi engine lên lại, không treo mãi ở "Đang chờ". Mở lại tab sau khi engine đã sẵn sàng ⇒ vào thẳng danh sách, không thấy "Đang chờ" nữa.
+D6b. Làm engine bỏ cuộc hẳn: `pkill -9 -f "vflow.js serve"` liên tục (≥ 5 lần trong 60 giây, xem README mục Engine) rồi mở tab "Từ điển".
+    **Dự kiến:** hiện rõ chữ đỏ "Không kết nối được engine: …" kèm nút "Thử lại" và "Khởi động lại engine" — KHÔNG hiện danh sách trống như thể từ điển thật sự rỗng, KHÔNG còn chữ "Đang chờ" (engine sẽ không tự lên nữa).
 
 ## E. Khác
 23. Bật VoiceOver (⌘F5), đọc chính tả một câu.
@@ -90,3 +92,13 @@ D6. Tắt engine (Tổng quan › "Khởi động lại engine" trong lúc đang
     **Dự kiến:** không còn engine con.
 28. Sau khi chạy lại `build-app.sh`: mở app.
     **Dự kiến:** có thể phải cấp lại Theo dõi đầu vào/Trợ năng (chữ ký ad-hoc mới) — app báo rõ, không im lặng.
+
+## F. Đóng gói tự đủ & cài đặt (M4b)
+29. `client/scripts/build-app.sh` xong, rồi `VFLOW_HOME=/tmp/vflow-selftest ./client/build/VFlow.app/Contents/MacOS/VFlow` (thư mục trống, chưa có model) với `client.json` chỉ có `{"port": <cổng riêng>}`.
+    **Dự kiến:** tab Tổng quan hiện "Đang chuẩn bị model lần đầu…" rồi tự hết (không lỗi); `/tmp/vflow-selftest/models/zipformer-vi-30m/` xuất hiện đủ tệp, sha256 khớp `~/.vflow/models/zipformer-vi-30m`; engine lên với model `loaded:true` dù máy không có Node/npm cài sẵn.
+30. Lặp lại bước 29 lần nữa (model đã có ở `/tmp/vflow-selftest`).
+    **Dự kiến:** KHÔNG chép lại, không có dòng "Đang chuẩn bị model" (hoặc hiện rồi biến mất ngay vì `.alreadyPresent`); thời gian mtime của tệp model không đổi.
+31. `client/scripts/install-app.sh`.
+    **Dự kiến:** thoát nhẹ nhàng bản vflow cũ đang chạy (nếu đường dẫn thực thi thuộc `client/build/` hoặc `/Applications/vflow.app`) — KHÔNG đụng Haynoi hay app khác; `/Applications/vflow.app` xuất hiện; `codesign --verify --deep --strict /Applications/vflow.app` OK. Mở `/Applications/vflow.app` lần đầu ⇒ macOS đòi cấp lại quyền macOS (chữ ký ad-hoc khác bản cũ).
+32. `client/scripts/uninstall-app.sh`.
+    **Dự kiến:** thoát vflow đang chạy từ `/Applications/vflow.app` rồi xoá; `~/.vflow` (token, từ điển, lịch sử) KHÔNG bị đụng — kiểm bằng `ls ~/.vflow`.

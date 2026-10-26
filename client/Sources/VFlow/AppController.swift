@@ -12,6 +12,9 @@ final class AppController: NSObject {
     private var machine = HotkeyStateMachine()
     private var retry = RetryBuffer()
     private var supervisor: EngineSupervisor?
+    /// Spec engine đã resolve (nếu thành công) — nguồn duy nhất cho cổng thật, tách khỏi
+    /// `supervisor` để `resolvedPort()` không bao giờ suy đoán cổng mặc định (xem `EnginePortResolution`).
+    private var engineSpec: EngineLaunchSpec?
     private var menu: StatusMenu!
     private var statusWindow: StatusWindowController!
     private var tickTimer: Timer?
@@ -46,6 +49,8 @@ final class AppController: NSObject {
     private(set) var engineState: EngineState = .stopped
     private(set) var configError: ClientError?
     private(set) var lastError: String?
+    /// Trạng thái chép model lần đầu từ bundle (M4b/Phần 2); `nil` = không có gì đáng nói (xem `ModelBootstrap`).
+    private(set) var modelBootstrapStatus: String?
 
     var mode: DictationMode {
         get { DictationMode(rawValue: UserDefaults.standard.string(forKey: "mode") ?? "") ?? .auto }
@@ -62,7 +67,8 @@ final class AppController: NSObject {
     var statusModel: StatusModel {
         StatusModel.build(engineState: engineState, configError: configError, lastError: lastError,
                            permissions: PermissionKind.items, mode: mode, canRetryLast: canRetry,
-                           launchAtLogin: launchAtLogin, conflictWarning: conflictWarning(), hotkeysActive: hotkeysActive)
+                           launchAtLogin: launchAtLogin, conflictWarning: conflictWarning(), hotkeysActive: hotkeysActive,
+                           modelBootstrapStatus: modelBootstrapStatus)
     }
 
     private func conflictWarning() -> String? {
@@ -91,12 +97,14 @@ final class AppController: NSObject {
 
         if AudioRecorder.permission() == .notDetermined { PermissionKind.microphone.request() }
         startHotkeys()
+        runModelBootstrapIfNeeded()
 
         switch ClientConfig.resolve(home: home, vflowHome: vflowHome, bundlePath: Bundle.main.bundlePath, fs: .live) {
         case .failure(let e):
             configError = e
             setError(ErrorText.message(e), showOverlay: true)
         case .success(let spec):
+            engineSpec = spec
             let port = spec.port
             let sup = EngineSupervisor(spec: spec, launcher: FoundationProcessLauncher(),
                                        probe: { [session] in await Self.probe(session: session, port: port) },
@@ -145,6 +153,35 @@ final class AppController: NSObject {
 
     /// Cửa sổ trạng thái gọi mỗi 2 giây khi đang hiện: quyền có thể vừa được cấp trong System Settings.
     func refreshPermissionsNow() { refreshUI() }
+
+    // MARK: model lần đầu (M4b/Phần 2 — bản dựng tự đủ kèm model trong bundle)
+
+    /// Bản dựng `--no-bundle` hoặc chạy từ repo: không có `Contents/Resources/models` ⇒ bỏ qua êm,
+    /// giữ hành vi cũ (`vflow models pull`). Có bundle model ⇒ chép sang `VFLOW_HOME` nếu CHƯA có,
+    /// KHÔNG BAO GIỜ đè model đã có; hiện trạng thái trung thực ở tab Tổng quan trong lúc chép.
+    private func runModelBootstrapIfNeeded() {
+        let modelsDir = Bundle.main.bundlePath + "/Contents/Resources/models"
+        guard FileManager.default.fileExists(atPath: modelsDir) else { return }
+        modelBootstrapStatus = "Đang chuẩn bị model lần đầu…"
+        refreshUI()
+        let home = vflowHome
+        Task.detached(priority: .utility) { [weak self] in
+            let outcome = ModelBootstrap.installIfNeeded(vflowHome: home, modelID: "zipformer-vi-30m",
+                                                          bundleModelsDir: modelsDir, fs: .live)
+            await MainActor.run {
+                guard let self else { return }
+                switch outcome {
+                case .alreadyPresent, .noBundledSource:
+                    self.modelBootstrapStatus = nil
+                case .copied:
+                    self.modelBootstrapStatus = nil
+                case .failed(let e):
+                    self.modelBootstrapStatus = "Chép model lần đầu lỗi: \(e)"
+                }
+                self.refreshUI()
+            }
+        }
+    }
 
     // MARK: engine
 
@@ -307,21 +344,33 @@ final class AppController: NSObject {
     private func send(pcm: Data, mode: DictationMode, app: String?) {
         overlay.show(.transcribing)
         refreshUI()
-        let port = currentPort
+        let portResult = resolvedPort()
         inflight = Task { [session] in
             let result: Result<TranscribeResult, ClientError>
-            switch readToken() {
-            case .success(let token):
-                result = await Self.transcribe(session: session, port: port, token: token, pcm: pcm, mode: mode, app: app)
+            switch portResult {
             case .failure(let e):
                 result = .failure(e)
+            case .success(let port):
+                switch readToken() {
+                case .success(let token):
+                    result = await Self.transcribe(session: session, port: port, token: token, pcm: pcm, mode: mode, app: app)
+                case .failure(let e):
+                    result = .failure(e)
+                }
             }
             guard !Task.isCancelled else { return }
             await self.deliver(result)
         }
     }
 
-    private var currentPort: Int { supervisor?.spec.port ?? ClientConfig.defaultPort }
+    /// Cổng thật để gọi engine, hoặc lỗi — KHÔNG BAO GIỜ âm thầm dùng `ClientConfig.defaultPort`
+    /// khi cấu hình chưa biết/lỗi (xem `EnginePortResolution`).
+    private func resolvedPort() -> Result<Int, ClientError> {
+        switch EnginePortResolution.resolve(spec: engineSpec, configError: configError) {
+        case .port(let p): return .success(p)
+        case .blocked(let e): return .failure(e)
+        }
+    }
 
     /// Token đọc từ `<VFLOW_HOME>/token` ở MỖI lần gửi (engine tự tạo khi chạy lần đầu).
     private func readToken() -> Result<String, ClientError> {
@@ -395,43 +444,57 @@ final class AppController: NSObject {
     // MARK: từ điển + gợi ý sửa (đọc-sửa-ghi qua `DictionaryOrchestration`)
 
     func fetchDictionary() async -> Result<[DictionaryEntry], ClientError> {
-        switch readToken() {
+        switch resolvedPort() {
         case .failure(let e): return .failure(e)
-        case .success(let token): return await Self.requestDictionaryList(session: session, port: currentPort, token: token)
+        case .success(let port):
+            switch readToken() {
+            case .failure(let e): return .failure(e)
+            case .success(let token): return await Self.requestDictionaryList(session: session, port: port, token: token)
+            }
         }
     }
 
     func applyDictionaryChange(_ change: DictionaryChange) async -> Result<[DictionaryEntry], ClientError> {
-        switch readToken() {
+        switch resolvedPort() {
         case .failure(let e): return .failure(e)
-        case .success(let token):
-            let port = currentPort
-            let session = self.session // không bắt `self` (MainActor) vào closure @Sendable
-            return await DictionaryOrchestration.applyChange(
-                change,
-                get: { await Self.requestDictionaryList(session: session, port: port, token: token) },
-                put: { entries in await Self.requestDictionaryPut(session: session, port: port, token: token, entries: entries) })
+        case .success(let port):
+            switch readToken() {
+            case .failure(let e): return .failure(e)
+            case .success(let token):
+                let session = self.session // không bắt `self` (MainActor) vào closure @Sendable
+                return await DictionaryOrchestration.applyChange(
+                    change,
+                    get: { await Self.requestDictionaryList(session: session, port: port, token: token) },
+                    put: { entries in await Self.requestDictionaryPut(session: session, port: port, token: token, entries: entries) })
+            }
         }
     }
 
     func acceptSuggestion(_ suggestion: CorrectionSuggestion) async -> Result<[DictionaryEntry], ClientError> {
-        switch readToken() {
+        switch resolvedPort() {
         case .failure(let e): return .failure(e)
-        case .success(let token):
-            let port = currentPort
-            let session = self.session
-            return await DictionaryOrchestration.acceptSuggestion(
-                suggestion,
-                get: { await Self.requestDictionaryList(session: session, port: port, token: token) },
-                put: { entries in await Self.requestDictionaryPut(session: session, port: port, token: token, entries: entries) })
+        case .success(let port):
+            switch readToken() {
+            case .failure(let e): return .failure(e)
+            case .success(let token):
+                let session = self.session
+                return await DictionaryOrchestration.acceptSuggestion(
+                    suggestion,
+                    get: { await Self.requestDictionaryList(session: session, port: port, token: token) },
+                    put: { entries in await Self.requestDictionaryPut(session: session, port: port, token: token, entries: entries) })
+            }
         }
     }
 
     func fetchCorrectionSuggestions(before: String, after: String) async -> Result<[CorrectionSuggestion], ClientError> {
-        switch readToken() {
+        switch resolvedPort() {
         case .failure(let e): return .failure(e)
-        case .success(let token):
-            return await Self.requestCorrections(session: session, port: currentPort, token: token, before: before, after: after)
+        case .success(let port):
+            switch readToken() {
+            case .failure(let e): return .failure(e)
+            case .success(let token):
+                return await Self.requestCorrections(session: session, port: port, token: token, before: before, after: after)
+            }
         }
     }
 

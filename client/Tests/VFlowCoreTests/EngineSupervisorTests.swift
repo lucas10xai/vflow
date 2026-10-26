@@ -51,17 +51,23 @@ final class FakeWorld: @unchecked Sendable {
     var childHealthy = true
     var childIgnoresTerm = false
     let health = Health(version: "0.1.0", models: [ModelStatus(id: "zipformer-vi-30m", kind: "local", loaded: true, reason: nil)])
+    /// Số lần `probe()` đã gọi (để giả "chưa sẵn sàng N lần rồi mới sẵn sàng" — engine con có
+    /// thật nhưng chưa trả /healthz ngay, khác với `childHealthy = false` (không bao giờ lên)).
+    var probeCount = 0
+    var readyAfterProbes: Int?
 
     var liveChild: Child? { children.last { $0.isRunning } }
 
     func probe() -> HealthProbe {
+        probeCount += 1
         if foreign { return .foreign }
+        if let n = readyAfterProbes, probeCount >= n, liveChild != nil { return .engine(health) }
         if externalEngine || (childHealthy && liveChild != nil) { return .engine(health) }
         return .unreachable
     }
 
-    @MainActor func makeSupervisor() -> EngineSupervisor {
-        let spec = EngineLaunchSpec(node: "/opt/homebrew/bin/node", script: "/repo/bin/vflow.js", repo: "/repo", port: 7611)
+    @MainActor func makeSupervisor(port: Int = 7611) -> EngineSupervisor {
+        let spec = EngineLaunchSpec(node: "/opt/homebrew/bin/node", script: "/repo/bin/vflow.js", repo: "/repo", port: port)
         return EngineSupervisor(spec: spec, launcher: Launcher(self),
                                 probe: { [unowned self] in self.probe() },
                                 sleep: { [unowned self] d in
@@ -213,6 +219,44 @@ private func settle() async {
         #expect(w.launches.count == 1)
         #expect(s.state == .running(owned: false, health: w.health))
     }
+
+    /// Hồi quy M4b/Phần 1: tab Từ điển không được hiện lỗi đỏ khi engine CON còn đang khởi động
+    /// (chưa trả /healthz vài lần đầu) — phải quan sát "chưa sẵn sàng" rồi "sẵn sàng", và suốt quá
+    /// trình đó cổng dùng để chạy/kiểm engine phải LUÔN là cổng đã cấu hình (7711, khác mặc định
+    /// 7611), không bao giờ lẫn sang mặc định. Phá nhánh: nếu spawn() dùng nhầm `ClientConfig.
+    /// defaultPort` ở bất kỳ bước nào, `w.launches[0].1`/`w.launches[0].2["VFLOW_PORT"]` sẽ là
+    /// "7611" và test đỏ.
+    @Test func engineNotReadyYetThenBecomesReadyOnConfiguredNonDefaultPort() async {
+        let w = FakeWorld()
+        w.childHealthy = false // engine con không tự trả /healthz ngay
+        w.readyAfterProbes = 4 // vài lần probe đầu "chưa sẵn sàng" giống node còn tải model
+        let s = w.makeSupervisor(port: 7711)
+        s.startupTimeout = .seconds(5)
+        s.pollInterval = .milliseconds(1)
+        var observed: [EngineState] = []
+        s.onStateChange = { observed.append($0) }
+
+        #expect(s.state == .stopped, "trước khi start() phải là 'chưa chạy', không phải 'sẵn sàng' giả")
+        await s.start()
+
+        #expect(observed.first == .starting, "phải báo 'đang khởi động' trước khi biết kết quả")
+        #expect(s.state == .running(owned: true, health: w.health))
+        #expect(s.spec.port == 7711)
+        #expect(w.launches.count == 1)
+        #expect(w.launches[0].1 == ["/repo/bin/vflow.js", "serve", "--port", "7711"], "không được lẫn cổng mặc định 7611")
+        #expect(w.launches[0].2["VFLOW_PORT"] == "7711")
+
+        // Mô hình thuần mà DictionaryView dựa vào: lúc "đang khởi động" phải là "đang chờ" (không
+        // lỗi, không chặn); sau khi running phải là "sẵn sàng".
+        let waiting = StatusModel.build(engineState: observed.first!, configError: nil, lastError: nil,
+                                        permissions: [], mode: .auto, canRetryLast: false, launchAtLogin: false,
+                                        conflictWarning: nil, hotkeysActive: true)
+        #expect(!waiting.engineReady && !waiting.engineBlocked)
+        let ready = StatusModel.build(engineState: s.state, configError: nil, lastError: nil,
+                                      permissions: [], mode: .auto, canRetryLast: false, launchAtLogin: false,
+                                      conflictWarning: nil, hotkeysActive: true)
+        #expect(ready.engineReady && !ready.engineBlocked)
+    }
 }
 
 @Suite struct RestartPolicyTests {
@@ -257,6 +301,36 @@ private func settle() async {
         #expect(s == EngineLaunchSpec(node: "/Users/u/n/node", script: "/Users/u/src/vflow/bin/vflow.js", repo: "/Users/u/src/vflow", port: 7700))
     }
 
+    // MARK: engine tự đủ trong bundle (M4b/Phần 2) — ưu tiên client.json > bundle > repo dev
+
+    @Test func bundledEngineIsUsedWhenNoClientJSONOverride() throws {
+        let f = fs(files: ["/App.app/Contents/Resources/engine/bin/vflow.js": ""],
+                  exec: ["/App.app/Contents/Resources/engine/node/bin/node"])
+        let s = try ClientConfig.resolve(home: "/Users/u", bundlePath: "/App.app", fs: f).get()
+        #expect(s == EngineLaunchSpec(node: "/App.app/Contents/Resources/engine/node/bin/node",
+                                      script: "/App.app/Contents/Resources/engine/bin/vflow.js",
+                                      repo: "/App.app/Contents/Resources/engine", port: ClientConfig.defaultPort))
+    }
+
+    @Test func userClientJSONOverridesBundledEngineEvenWhenBundlePresent() throws {
+        // Người dùng tự đặt repo/node trong client.json ⇒ phải thắng engine đóng gói trong bundle.
+        let cfg = #"{"repo":"/Users/u/src/vflow","node":"/opt/homebrew/bin/node"}"#
+        let f = fs(files: ["/Users/u/.vflow/client.json": cfg, "/Users/u/src/vflow/bin/vflow.js": "",
+                          "/App.app/Contents/Resources/engine/bin/vflow.js": ""],
+                  exec: ["/opt/homebrew/bin/node", "/App.app/Contents/Resources/engine/node/bin/node"])
+        let s = try ClientConfig.resolve(home: "/Users/u", bundlePath: "/App.app", fs: f).get()
+        #expect(s.repo == "/Users/u/src/vflow")
+        #expect(s.node == "/opt/homebrew/bin/node")
+    }
+
+    @Test func noBundledEngineFallsBackToDevRepoDerivedFromBundlePath() throws {
+        // Bản dựng `--no-bundle` (không có Contents/Resources/engine) ⇒ hành vi cũ không đổi.
+        let f = fs(files: ["/r/bin/vflow.js": ""], exec: ["/opt/homebrew/bin/node"])
+        let s = try ClientConfig.resolve(home: "/Users/u", bundlePath: "/r/client/build/VFlow.app", fs: f).get()
+        #expect(s.repo == "/r")
+        #expect(s.node == "/opt/homebrew/bin/node")
+    }
+
     @Test func configuredNodeThatDoesNotRunIsAnErrorNotSilentFallback() {
         let f = fs(files: ["/h/.vflow/client.json": #"{"node":"/nope/node"}"#, "/r/bin/vflow.js": ""], exec: ["/opt/homebrew/bin/node"])
         guard case .failure(.configInvalid(let m)) = ClientConfig.resolve(home: "/h", bundlePath: "/r/client/build/VFlow.app", fs: f) else {
@@ -296,5 +370,31 @@ private func settle() async {
         let old = ClientConfig.resolve(home: "/tmp/vflow-test-home", bundlePath: "/r/client/build/VFlow.app", fs: f)
         guard case .failure(.configInvalid(let m)) = old else { Issue.record("không có client.json ở <home>/.vflow ⇒ dùng node mặc định, không có node mặc định trong fs giả này nên phải lỗi"); return }
         #expect(m.contains("node"))
+    }
+}
+
+/// Hồi quy M4b/Phần 1 (d): cổng gọi engine không bao giờ được suy đoán ra `ClientConfig.
+/// defaultPort` khi cấu hình chưa biết/lỗi — xem `EnginePortResolution`, dùng bởi
+/// `AppController.resolvedPort()` thay cho `supervisor?.spec.port ?? ClientConfig.defaultPort` cũ.
+@Suite struct EnginePortResolutionTests {
+    @Test func usesConfiguredPortWhenSpecIsKnown() {
+        let spec = EngineLaunchSpec(node: "/n", script: "/r/bin/vflow.js", repo: "/r", port: 7711)
+        #expect(EnginePortResolution.resolve(spec: spec, configError: nil) == .port(7711))
+    }
+
+    @Test func neverFallsBackToDefaultPortWhenConfigIsInvalid() {
+        // Phá nhánh: nếu code dùng `spec?.port ?? ClientConfig.defaultPort`, kết quả sẽ là
+        // `.port(7611)` (trùng mặc định) thay vì `.blocked` — test này phải đỏ trong trường hợp đó.
+        let err = ClientError.configInvalid("chưa biết repo vflow: thêm \"repo\" vào ~/.vflow/client.json")
+        let result = EnginePortResolution.resolve(spec: nil, configError: err)
+        #expect(result == .blocked(err))
+        if case .port(let p) = result { Issue.record("không được suy đoán ra cổng \(p) khi cấu hình lỗi") }
+    }
+
+    @Test func blockedWhenNeitherSpecNorErrorIsKnownYet() {
+        // Trường hợp lý thuyết (chưa resolve xong) cũng phải chặn, không đoán cổng.
+        guard case .blocked = EnginePortResolution.resolve(spec: nil, configError: nil) else {
+            Issue.record("phải chặn khi chưa biết cổng thật, không suy đoán"); return
+        }
     }
 }

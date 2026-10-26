@@ -5,6 +5,7 @@ import VFlowCore
 /// `DictionaryOrchestration`). Kiểm hợp lệ phía client giống luật engine trước khi gửi; lỗi
 /// `bad_request` của engine hiện nguyên văn (đã là tiếng Việt theo contract), không nuốt.
 struct DictionaryView: View {
+    let model: StatusModel
     let controller: AppController
     @State private var entries: [DictionaryEntry] = []
     @State private var loadError: ClientError?
@@ -21,7 +22,13 @@ struct DictionaryView: View {
             header
             body_
         }
-        .task { await load() }
+        // id = model.engineReady: engine CHƯA sẵn sàng (đang khởi động/khởi động lại) thì không
+        // gọi API (tránh lỗi giả); vừa chuyển sang sẵn sàng ⇒ task này được huỷ và chạy lại ⇒ tự
+        // tải lại. Không bao giờ tải trong lúc đang chờ.
+        .task(id: model.engineReady) {
+            guard model.engineReady else { return }
+            await load()
+        }
         .sheet(isPresented: $showEditor) { editorSheet }
         .confirmationDialog(
             "Xoá mục \"\(confirmDelete?.term ?? "")\"?",
@@ -37,15 +44,34 @@ struct DictionaryView: View {
         HStack {
             SectionTitle(text: "Từ điển (\(entries.count))")
             Spacer()
-            Button("Làm mới") { Task { await load() } }
-            Button("Thêm mục…") { beginAdd() }
+            Button("Làm mới") { Task { await load() } }.disabled(!model.engineReady)
+            Button("Thêm mục…") { beginAdd() }.disabled(!model.engineReady)
         }
     }
 
     @ViewBuilder private var body_: some View {
-        if let e = loadError {
-            // Engine không chạy ⇒ nói rõ, KHÔNG hiện danh sách rỗng giả.
-            Text(ErrorText.message(e)).font(.system(size: 13)).foregroundStyle(Color.red)
+        if model.engineBlocked {
+            // Lỗi thật (cấu hình lỗi, hoặc engine đã bỏ cuộc) — hiện rõ + nút thử lại, không bao
+            // giờ hiện "đang chờ" vô thời hạn khi engine sẽ không bao giờ tự lên.
+            VStack(alignment: .leading, spacing: 8) {
+                Text(model.engineSummary).font(.system(size: 13)).foregroundStyle(Color.red)
+                HStack(spacing: 10) {
+                    Button("Thử lại") { Task { await load() } }
+                    if model.engineHasFailed {
+                        Button("Khởi động lại engine") { controller.restartEngine() }
+                    }
+                }
+            }
+        } else if !model.engineReady {
+            // Engine đang khởi động/khởi động lại — trạng thái trung thực, KHÔNG phải lỗi; tự tải
+            // lại khi engine chuyển sang sẵn sàng (xem `.task(id: model.engineReady)` ở trên).
+            Text("Đang chờ engine khởi động…").font(.system(size: 13)).foregroundStyle(.secondary)
+        } else if let e = loadError {
+            // Engine đã sẵn sàng nhưng lần gọi vẫn lỗi (token hỏng, engine từ chối…) ⇒ lỗi thật.
+            VStack(alignment: .leading, spacing: 8) {
+                Text(ErrorText.message(e)).font(.system(size: 13)).foregroundStyle(Color.red)
+                Button("Thử lại") { Task { await load() } }
+            }
         } else if !loaded {
             Text("Đang tải…").font(.system(size: 13)).foregroundStyle(.secondary)
         } else if entries.isEmpty {

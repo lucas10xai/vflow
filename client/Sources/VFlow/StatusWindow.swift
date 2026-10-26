@@ -111,7 +111,7 @@ struct MainWindowView: View {
         switch viewModel.selectedTab {
         case .overview: OverviewView(model: model, controller: controller)
         case .history: HistoryView(controller: controller)
-        case .dictionary: DictionaryView(controller: controller)
+        case .dictionary: DictionaryView(model: model, controller: controller)
         case .settings: SettingsView(model: model, controller: controller)
         }
     }

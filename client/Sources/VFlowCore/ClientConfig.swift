@@ -59,19 +59,30 @@ public enum ClientConfig {
             port = n
         }
 
+        // Ưu tiên nguồn "repo" (thư mục chứa bin/vflow.js): client.json (người dùng đặt) > engine tự
+        // đủ đóng gói TRONG bundle (M4b/Phần 2, app không cần repo/Node hệ thống) > suy ra từ
+        // bundlePath kiểu `<repo>/client/build/VFlow.app` (chạy thẳng từ repo lúc phát triển).
         let repo: String
+        let usedBundledEngine: Bool
         if let r = obj["repo"] {
             guard let s = r as? String, !s.isEmpty else { return .failure(.configInvalid("\"repo\" phải là chuỗi đường dẫn")) }
             repo = expand(s, home: home)
             guard fs.fileExists(repo + "/bin/vflow.js") else {
                 return .failure(.configInvalid("không thấy \(repo)/bin/vflow.js (khoá \"repo\")"))
             }
+            usedBundledEngine = false
+        } else if let b = bundlePath, fs.fileExists(bundledEngineDir(b) + "/bin/vflow.js") {
+            repo = bundledEngineDir(b)
+            usedBundledEngine = true
         } else if let b = bundlePath, let derived = repoFromBundle(b), fs.fileExists(derived + "/bin/vflow.js") {
             repo = derived
+            usedBundledEngine = false
         } else {
             return .failure(.configInvalid("chưa biết repo vflow: thêm \"repo\" vào \(configPath)"))
         }
 
+        // Cổng Node: client.json (người dùng đặt) > Node đóng gói CÙNG engine tự đủ vừa chọn ở trên
+        // (chỉ khi đó thật là engine trong bundle — không lẫn Node đóng gói cho repo dev) > dò hệ thống.
         let node: String
         if let n = obj["node"] {
             guard let s = n as? String, !s.isEmpty else { return .failure(.configInvalid("\"node\" phải là chuỗi đường dẫn")) }
@@ -79,6 +90,8 @@ public enum ClientConfig {
             // Cấu hình chỉ định sai ⇒ báo lỗi, không âm thầm dùng node khác.
             guard fs.isExecutable(p) else { return .failure(.configInvalid("\"node\" không chạy được: \(p)")) }
             node = p
+        } else if usedBundledEngine, fs.isExecutable(repo + "/node/bin/node") {
+            node = repo + "/node/bin/node"
         } else if let found = nodeCandidates.map({ expand($0, home: home) }).first(where: fs.isExecutable) {
             node = found
         } else {
@@ -87,11 +100,29 @@ public enum ClientConfig {
         return .success(EngineLaunchSpec(node: node, script: repo + "/bin/vflow.js", repo: repo, port: port))
     }
 
+    /// `<bundle>/Contents/Resources/engine` — thư mục engine tự đủ nếu `bundle-engine.sh` đã đóng
+    /// gói (có `bin/vflow.js`, `node_modules/`, và Node riêng ở `node/bin/node`).
+    static func bundledEngineDir(_ bundlePath: String) -> String { bundlePath + "/Contents/Resources/engine" }
+
     /// `<repo>/client/build/VFlow.app` ⇒ `<repo>`.
     static func repoFromBundle(_ bundlePath: String) -> String? {
         var parts = bundlePath.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
         while parts.last == "" { parts.removeLast() }
         guard parts.count >= 4, parts[parts.count - 2] == "build", parts[parts.count - 3] == "client" else { return nil }
         return parts.dropLast(3).joined(separator: "/")
+    }
+}
+
+/// Cổng dùng để gọi engine: tính từ `EngineLaunchSpec` đã resolve, KHÔNG BAO GIỜ suy đoán ra
+/// `ClientConfig.defaultPort` khi cấu hình lỗi/chưa biết. Cấu hình lỗi ⇒ `.blocked` (gọi engine
+/// lúc đó chỉ có thể là nhầm cổng), không có đường nào trả về mặc định thay cho cổng thật.
+public enum EnginePortResolution: Equatable, Sendable {
+    case port(Int)
+    case blocked(ClientError)
+
+    public static func resolve(spec: EngineLaunchSpec?, configError: ClientError?) -> EnginePortResolution {
+        if let spec { return .port(spec.port) }
+        if let configError { return .blocked(configError) }
+        return .blocked(.configInvalid("chưa xác định được cổng engine"))
     }
 }

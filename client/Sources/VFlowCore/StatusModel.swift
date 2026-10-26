@@ -123,10 +123,21 @@ public struct StatusModel: Equatable, Sendable {
     public var conflictWarning: String?
     public var hotkeysActive: Bool
     public var engineHasFailed: Bool
+    /// `true` CHỈ khi engine đang `.running` và cấu hình không lỗi — các tab dùng engine (vd. Từ
+    /// điển) chỉ nên gọi API khi cờ này bật, nếu không sẽ gọi vào cổng/engine chưa có thật.
+    public var engineReady: Bool
+    /// `true` khi engine sẽ KHÔNG tự chuyển sang sẵn sàng nữa (cấu hình lỗi, hoặc engine đã bỏ
+    /// cuộc) — tab dùng engine nên hiện lỗi thật + nút thử lại, KHÔNG hiện "đang chờ" vô thời hạn.
+    public var engineBlocked: Bool
+    /// Trạng thái chép model lần đầu từ bundle (M4b/Phần 2) — `nil` nghĩa là không có gì đáng nói
+    /// (không áp dụng, hoặc đã xong êm từ trước); có giá trị khi đang chép hoặc chép lỗi, hiện ở
+    /// tab Tổng quan.
+    public var modelBootstrapStatus: String?
 
     public init(engineSummary: String, models: [ModelStatus], permissions: [PermissionItem], mode: DictationMode,
                 lastError: String?, canRetryLast: Bool, launchAtLogin: Bool, conflictWarning: String?,
-                hotkeysActive: Bool, engineHasFailed: Bool) {
+                hotkeysActive: Bool, engineHasFailed: Bool, engineReady: Bool, engineBlocked: Bool,
+                modelBootstrapStatus: String? = nil) {
         self.engineSummary = engineSummary
         self.models = models
         self.permissions = permissions
@@ -137,19 +148,28 @@ public struct StatusModel: Equatable, Sendable {
         self.conflictWarning = conflictWarning
         self.hotkeysActive = hotkeysActive
         self.engineHasFailed = engineHasFailed
+        self.engineReady = engineReady
+        self.engineBlocked = engineBlocked
+        self.modelBootstrapStatus = modelBootstrapStatus
     }
 
     public var missingPermissions: [PermissionItem] { permissions.filter { !$0.granted } }
 
     public static func build(engineState: EngineState, configError: ClientError?, lastError: String?,
                               permissions: [PermissionItem], mode: DictationMode, canRetryLast: Bool,
-                              launchAtLogin: Bool, conflictWarning: String?, hotkeysActive: Bool) -> StatusModel {
+                              launchAtLogin: Bool, conflictWarning: String?, hotkeysActive: Bool,
+                              modelBootstrapStatus: String? = nil) -> StatusModel {
         let (summary, models) = engineSummaryAndModels(engineState: engineState, configError: configError)
         let failed: Bool
         if case .failed = engineState { failed = true } else { failed = false }
+        let running: Bool
+        if case .running = engineState { running = true } else { running = false }
+        let ready = configError == nil && running
+        let blocked = configError != nil || failed
         return StatusModel(engineSummary: summary, models: models, permissions: permissions, mode: mode,
                             lastError: lastError, canRetryLast: canRetryLast, launchAtLogin: launchAtLogin,
-                            conflictWarning: conflictWarning, hotkeysActive: hotkeysActive, engineHasFailed: failed)
+                            conflictWarning: conflictWarning, hotkeysActive: hotkeysActive, engineHasFailed: failed,
+                            engineReady: ready, engineBlocked: blocked, modelBootstrapStatus: modelBootstrapStatus)
     }
 
     static func engineSummaryAndModels(engineState: EngineState, configError: ClientError?) -> (String, [ModelStatus]) {

@@ -17,6 +17,11 @@ struct OverviewView: View {
                 .font(.system(size: 13, weight: .medium))
                 .accessibilityLabel("Giữ Option trái để nói, nhả ra để chữ hiện ở chỗ con trỏ")
 
+            if let status = model.modelBootstrapStatus {
+                Text(status).font(.system(size: 13))
+                    .foregroundStyle(status.hasPrefix("Chép model lần đầu lỗi") ? Color.red : Color.secondary)
+            }
+
             EngineSection(model: model)
             PermissionsSection(permissions: model.permissions)
             ModeSection(mode: model.mode) { controller.mode = $0 }

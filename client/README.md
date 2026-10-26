@@ -4,11 +4,14 @@ Giữ **⌥ Option trái**, nói, nhả phím ⇒ chữ được dán vào ô đ
 
 Từ M4a, vflow là **app thường**: biểu tượng Dock, ⌘-Tab, menu ứng dụng đầy đủ, và cửa sổ chính **"vflow"** với 4 mục — **Tổng quan**, **Lịch sử**, **Từ điển**, **Cài đặt**. Biểu tượng thanh menu vẫn còn nhưng chỉ là phụ (có công tắc ẩn/hiện ở Cài đặt, mặc định bật). **Đóng cửa sổ chính (nút đỏ) KHÔNG thoát app** — ghi âm bằng phím nóng và engine vẫn hoạt động; thoát hẳn bằng **⌘Q** hoặc menu "vflow › Thoát vflow".
 
+Từ M4b, bản dựng mặc định (`build-app.sh`, không có `--no-bundle`) **tự đủ**: Node 22, mã engine, `node_modules` (chỉ darwin-arm64) và model `zipformer-vi-30m` nằm sẵn trong `VFlow.app/Contents/Resources/` — không cần repo hay Node cài trên máy chạy. Xem mục "Đóng gói tự đủ & cài đặt" bên dưới.
+
 ## Dựng và chạy
 ```sh
 client/scripts/make-icon.sh            # (chỉ cần khi đổi thiết kế biểu tượng) ⇒ client/Resources/AppIcon.icns
-client/scripts/build-app.sh            # ⇒ client/build/VFlow.app (release, ký ad-hoc, codesign --verify)
-client/scripts/build-app.sh --clean    # như trên rồi xoá client/.build (~ vài trăm MB)
+client/scripts/build-app.sh            # ⇒ client/build/VFlow.app (release, TỰ ĐỦ: kèm Node+engine+model, ký ad-hoc, codesign --verify)
+client/scripts/build-app.sh --no-bundle  # như trên nhưng KHÔNG đóng gói engine (dựng nhanh khi phát triển; cần repo + Node hệ thống như trước M4b)
+client/scripts/build-app.sh --clean    # xoá client/.build (~ vài trăm MB) sau khi dựng; kết hợp được với --no-bundle
 open client/build/VFlow.app
 cd client && swift test                # test logic thuần (VFlowCore)
 ```
@@ -18,6 +21,32 @@ Yêu cầu: macOS 14+, Xcode/Swift 6. Cờ dòng lệnh của nhị phân `VFlow
 - `--open-tab tongquan|lichsu|tudien|caidat`: mở cửa sổ chính thẳng vào tab đó (dùng để chụp ảnh từng tab).
 
 Biến môi trường `VFLOW_HOME` (mặc định `~/.vflow`, giống engine) đổi nơi client đọc `client.json`/`token` và lưu `history.jsonl` — dùng để thử nghiệm mà không đụng dữ liệu thật, ví dụ: `VFLOW_HOME=/tmp/vflow-test VFlow.app/Contents/MacOS/VFlow`.
+
+## Đóng gói tự đủ & cài đặt (M4b)
+
+```sh
+client/scripts/bundle-engine.sh client/build/VFlow.app   # gọi tự động từ build-app.sh, hiếm khi cần chạy tay
+client/scripts/install-app.sh      # dựng bản đầy đủ rồi cài vào /Applications/vflow.app
+client/scripts/uninstall-app.sh    # gỡ /Applications/vflow.app (KHÔNG đụng ~/.vflow)
+```
+
+**`bundle-engine.sh`** đóng gói vào `VFlow.app/Contents/Resources/`:
+- `engine/node/bin/node`: Node 22 LTS chính thức (darwin-arm64) tải từ nodejs.org, kiểm sha256 với `SHASUMS256.txt` chính thức, cache ở `client/.cache/` (không commit).
+- `engine/{bin,engine,eval,config,package.json,node_modules}`: mã engine (bỏ `*.test.js`), `node_modules` chỉ dependency chạy thật của **đúng kiến trúc máy chạy `npm ci`** (darwin-arm64; không lẫn `sherpa-onnx-win-*`/`linux-*` vì đó là optionalDependencies theo nền tảng của npm).
+- `models/zipformer-vi-30m/`: lấy từ `~/.vflow/models/zipformer-vi-30m` (đã kiểm checksum theo manifest ở cả nguồn lẫn sau khi chép vào bundle); KHÔNG đóng gói model streaming/PhoWhisper.
+- `LICENSES/`: Node, sherpa-onnx (Apache-2.0), onnxruntime (MIT), mô tả giấy phép model (CC-BY-NC-ND-4.0 — **chỉ dùng cá nhân, phi thương mại**).
+- Ký ad-hoc từng nhị phân lồng nhau (`node`, `*.node`, `*.dylib`) rồi ký cả bundle; `build-app.sh` kiểm `codesign --verify --deep --strict`.
+
+**Thứ tự ưu tiên cấu hình engine** (xem `ClientConfig.resolve`, `EnginePortResolution`): `~/.vflow/client.json` (người dùng tự đặt `repo`/`node`) > engine đóng gói trong bundle (`Contents/Resources/engine`, mặc định khi có) > suy ra repo dev từ đường dẫn `<repo>/client/build/VFlow.app` (khi dựng `--no-bundle`). Không bao giờ âm thầm rơi về cổng mặc định khi cấu hình lỗi/chưa biết.
+
+**Model lần đầu**: nếu bundle có kèm model và `~/.vflow/models/zipformer-vi-30m` CHƯA có, app tự chép sang (nguyên tử qua thư mục tạm + đổi tên, kiểm sha256 từng tệp theo manifest sau khi chép, dọn thư mục tạm nếu lần trước bị gián đoạn) — xem `VFlowCore.ModelBootstrap`. Model đã có ở `~/.vflow` thì **không bao giờ bị đè**. Trạng thái/lỗi hiện ở tab Tổng quan.
+
+**`install-app.sh`**: dựng bản đầy đủ, thoát nhẹ nhàng (AppleScript `quit`, chờ tối đa 10s, không `kill -9`) **chỉ** các tiến trình vflow có đường dẫn thực thi trong `client/build/VFlow.app` hoặc `/Applications/vflow.app`, sao chép bằng `ditto` sang `/Applications/vflow.app` (có bản cũ thì sao lưu ra `~/.vflow/backup/` trước), gỡ cách ly (`xattr -dr com.apple.quarantine`), kiểm chữ ký. Không dùng `sudo`; thiếu quyền ghi `/Applications` thì dừng. Không tự mở app sau khi cài.
+
+**Lưu ý chữ ký**: bản ad-hoc trong `/Applications/vflow.app` được ký lại độc lập với bản trong `client/build/` mỗi lần cài — macOS sẽ coi là "app khác" và đòi cấp lại quyền macOS (Micro, Theo dõi đầu vào, Trợ năng) cho bản `/Applications`, đó là bản dùng thật.
+
+### Nợ kỹ thuật
+`bin/vflow.js` có import TĨNH ở đầu file từ `eval/metrics.js`, `eval/bench.js`, `eval/evaluate.js` (dùng cho lệnh `record`/`bench`/`compare`, không phải `serve`). Vì vậy `bundle-engine.sh` phải đóng gói cả các tệp `.js` ở gốc `eval/` (bỏ `*.test.js`, `eval/reports`, `eval/prompts`, `eval/phowhisper-server`) chứ không chỉ `bin/`+`engine/` như dự kiến ban đầu — nếu không `node bin/vflow.js serve` sẽ lỗi `ERR_MODULE_NOT_FOUND` ngay khi khởi động dù lệnh `serve` không cần các module đó. Nên đổi các import này sang `import()` động trong `bin/vflow.js` (việc của engine/, ngoài phạm vi `client/` — coordinator giao ở task khác).
 
 ## Cấu trúc
 | Target | Nội dung |
