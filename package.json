@@ -8,6 +8,12 @@
     "node": ">=22"
   },
   "scripts": {
-    "test": "node --test \"{engine,eval,scripts}/**/*.test.{js,mjs}\""
+    "test": "node --test \"{bin,engine,eval,scripts}/**/*.test.{js,mjs}\""
+  },
+  "bin": {
+    "vflow": "bin/vflow.js"
+  },
+  "dependencies": {
+    "sherpa-onnx-node": "2.0.0"
   }
 }
