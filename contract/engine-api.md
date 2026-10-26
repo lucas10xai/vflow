@@ -30,14 +30,14 @@ Phản hồi 200:
                           { "type": "filler_removed", "from": "ừm", "to": "" } ],
             "rewrite": { "used": false, "error": null } } }
 ```
-Quy tắc: `text` luôn có giá trị dùng được; nếu bước viết lại (`email`) lỗi hoặc quá thời gian thì `text = text_raw`, `rewrite = {used:false,error:"<mã>"}` (không báo thành công giả). Âm thanh rỗng/im lặng trả `text:""` kèm `"silence":true`, không phải lỗi.
+Quy tắc: `text_raw` luôn là chữ gốc do STT trả về, không đổi. `text` luôn có giá trị dùng được. Nếu bước viết lại (`email`) lỗi hoặc quá thời gian thì `text` = văn bản đã qua từ điển nhưng CHƯA viết lại (không áp thêm `clean`), `rewrite = {used:false,error:"<mã>"}` (không báo thành công giả). Âm thanh rỗng/im lặng trả `text:""` kèm `"silence":true`, không phải lỗi.
 
 ## Từ điển cá nhân
 `GET /v1/dictionary` → `{ "entries": [ { "term": "deploy", "spoken": ["đi plôi","đì ploi"], "kind": "term", "uses": 12, "last_used": "2026-10-26T01:00:00Z" } ] }`
 `PUT /v1/dictionary` thay toàn bộ (kiểm schema, tối đa 5.000 mục). `POST /v1/corrections` với `{ "before": "…", "after": "…" }` → `{ "suggestions": [ { "term": "…", "spoken": ["…"] } ] }` (chỉ gợi ý, người dùng xác nhận mới ghi). Tệp lưu `~/.vflow/dictionary.json` (0600), không nằm trong repo. Hạt giống `config/dictionary.seed.json` chỉ chứa thuật ngữ chung, không có tên riêng/khoá.
 
 ## Cấu hình (`~/.vflow/config.json`, tất cả có mặc định)
-`default_model`, `rewrite.url` (mặc định `http://127.0.0.1:20128/v1`), `rewrite.model`, `rewrite.timeout_ms` (mặc định 8000), `rewrite.key_file` (đường dẫn tệp chứa khoá; **không** chứa khoá trực tiếp trong cấu hình). `remote.phowhisper.url`.
+`default_model`, `rewrite.url` (mặc định `http://127.0.0.1:20128/v1`), `rewrite.model`, `rewrite.timeout_ms` (mặc định 8000), `rewrite.key_file` (đường dẫn tệp chứa khoá; **không** chứa khoá trực tiếp trong cấu hình), `auto.apps` (bảng ánh xạ `{ "<bundleId>": "normal|clean|email" }` cho chế độ `auto`; có mặc định, sửa được). `remote.phowhisper.url`.
 
 ## Chế độ
 - `normal`: STT + từ điển.
@@ -47,7 +47,7 @@ Quy tắc: `text` luôn có giá trị dùng được; nếu bước viết lạ
 
 ## Bất biến cần test
 1. Âm thanh không bao giờ được ghi xuống đĩa; log không chứa văn bản.
-2. Viết lại lỗi ⇒ `text == text_raw` và `rewrite.error` có giá trị.
+2. Viết lại lỗi ⇒ `text` là văn bản đã qua từ điển (chưa viết lại), `text_raw` giữ nguyên chữ STT gốc, và `rewrite.error` có giá trị.
 3. Thiếu/sai token ⇒ 401 `unauthorized`; `Host` lạ ⇒ từ chối.
 4. Model thiếu/hỏng ⇒ `model_unavailable` kèm lý do, không rơi về model khác một cách âm thầm.
 5. Khoá viết lại không xuất hiện trong bất kỳ log/phản hồi/lỗi nào.
