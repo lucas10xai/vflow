@@ -8,6 +8,7 @@ import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
+import { fileURLToPath } from 'node:url';
 import { performance } from 'node:perf_hooks';
 import { createStt, vflowHome, DEFAULT_MODEL } from '../engine/stt/index.js';
 import { LOCAL_MODELS, findModel } from '../engine/stt/registry.js';
@@ -29,6 +30,13 @@ const USAGE = `Cách dùng: vflow <lệnh> [tuỳ chọn]
   bench <wav|thư mục> [--model id] [--runs N] [--json] [--out tệp.json]
   eval --set <thư mục> [--model id] [--json] [--out tệp.json]   cặp *.wav + *.txt cùng tên
   doctor                                       kiểm nền tảng, RAM, runtime, model
+  record-set --prompts <tệp> --out <thư mục> [--device N] [--redo NN,..] [--input-fake [--fake-gain=dB]]
+             thu bộ câu NN.wav (16 kHz mono PCM16) + NN.txt, chỉ thu khi bấm Enter; chạy lại = tiếp tục
+             quyền micro macOS: Cài đặt hệ thống → Quyền riêng tư & Bảo mật → Micrô → bật cho app terminal
+             (xem eval/RECORDING.md)
+  record-set --list-devices                    liệt kê thiết bị âm thanh macOS (ffmpeg avfoundation)
+  compare --set <thư mục> --models id1,id2[,..] [--out <thư mục>] [--mode normal|clean|email]
+          [--dictionary <tệp>] [--synthetic] [--json]   so sánh model; báo cáo mặc định ở <set>/reports/
 
 Biến môi trường: VFLOW_HOME (mặc định ~/.vflow), VFLOW_PORT, VFLOW_REMOTE_TOKEN.`;
 
@@ -229,6 +237,98 @@ async function cmdDoctor() {
   if (bad) throw new Error(`doctor: ${bad} lỗi`);
 }
 
+async function cmdRecordSet(args) {
+  const { values, positionals } = parseArgs({
+    args, allowPositionals: true,
+    options: {
+      prompts: { type: 'string' }, out: { type: 'string' }, device: { type: 'string' }, redo: { type: 'string' },
+      'list-devices': { type: 'boolean' }, 'input-fake': { type: 'boolean' }, 'fake-gain': { type: 'string' },
+    },
+  });
+  if (positionals.length) throw new UsageError('record-set không nhận tham số vị trí');
+  const rec = await import('../eval/record.js');
+  if (values['list-devices']) {
+    const devices = rec.listAudioDevices();
+    if (devices.length === 0) throw new Error(`ffmpeg không liệt kê được thiết bị âm thanh nào.\n${rec.MIC_PERMISSION_HELP}`);
+    for (const d of devices) process.stdout.write(`[${d.index}] ${d.name}\n`);
+    return;
+  }
+  if (!values.prompts || !values.out) throw new UsageError('record-set cần --prompts <tệp> và --out <thư mục>');
+  const device = Number(values.device ?? 0);
+  if (!Number.isInteger(device) || device < 0) throw new UsageError(`--device phải là số nguyên ≥ 0: ${values.device}`);
+  const fakeGainDb = Number(values['fake-gain'] ?? 0);
+  if (!Number.isFinite(fakeGainDb)) throw new UsageError(`--fake-gain phải là số (dB): ${values['fake-gain']}`);
+  if (values['fake-gain'] !== undefined && !values['input-fake']) throw new UsageError('--fake-gain chỉ dùng với --input-fake');
+  const redo = values.redo ? values.redo.split(',').map((x) => x.trim().padStart(2, '0')) : [];
+  const prompts = rec.parsePrompts(await fsp.readFile(values.prompts, 'utf8'));
+  const out = path.resolve(values.out);
+  const repo = fileURLToPath(new URL('..', import.meta.url)).replace(/[\\/]+$/, '');
+  if (out === repo || out.startsWith(repo + path.sep)) throw new UsageError(`Không ghi âm thanh vào trong repo (${repo}); dùng ví dụ ~/.vflow/eval/<tên-bộ>/`);
+  if (!values['input-fake']) {
+    if (process.platform !== 'darwin') throw new Error('Thu bằng micro chỉ hỗ trợ macOS (avfoundation); dùng --input-fake để thử.');
+    const devices = rec.listAudioDevices();
+    const d = devices.find((x) => x.index === device);
+    if (!d) throw new Error(`Không có thiết bị âm thanh [${device}]. Có: ${devices.map((x) => `[${x.index}] ${x.name}`).join(', ') || 'không có'}\n${rec.MIC_PERMISSION_HELP}`);
+    process.stdout.write(`Micro: [${d.index}] ${d.name}\n(Lần đầu thu, macOS sẽ hỏi quyền micro cho ứng dụng terminal; nếu thu ra im lặng hoặc lỗi:)\n${rec.MIC_PERMISSION_HELP}\n`);
+  } else {
+    process.stdout.write(`Nguồn GIẢ (ffmpeg lavfi sine 440 Hz${fakeGainDb ? `, ${fakeGainDb} dB` : ''}): bộ này sẽ bị đánh dấu synthetic.\n`);
+  }
+  const r = await rec.recordSession({ prompts, out, device, fake: Boolean(values['input-fake']), fakeGainDb, redo, promptsFile: values.prompts });
+  process.stdout.write(`\nKết thúc: lưu ${r.saved.length} câu${r.saved.length ? ` (${r.saved.join(', ')})` : ''}, bỏ qua ${r.skipped.length}, còn thiếu ${r.remaining}/${prompts.length}.${r.remaining ? ' Chạy lại lệnh để tiếp tục.' : ''}\n`);
+}
+
+async function cmdCompare(args) {
+  const { values, positionals } = parseArgs({
+    args, allowPositionals: true,
+    options: {
+      set: { type: 'string' }, models: { type: 'string' }, out: { type: 'string' }, mode: { type: 'string' },
+      dictionary: { type: 'string' }, synthetic: { type: 'boolean' }, json: { type: 'boolean' },
+    },
+  });
+  if (positionals.length) throw new UsageError('compare không nhận tham số vị trí');
+  if (!values.set || !values.models) throw new UsageError('compare cần --set <thư mục> và --models id1,id2');
+  const models = [...new Set(values.models.split(',').map((x) => x.trim()).filter(Boolean))];
+  for (const m of models) if (!findModel(m)) throw new UsageError(`Không có model "${m}"`);
+  const mode = values.mode ?? 'normal';
+  if (!['normal', 'clean', 'email'].includes(mode)) throw new UsageError(`--mode phải là normal|clean|email: ${mode}`);
+  const cmp = await import('../eval/compare.js');
+  const setDir = path.resolve(values.set);
+  const { pairs, missingRef } = await findPairs(setDir);
+  if (pairs.length === 0) throw new Error(`Không có cặp .wav + .txt nào trong ${setDir}`);
+  const meta = (await cmp.readSetMeta(setDir)) ?? (values.synthetic ? {} : null);
+  if (values.synthetic && meta) meta.synthetic = true;
+  const config = await readConfig();
+  // Từ điển dùng bản sao trong thư mục tạm: post tăng `uses` và ghi tệp mỗi lần thay, không được đụng
+  // ~/.vflow/dictionary.json của người dùng. Không có --dictionary ⇒ chỉ hạt giống.
+  const tmp = await fsp.mkdtemp(path.join(os.tmpdir(), 'vflow-compare-'));
+  try {
+    const dictPath = path.join(tmp, 'dictionary.json');
+    if (values.dictionary) await fsp.copyFile(values.dictionary, dictPath);
+    const { createPostProcessor } = await import('../engine/post/index.js');
+    const post = createPostProcessor({ dictionaryPath: dictPath, config, log: () => {} });
+    const stt = createStt({ home, config });
+    const runs = await cmp.runCompare({ pairs, models, stt, post, readWave, mode, log: err });
+    const report = cmp.buildReport({
+      set: setDir, meta, count: pairs.length, missing_ref: missingRef, mode,
+      dictionary: values.dictionary ? `bản sao của ${path.basename(values.dictionary)}` : 'chỉ hạt giống config/dictionary.seed.json',
+      terms: await loadTerms(), runs,
+      host: `${os.hostname().split('.')[0]} (${process.platform}-${process.arch}, ${os.cpus()[0]?.model ?? 'CPU?'})`,
+    });
+    const md = cmp.compareMarkdown(report);
+    const outDir = path.resolve(values.out ?? path.join(setDir, 'reports'));
+    await fsp.mkdir(outDir, { recursive: true, mode: 0o700 });
+    const stamp = report.date.replace(/[:.]/g, '-');
+    const base = path.join(outDir, `compare-${stamp}`);
+    await fsp.writeFile(`${base}.json`, JSON.stringify(report, null, 2) + '\n');
+    await fsp.writeFile(`${base}.md`, md + '\n');
+    process.stdout.write((values.json ? JSON.stringify(report, null, 2) : md) + '\n');
+    err(`Báo cáo: ${base}.md và ${base}.json`);
+    if (Object.values(report.models).every((s) => s.ok === 0)) throw new Error('Không model nào chạy được clip nào');
+  } finally {
+    await fsp.rm(tmp, { recursive: true, force: true });
+  }
+}
+
 async function main(argv) {
   const [cmd, ...args] = argv;
   switch (cmd) {
@@ -238,6 +338,8 @@ async function main(argv) {
     case 'bench': return cmdBench(args);
     case 'eval': return cmdEval(args);
     case 'doctor': return cmdDoctor();
+    case 'record-set': return cmdRecordSet(args);
+    case 'compare': return cmdCompare(args);
     case undefined: case '-h': case '--help': case 'help':
       process.stdout.write(USAGE + '\n');
       if (cmd === undefined) process.exitCode = 2;
