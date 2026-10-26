@@ -217,6 +217,36 @@ private func err(_ code: String, _ msg: String) -> Data { json(#"{"error":{"code
     }
 }
 
+@Suite struct DictationModeTests {
+    /// Danh sách theo hợp đồng (contract/engine-api.md mục Chế độ): chỉ `tidy`/`email` gửi CHỮ qua 9Router;
+    /// `auto` mặc định không bao giờ gọi LLM (bất biến 10).
+    static let contractSendsTextToCloud: Set<DictationMode> = [.tidy, .email]
+
+    @Test func sendsTextToCloudMatchesContractList() {
+        for m in DictationMode.allCases {
+            #expect(m.sendsTextToCloud == Self.contractSendsTextToCloud.contains(m), "\(m): sendsTextToCloud lệch với hợp đồng")
+        }
+    }
+
+    /// Một nguồn duy nhất: mô tả hiển thị ở Tổng quan/Cài đặt/menu đều đọc từ `subtitle`/`sendsTextToCloud`
+    /// của `DictationMode` này, nên chỉ cần kiểm chuỗi "gửi chữ" trong `subtitle` khớp đúng cờ gọi LLM.
+    @Test func subtitleMentionsSendingTextOnlyWhenModeCallsLLM() {
+        for m in DictationMode.allCases {
+            let mentionsSendingText = m.subtitle.lowercased().contains("gửi chữ")
+            #expect(mentionsSendingText == m.sendsTextToCloud, "\(m): mô tả \"\(m.subtitle)\" không khớp sendsTextToCloud=\(m.sendsTextToCloud)")
+        }
+    }
+
+    @Test func autoDescribesLocalOnlyRoutingNotPrivacyLie() {
+        let s = DictationMode.auto.subtitle
+        #expect(!DictationMode.auto.sendsTextToCloud)
+        #expect(s.contains("terminal") || s.lowercased().contains("terminal"))
+        #expect(s.contains("Làm sạch"))
+        #expect(s.contains("Thường"))
+        #expect(s.contains("thủ công"))
+    }
+}
+
 @Suite struct OverlayTextTests {
     @Test func fourStatesHaveSymbolsAndVietnamese() {
         #expect(OverlayText.present(.listening(level: 0)).text == "Đang nghe")

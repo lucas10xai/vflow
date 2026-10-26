@@ -16,11 +16,15 @@ test('không có tệp ⇒ mặc định theo contract', (t) => {
   assert.equal(c.rewrite.url, 'http://127.0.0.1:20128/v1');
   assert.equal(c.rewrite.timeout_ms, 8000);
   assert.equal(c.rewrite.model, null);
-  assert.equal(c.auto.apps['com.apple.mail'], 'email');
+  // Bất biến 10: mặc định auto.apps chỉ chọn chế độ trong máy (clean/dev/normal), không bao giờ email/tidy.
+  assert.equal(c.auto.apps['com.apple.mail'], 'clean');
   assert.equal(c.auto.apps['com.googlecode.iterm2'], 'dev');
   assert.equal(c.auto.apps['com.google.Chrome'], undefined);
   assert.equal(c.auto.apps['com.apple.Terminal'], 'dev');
-  assert.equal(c.auto.apps['com.tinyspeck.slackmacgap'], 'tidy');
+  assert.equal(c.auto.apps['com.tinyspeck.slackmacgap'], 'clean');
+  for (const mode of Object.values(DEFAULT_CONFIG.auto.apps)) {
+    assert.ok(['normal', 'clean', 'dev'].includes(mode), `mặc định auto.apps không được trỏ tới tidy/email: ${mode}`);
+  }
   assert.equal(c.tidy.guard.min_token_overlap, 0.85);
   assert.deepEqual(loadConfig(), loadConfig(join(tmp(t), 'x.json')));
 });
@@ -32,9 +36,17 @@ test('trộn với mặc định, giữ khoá lạ ở cấp trên, không làm 
   assert.equal(c.rewrite.model, 'm');
   assert.equal(c.rewrite.url, DEFAULT_CONFIG.rewrite.url);
   assert.equal(c.auto.apps['a.b'], 'clean');
-  assert.equal(c.auto.apps['com.apple.mail'], 'email');
+  assert.equal(c.auto.apps['com.apple.mail'], 'clean');
   assert.deepEqual(c.server, { port: 1 });
   assert.equal(DEFAULT_CONFIG.auto.apps['a.b'], undefined);
+});
+
+test('người dùng vẫn tự ánh xạ auto.apps tới tidy/email được (chỉ mặc định mới bị cấm)', (t) => {
+  const p = join(tmp(t), 'c.json');
+  writeFileSync(p, JSON.stringify({ auto: { apps: { 'com.apple.mail': 'email', 'com.tinyspeck.slackmacgap': 'tidy' } } }));
+  const c = loadConfig(p);
+  assert.equal(c.auto.apps['com.apple.mail'], 'email');
+  assert.equal(c.auto.apps['com.tinyspeck.slackmacgap'], 'tidy');
 });
 
 test('sai schema ⇒ ConfigError bad_config', (t) => {

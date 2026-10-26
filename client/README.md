@@ -126,7 +126,7 @@ Một cửa sổ (`.titled`, đổi cỡ được, nhớ kích thước/vị tr�
 ### Chế độ đọc chính tả (6)
 | Chế độ | Trong máy/Đám mây | Mô tả |
 |---|---|---|
-| Tự động | theo ứng dụng | Chọn chế độ theo `auto.apps` (thư→email, terminal/IDE→dev, nhắn tin→tidy, còn lại→normal) |
+| Tự động | trong máy | Chọn theo `auto.apps` (mặc định CHỈ chọn chế độ trong máy — bất biến 10: terminal/IDE→dev, thư/nhắn tin→clean, còn lại→normal); tự ánh xạ sang tidy/email được nhưng không phải mặc định |
 | Thường | trong máy | STT + từ điển |
 | Làm sạch | trong máy | + bỏ từ đệm, sửa dấu câu cơ bản (quy tắc, không LLM) |
 | **Gọn** | **đám mây (9Router)** | + snippets, quy tắc lập trình, LLM làm gọn (thêm dấu câu, bỏ từ đệm, tự sửa giữa câu); guard chặn LLM thêm nội dung lạ |

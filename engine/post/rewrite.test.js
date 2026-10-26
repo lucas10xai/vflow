@@ -177,12 +177,28 @@ test('email: chưa đặt rewrite.model ⇒ no_model, không gọi mạng', asyn
   assert.equal(srv.requests.length, 0);
 });
 
-test('auto với ứng dụng thư ⇒ email', async (t) => {
+test('auto với ứng dụng thư ⇒ clean (mặc định mới, bất biến 10: không gọi LLM); tự ánh xạ sang email mới gọi', async (t) => {
   const srv = await startServer(t);
   const { p } = setup(t, srv.url);
   const r = await p.process({ textRaw: RAW, mode: 'auto', app: 'com.apple.mail' });
-  assert.equal(r.mode, 'email');
-  assert.equal(r.rewrite.used, true);
+  assert.equal(r.mode, 'clean');
+  assert.equal(r.rewrite.used, false);
+  assert.equal(srv.requests.length, 0);
+
+  const dir = mkdtempSync(join(tmpdir(), 'vflow-post-rewrite-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const keyFile = join(dir, 'rewrite.key');
+  writeFileSync(keyFile, `${CANARY}\n`, { mode: 0o600 });
+  const dictionaryPath = join(dir, 'dictionary.json');
+  writeFileSync(dictionaryPath, JSON.stringify({ entries: [] }));
+  const p2 = createPostProcessor({
+    dictionaryPath,
+    config: { rewrite: { url: srv.url, model: 'ok', timeout_ms: 500, key_file: keyFile }, auto: { apps: { 'com.apple.mail': 'email' } } },
+    log: () => {},
+  });
+  const r2 = await p2.process({ textRaw: RAW, mode: 'auto', app: 'com.apple.mail' });
+  assert.equal(r2.mode, 'email');
+  assert.equal(r2.rewrite.used, true);
 });
 
 test('khoá canh gác KHÔNG xuất hiện trong kết quả, log, stdout/stderr hay tệp ghi ra ở mọi tình huống', async (t) => {

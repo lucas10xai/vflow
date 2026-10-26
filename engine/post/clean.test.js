@@ -1,9 +1,33 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createServer } from 'node:http';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createPostProcessor } from './index.js';
+import { DEFAULT_CONFIG } from './config.js';
+
+/** Máy chủ LLM giả: đếm yêu cầu, lúc được gọi thì vọng lại nguyên văn người dùng gửi (qua guard tidy dễ dàng). */
+async function startFakeLlmServer(t) {
+  const requests = [];
+  const server = createServer((req, res) => {
+    let body = '';
+    req.setEncoding('utf8');
+    req.on('data', (c) => (body += c));
+    req.on('end', () => {
+      requests.push(JSON.parse(body));
+      const userText = JSON.parse(body).messages.at(-1).content;
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ choices: [{ message: { content: userText } }] }));
+    });
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  t.after(() => {
+    server.closeAllConnections();
+    server.close();
+  });
+  return { url: `http://127.0.0.1:${server.address().port}/v1`, requests };
+}
 
 function setup(t, config = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'vflow-post-clean-'));
@@ -89,11 +113,12 @@ test('normal không bỏ từ đệm, không sửa dấu câu', async (t) => {
 });
 
 test('auto chọn chế độ theo bundle id; không biết ⇒ normal; bảng sửa được qua cấu hình', async (t) => {
-  const p = setup(t, { auto: { apps: { 'com.example.Notes': 'clean', 'com.apple.Terminal': 'normal' } } });
+  // 'com.tinyspeck.slackmacgap': 'tidy' ở đây là NGƯỜI DÙNG tự ghi đè (mặc định của Slack là 'clean').
+  const p = setup(t, { auto: { apps: { 'com.example.Notes': 'clean', 'com.apple.Terminal': 'normal', 'com.tinyspeck.slackmacgap': 'tidy' } } });
   const run = (app) => p.process({ textRaw: 'ừm đi plôi', mode: 'auto', app });
   assert.equal((await run('com.googlecode.iterm2')).mode, 'dev');
   assert.equal((await run('com.googlecode.iterm2')).text, 'deploy');
-  assert.equal((await run('com.tinyspeck.slackmacgap')).mode, 'tidy');
+  assert.equal((await run('com.tinyspeck.slackmacgap')).mode, 'tidy'); // ghi đè mặc định ('clean') sang 'tidy'
   // chưa đặt rewrite.model ⇒ tidy không gọi được LLM, dùng văn bản dự phòng (dict+clean).
   const slack = await run('com.tinyspeck.slackmacgap');
   assert.equal(slack.text, 'deploy');
@@ -103,10 +128,54 @@ test('auto chọn chế độ theo bundle id; không biết ⇒ normal; bảng s
   assert.equal((await run('com.example.Notes')).mode, 'clean');
   assert.equal((await run('com.apple.Terminal')).mode, 'normal'); // ghi đè mặc định
   assert.equal((await run('toString')).mode, 'normal'); // không lọt thuộc tính prototype
+  assert.equal((await run('com.apple.mail')).mode, 'clean'); // mặc định mới (bất biến 10): thư → clean, không email
 });
 
 test('chế độ lạ hoặc textRaw không phải chuỗi ⇒ lỗi bad_request', async (t) => {
   const p = setup(t);
   await assert.rejects(p.process({ textRaw: 'x', mode: 'loud' }), { code: 'bad_request' });
   await assert.rejects(p.process({ textRaw: null }), { code: 'bad_request' });
+});
+
+test('bất biến 10: cấu hình mặc định ⇒ mode=auto KHÔNG BAO GIỜ gọi LLM, với mọi app trong auto.apps mặc định và vài app lạ', async (t) => {
+  const srv = await startFakeLlmServer(t);
+  const dir = mkdtempSync(join(tmpdir(), 'vflow-post-clean-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const keyFile = join(dir, 'rewrite.key');
+  writeFileSync(keyFile, 'khoa-gia-khong-bao-gio-duoc-dung\n');
+  // rewrite.model/key_file được ĐẶT ĐẦY ĐỦ: nếu auto lỡ phân giải sang tidy/email thì sẽ THỰC SỰ gọi srv,
+  // nên "0 yêu cầu" dưới đây là bằng chứng thật, không phải vì thiếu model/khoá mà engine tự bỏ qua.
+  const config = { rewrite: { url: srv.url, model: 'model-giả', timeout_ms: 2000, key_file: keyFile } };
+  const dictionaryPath = join(dir, 'dictionary.json');
+  writeFileSync(dictionaryPath, JSON.stringify({ entries: [] }));
+  const p = createPostProcessor({ dictionaryPath, config, log: () => {} });
+
+  const apps = [...Object.keys(DEFAULT_CONFIG.auto.apps), 'com.unknown.lạ', 'org.example.KhongTonTai', undefined];
+  for (const app of apps) {
+    const r = await p.process({ textRaw: 'ừm mình cần kiểm tra lại', mode: 'auto', app });
+    assert.ok(['normal', 'clean', 'dev'].includes(r.mode), `app ${app} phải phân giải sang chế độ trong máy, nhận "${r.mode}"`);
+    assert.equal(r.rewrite.used, false, `app ${app}: rewrite.used phải false`);
+    assert.equal(r.rewrite.error, null, `app ${app}: rewrite.error phải null`);
+  }
+  assert.equal(srv.requests.length, 0, 'máy chủ LLM giả không được nhận yêu cầu nào');
+});
+
+test('ngược với bất biến 10: tự ánh xạ một app tới tidy trong auto.apps ⇒ CÓ gọi LLM', async (t) => {
+  const srv = await startFakeLlmServer(t);
+  const dir = mkdtempSync(join(tmpdir(), 'vflow-post-clean-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const keyFile = join(dir, 'rewrite.key');
+  writeFileSync(keyFile, 'khoa-gia\n');
+  const config = {
+    rewrite: { url: srv.url, model: 'model-giả', timeout_ms: 2000, key_file: keyFile },
+    auto: { apps: { 'com.example.TuChon': 'tidy' } },
+  };
+  const dictionaryPath = join(dir, 'dictionary.json');
+  writeFileSync(dictionaryPath, JSON.stringify({ entries: [] }));
+  const p = createPostProcessor({ dictionaryPath, config, log: () => {} });
+
+  const r = await p.process({ textRaw: 'mình cần kiểm tra lại', mode: 'auto', app: 'com.example.TuChon' });
+  assert.equal(r.mode, 'tidy');
+  assert.equal(r.rewrite.used, true, JSON.stringify(r));
+  assert.equal(srv.requests.length, 1, 'tự ánh xạ sang tidy thì phải thấy đúng 1 yêu cầu LLM');
 });

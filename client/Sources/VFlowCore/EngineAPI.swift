@@ -25,7 +25,7 @@ public enum DictationMode: String, CaseIterable, Sendable {
     /// Mô tả ngắn dưới mỗi chế độ (chọn chế độ ở Tổng quan/Cài đặt).
     public var subtitle: String {
         switch self {
-        case .auto: "Chọn chế độ theo ứng dụng đang dùng"
+        case .auto: "Tự chọn theo ứng dụng: Lập trình trong terminal/IDE, Làm sạch trong thư/chat, Thường ở nơi khác. Muốn dùng Gọn hoặc Thư hãy chọn thủ công."
         case .normal: "Trong máy — chỉ nhận dạng giọng nói + từ điển"
         case .clean: "Trong máy — bỏ từ đệm, sửa dấu câu cơ bản"
         case .email: "Gửi chữ qua 9Router — viết lại thành thư chuyên nghiệp"
