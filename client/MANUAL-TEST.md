@@ -3,17 +3,23 @@
 Dành cho chủ dự án, trên Mac thật. Mỗi bước có **Dự kiến**; khác dự kiến thì ghi lại bước + thông điệp trên thanh/menu.
 Chuẩn bị: `client/scripts/build-app.sh`; model `zipformer-vi-30m` đã có trong `~/.vflow/models`; chưa có engine nào chạy (`lsof -nP -iTCP:7611 -sTCP:LISTEN` rỗng).
 
-## A. Khởi động và cấp quyền
+## A. Khởi động, cửa sổ "vflow" và cấp quyền
 1. `open client/build/VFlow.app`.
-   **Dự kiến:** không có cửa sổ/biểu tượng Dock; biểu tượng micro trên menu bar; hộp thoại xin quyền Micro (chữ tiếng Việt từ Info.plist); hộp thoại/nhắc “Theo dõi đầu vào”; thanh đáy màn hình “Lỗi: Thiếu quyền Theo dõi đầu vào (Input Monitoring)”.
+   **Dự kiến:** không có biểu tượng Dock; biểu tượng micro trên menu bar (có thể bị ẩn nếu thanh menu chật/notch che — xem bước 1b); **cửa sổ "vflow" tự hiện** (mặc định bật) với: dòng hướng dẫn giữ ⌥ trái, trạng thái engine + model, 3 quyền (Chưa cấp lúc đầu), chế độ, lỗi gần nhất nếu có; hộp thoại xin quyền Micro (chữ tiếng Việt từ Info.plist); hộp thoại/nhắc “Theo dõi đầu vào”; cửa sổ hiện lỗi “Thiếu quyền Theo dõi đầu vào (Input Monitoring)”.
+1b. Thu nhỏ cửa sổ "vflow" lại (đừng thoát app), giả lập biểu tượng thanh menu bị ẩn (thử thu nhỏ cửa sổ trình duyệt/mở nhiều ứng dụng để thanh menu chật). Chạy lại `open client/build/VFlow.app`.
+   **Dự kiến:** KHÔNG có tiến trình VFlow thứ hai (`pgrep -fl "VFlow.app/Contents/MacOS/VFlow"` chỉ ra đúng 1 dòng); cửa sổ "vflow" được đưa ra trước thay vì mở lại từ đầu.
 2. Bấm “Cho phép” Micro.
-3. Menu › “Thiếu quyền Theo dõi đầu vào — mở Cài đặt…”.
+3. Trong cửa sổ "vflow" › hàng “Theo dõi đầu vào (Input Monitoring)” bấm “Cấp quyền…”.
    **Dự kiến:** mở đúng trang Quyền riêng tư & Bảo mật › Theo dõi đầu vào, có `vflow`. Bật lên.
-   **Dự kiến:** trong ~3 s dòng đó biến khỏi menu (nếu không: thoát và mở lại vflow).
-4. Menu › “Thiếu quyền Trợ năng — mở Cài đặt…”. Bật `vflow`.
-   **Dự kiến:** menu không còn dòng “Thiếu quyền …”. Menu › “Hướng dẫn cấp quyền…” hiện cả 3 quyền “ĐÃ CẤP”.
+   **Dự kiến:** trong ~2 s (cửa sổ tự kiểm lại quyền mỗi 2 giây khi đang hiện) hàng đó đổi thành “Đã cấp” màu xanh (nếu không: thoát và mở lại vflow). Menu cũng hết dòng “Thiếu quyền Theo dõi đầu vào…” cùng lúc.
+4. Tương tự với “Trợ năng (Accessibility)”.
+   **Dự kiến:** cả 3 quyền trong cửa sổ đều “Đã cấp”; menu không còn dòng “Thiếu quyền …”.
 5. `curl -s 127.0.0.1:7611/healthz` và `pgrep -fl "vflow.js serve"`.
-   **Dự kiến:** `ok:true`, `zipformer-vi-30m` `loaded:true` (sau vài giây); có một tiến trình node là con của VFlow. Menu dòng đầu: “engine con v0.1.0, sẵn sàng”; Model › liệt kê model, model chưa tải có lý do (`not_downloaded`, `missing_token`…).
+   **Dự kiến:** `ok:true`, `zipformer-vi-30m` `loaded:true` (sau vài giây); có một tiến trình node là con của VFlow. Cửa sổ "vflow" và menu đều nói “engine con v0.1.0, sẵn sàng” (không bao giờ khác nhau); mục Engine trong cửa sổ liệt kê từng model, model chưa tải có lý do (`not_downloaded`, `missing_token`…).
+5b. Đóng cửa sổ "vflow" bằng nút đóng (không phải nút Thoát).
+   **Dự kiến:** app vẫn chạy (`pgrep -fl "VFlow.app/Contents/MacOS/VFlow"` còn); engine con vẫn sống. Menu › “Mở cửa sổ vflow” (mục đầu menu) đưa cửa sổ lại.
+5c. (Chỉ nếu có cài [Haynoi](https://github.com/sonpiaz/haynoi) hoặc ứng dụng đọc chính tả khác cùng danh sách xung đột) Mở Haynoi, rồi mở lại cửa sổ "vflow".
+   **Dự kiến:** cửa sổ (và menu) hiện cảnh báo đỏ “Haynoi đang chạy: cả hai sẽ phản ứng khi giữ ⌥ trái. Hãy thoát một trong hai.”; vflow không tự thoát Haynoi. Thoát Haynoi ⇒ trong ~2 s cảnh báo biến mất.
 
 ## B. Đọc chính tả
 6. Mở Terminal, bấm vào dòng lệnh. Giữ ⌥ trái, chờ thấy “Đang nghe” (thanh mức âm nhảy theo giọng), nói “kiểm tra trạng thái git rồi commit”, nhả.
@@ -32,8 +38,8 @@ Chuẩn bị: `client/scripts/build-app.sh`; model `zipformer-vi-30m` đã có t
     **Dự kiến:** tự chuyển “Đang dịch” đúng lúc 120 s; nhả phím sau đó không gửi lần hai.
 13. Trong lúc “Đang dịch”, giữ ⌥ trái lần nữa.
     **Dự kiến:** không có lần ghi thứ hai chồng lên.
-14. Menu › Chế độ › “Thư (viết lại)”, mở Mail/Notes, đọc một đoạn thư.
-    **Dự kiến:** nếu 9Router + `rewrite.model` đã cấu hình: chữ được viết lại thành thư. Nếu chưa: vẫn dán bản chưa viết lại và thanh “Lỗi: Viết lại thư lỗi (no_model|no_key|…), đã dán bản chưa viết lại”. Thoát rồi mở lại app: chế độ vẫn là “Thư”. Đặt lại “Tự động”.
+14. Menu › Chế độ › “Thư (viết lại)” (hoặc chọn trong cửa sổ "vflow", mục Chế độ — hai nơi dùng chung UserDefaults), mở Mail/Notes, đọc một đoạn thư.
+    **Dự kiến:** nếu 9Router + `rewrite.model` đã cấu hình: chữ được viết lại thành thư. Nếu chưa: vẫn dán bản chưa viết lại và thanh “Lỗi: Viết lại thư lỗi (no_model|no_key|…), đã dán bản chưa viết lại”. Thoát rồi mở lại app: chế độ vẫn là “Thư” (ở cả menu lẫn cửa sổ). Đặt lại “Tự động”.
 
 ## C. Lỗi và hồi phục
 15. Rút micro USB/tai nghe giữa lúc đang nghe (nếu có micro ngoài).
@@ -56,6 +62,8 @@ Chuẩn bị: `client/scripts/build-app.sh`; model `zipformer-vi-30m` đã có t
 ## D. Khác
 23. Bật VoiceOver (⌘F5), đọc chính tả một câu.
     **Dự kiến:** VoiceOver đọc “vflow đang dịch giọng nói”, “vflow đã chèn chữ”; biểu tượng menu bar có nhãn.
+23b. VoiceOver vẫn bật: mở cửa sổ "vflow", dùng Tab/VoiceOver để duyệt qua từng hàng quyền, nút “Cấp quyền…”, Picker chế độ, các nút thao tác — không dùng chuột.
+    **Dự kiến:** mọi điều khiển đọc được tên + trạng thái bằng VoiceOver và bấm được bằng bàn phím (Space/Return); không có phần tử “mồ côi” không tên.
 24. Bật Giảm chuyển động (Trợ năng › Màn hình), giữ ⌥.
     **Dự kiến:** thanh mức âm đổi tức thì, không hoạt ảnh.
 25. Ứng dụng toàn màn hình / Space khác: giữ ⌥.

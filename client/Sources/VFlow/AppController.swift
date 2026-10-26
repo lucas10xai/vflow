@@ -13,6 +13,7 @@ final class AppController: NSObject {
     private var retry = RetryBuffer()
     private var supervisor: EngineSupervisor?
     private var menu: StatusMenu!
+    private var statusWindow: StatusWindowController!
     private var tickTimer: Timer?
     private var healthTimer: Timer?
     private var hotkeyRetryTimer: Timer?
@@ -21,6 +22,8 @@ final class AppController: NSObject {
     private var recordingStartedAt: TimeInterval = 0
     private let session: URLSession
     private let home = FileManager.default.homeDirectoryForCurrentUser.path
+    private let conflictDetector = ConflictDetector()
+    private let runningApps: RunningAppsProvider = WorkspaceRunningApps()
 
     private(set) var engineState: EngineState = .stopped
     private(set) var configError: ClientError?
@@ -29,6 +32,23 @@ final class AppController: NSObject {
     var mode: DictationMode {
         get { DictationMode(rawValue: UserDefaults.standard.string(forKey: "mode") ?? "") ?? .auto }
         set { UserDefaults.standard.set(newValue.rawValue, forKey: "mode") }
+    }
+
+    /// Công tắc "Hiện cửa sổ này khi mở app" (mặc định bật).
+    var showWindowOnLaunch: Bool {
+        get { ShowWindowPreference.resolve(stored: UserDefaults.standard.object(forKey: "showWindowOnLaunch") as? Bool) }
+        set { UserDefaults.standard.set(newValue, forKey: "showWindowOnLaunch") }
+    }
+
+    /// Mô hình thuần dùng chung cho menu và cửa sổ trạng thái — một nguồn duy nhất.
+    var statusModel: StatusModel {
+        StatusModel.build(engineState: engineState, configError: configError, lastError: lastError,
+                           permissions: PermissionKind.items, mode: mode, canRetryLast: canRetry,
+                           launchAtLogin: launchAtLogin, conflictWarning: conflictWarning(), hotkeysActive: hotkeysActive)
+    }
+
+    private func conflictWarning() -> String? {
+        ConflictText.warning(for: conflictDetector.detect(runningBundleIDs: runningApps.runningBundleIDs()))
     }
 
     override init() {
@@ -44,12 +64,13 @@ final class AppController: NSObject {
 
     func start() {
         menu = StatusMenu(controller: self)
+        statusWindow = StatusWindowController(controller: self)
         recorder.onLevel = { [weak self] l in self?.overlay.setLevel(l) }
         recorder.onInterrupted = { [weak self] why in self?.micInterrupted(why) }
         hotkeys.onInput = { [weak self] input in self?.handle(input) }
         hotkeys.onTapDisabled = { [weak self] in self?.tapDisabled() }
 
-        if AudioRecorder.permission() == .notDetermined { Permission.microphone.request() }
+        if AudioRecorder.permission() == .notDetermined { PermissionKind.microphone.request() }
         startHotkeys()
 
         switch ClientConfig.resolve(home: home, bundlePath: Bundle.main.bundlePath, fs: .live) {
@@ -69,7 +90,8 @@ final class AppController: NSObject {
                 MainActor.assumeIsolated { if let s = self?.supervisor { Task { await s.refresh() } } }
             }
         }
-        menu.refresh()
+        refreshUI()
+        if showWindowOnLaunch { openStatusWindow() }
     }
 
     /// Thoát: đóng engine con trước.
@@ -79,6 +101,27 @@ final class AppController: NSObject {
         inflight?.cancel()
         await supervisor?.stop()
     }
+
+    /// Cách điều khiển chính không phụ thuộc biểu tượng thanh menu: mở lại app (`open VFlow.app`
+    /// khi đang chạy), menu › "Mở cửa sổ vflow", hoặc (nếu bật) tự mở khi khởi động.
+    func openStatusWindow() {
+        refreshUI()
+        statusWindow.show()
+        NSApp.activate()
+    }
+
+    func openDataFolder() {
+        NSWorkspace.shared.open(FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".vflow"))
+    }
+
+    private func refreshUI() {
+        let model = statusModel
+        menu.refresh(model)
+        statusWindow.update(model)
+    }
+
+    /// Cửa sổ trạng thái gọi mỗi 2 giây khi đang hiện: quyền có thể vừa được cấp trong System Settings.
+    func refreshPermissionsNow() { refreshUI() }
 
     // MARK: engine
 
@@ -96,7 +139,7 @@ final class AppController: NSObject {
     private func engineStateChanged(_ s: EngineState) {
         engineState = s
         if case .failed(let e) = s { setError(ErrorText.message(e), showOverlay: true) }
-        menu.refresh()
+        refreshUI()
     }
 
     func restartEngine() {
@@ -115,23 +158,23 @@ final class AppController: NSObject {
 
     private func startHotkeys() {
         // Chỉ tạo event tap khi đã có quyền (tapCreate khi chưa có quyền tự bật hộp thoại hệ thống).
-        if Permission.inputMonitoring.granted, hotkeys.start() {
+        if PermissionKind.inputMonitoring.granted, hotkeys.start() {
             hotkeyRetryTimer?.invalidate()
             hotkeyRetryTimer = nil
-            menu.refresh()
+            refreshUI()
             return
         }
         // Thiếu quyền: hỏi một lần (thêm app vào danh sách), thử lại định kỳ.
-        Permission.inputMonitoring.request()
+        PermissionKind.inputMonitoring.request()
         setError(ErrorText.message(.inputMonitoringDenied), showOverlay: true)
         if hotkeyRetryTimer == nil {
             hotkeyRetryTimer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in
                 MainActor.assumeIsolated {
-                    guard let self, Permission.inputMonitoring.granted, self.hotkeys.start() else { return }
+                    guard let self, PermissionKind.inputMonitoring.granted, self.hotkeys.start() else { return }
                     self.hotkeyRetryTimer?.invalidate()
                     self.hotkeyRetryTimer = nil
                     self.lastError = nil
-                    self.menu.refresh()
+                    self.refreshUI()
                 }
             }
         }
@@ -172,7 +215,7 @@ final class AppController: NSObject {
         case .cancel:
             recorder.cancel()
             overlay.show(.notice(OverlayText.cancelled))
-            menu.refresh()
+            refreshUI()
         case .busyTimedOut:
             inflight?.cancel()
             inflight = nil
@@ -191,7 +234,7 @@ final class AppController: NSObject {
         switch AudioRecorder.permission() {
         case .authorized: break
         case .notDetermined:
-            Permission.microphone.request()
+            PermissionKind.microphone.request()
             return abortRecording(.micDenied)
         default:
             return abortRecording(.micDenied)
@@ -212,7 +255,7 @@ final class AppController: NSObject {
         recordingStartedAt = Self.now
         overlay.setLevel(0)
         overlay.show(.listening(level: 0))
-        menu.refresh()
+        refreshUI()
     }
 
     private func micInterrupted(_ why: String) {
@@ -240,7 +283,7 @@ final class AppController: NSObject {
 
     private func send(pcm: Data, mode: DictationMode, app: String?) {
         overlay.show(.transcribing)
-        menu.refresh()
+        refreshUI()
         let port = supervisor?.spec.port ?? ClientConfig.defaultPort
         let tokenPath = home + "/.vflow/token"
         inflight = Task { [session] in
@@ -289,13 +332,13 @@ final class AppController: NSObject {
         overlay.show(overlayState)
         machine.finished(optionHeld: HotkeyMonitor.leftOptionHeldNow())
         updateTicking()
-        menu.refresh()
+        refreshUI()
     }
 
     private func setError(_ message: String, showOverlay: Bool) {
         lastError = message
         if showOverlay { overlay.show(.error(message)) }
-        menu?.refresh()
+        refreshUI()
     }
 
     var phase: HotkeyPhase { machine.phase }
@@ -310,6 +353,6 @@ final class AppController: NSObject {
         } catch {
             setError("Không đổi được “Bật khi đăng nhập”: \(error.localizedDescription)", showOverlay: true)
         }
-        menu.refresh()
+        refreshUI()
     }
 }

@@ -1,38 +1,15 @@
 import AppKit
 import AVFoundation
 import ApplicationServices
+import VFlowCore
 
-/// Quyền macOS thật sự cần (xem client/README.md).
-enum Permission: CaseIterable {
-    case microphone
-    /// Event tap nghe phím toàn cục (kTCCServiceListenEvent).
-    case inputMonitoring
-    /// Gửi ⌘V tổng hợp (kTCCServicePostEvent, hiện ở mục Trợ năng).
-    case accessibility
-
-    var title: String {
-        switch self {
-        case .microphone: "Micro"
-        case .inputMonitoring: "Theo dõi đầu vào (Input Monitoring)"
-        case .accessibility: "Trợ năng (Accessibility)"
-        }
-    }
-
-    var why: String {
-        switch self {
-        case .microphone: "ghi giọng nói khi giữ ⌥ trái"
-        case .inputMonitoring: "nhận biết khi giữ/nhả phím ⌥ trái ở mọi ứng dụng"
-        case .accessibility: "dán chữ (⌘V) vào ứng dụng đang dùng"
-        }
-    }
-
+/// Quyền macOS thật sự cần (dữ liệu thuần — tên, lý do, nơi mở Cài đặt — nằm ở
+/// `VFlowCore.PermissionKind`, dùng chung với cửa sổ trạng thái và menu). Ở đây chỉ thêm các API
+/// gọi hệ thống thật (AVFoundation/ApplicationServices), không có trong VFlowCore vì VFlowCore
+/// không phụ thuộc AppKit để test được không cần chạy trên máy thật.
+extension PermissionKind {
     var settingsURL: URL {
-        let anchor = switch self {
-        case .microphone: "Privacy_Microphone"
-        case .inputMonitoring: "Privacy_ListenEvent"
-        case .accessibility: "Privacy_Accessibility"
-        }
-        return URL(string: "x-apple.systempreferences:com.apple.preference.security?\(anchor)")!
+        URL(string: "x-apple.systempreferences:com.apple.preference.security?\(settingsAnchor)")!
     }
 
     var granted: Bool {
@@ -58,5 +35,9 @@ enum Permission: CaseIterable {
 
     func openSettings() { NSWorkspace.shared.open(settingsURL) }
 
-    static var missing: [Permission] { allCases.filter { !$0.granted } }
+    static var missing: [PermissionKind] { allCases.filter { !$0.granted } }
+
+    /// Snapshot thuần cho `StatusModel` (cùng một nguồn dữ liệu cho menu và cửa sổ trạng thái).
+    var item: PermissionItem { PermissionItem(kind: self, granted: granted) }
+    static var items: [PermissionItem] { allCases.map(\.item) }
 }

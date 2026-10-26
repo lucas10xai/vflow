@@ -42,6 +42,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { NSApp.terminate(nil) }
     }
 
+    /// `open VFlow.app` lần nữa khi app đang chạy ⇒ không mở tiến trình thứ hai, chỉ đưa cửa sổ
+    /// trạng thái lên trước (cách để tìm lại app khi biểu tượng thanh menu bị ẩn).
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        controller?.openStatusWindow()
+        return true
+    }
+
+    /// Đóng cửa sổ trạng thái không được thoát app (chỉ còn menu bar).
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard let c = controller, !terminating else { return .terminateNow }
         terminating = true
