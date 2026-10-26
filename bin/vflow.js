@@ -27,6 +27,11 @@ const USAGE = `Cách dùng: vflow <lệnh> [tuỳ chọn]
   models list                                  liệt kê model và trạng thái
   models pull <id>                             tải model về ~/.vflow/models/<id>/ (kiểm sha256)
   serve [--port N]                             chạy HTTP cục bộ 127.0.0.1 (mặc định ${DEFAULT_PORT} hoặc VFLOW_PORT)
+  snippets list                                liệt kê snippets (~/.vflow/snippets.json)
+  snippets add <trigger> <text...>             thêm/thay snippet (text là các từ còn lại, nối bằng dấu cách)
+  snippets remove <trigger>                    xoá snippet theo trigger
+  settings get                                 in cài đặt hiện tại (JSON)
+  settings set <khoá> <giá trị>                đặt một cài đặt (true/false/null/số/chuỗi), ghi ~/.vflow/config.json
   bench <wav|thư mục> [--model id] [--runs N] [--json] [--out tệp.json]
   eval --set <thư mục> [--model id] [--json] [--out tệp.json]   cặp *.wav + *.txt cùng tên
   doctor                                       kiểm nền tảng, RAM, runtime, model
@@ -123,10 +128,19 @@ async function cmdServe(args) {
   const { token, created } = await ensureToken(path.join(home, 'token'));
   // Hậu xử lý thật (engine/post). Không có ⇒ dừng, không chạy với bộ "đồng nhất" giả.
   const { createPostProcessor } = await import('../engine/post/index.js');
-  const post = createPostProcessor({ dictionaryPath: path.join(home, 'dictionary.json'), config, fetchImpl: fetch, now: () => new Date() });
+  const { createSnippetStore } = await import('../engine/post/snippets.js');
+  const { createSettingsStore } = await import('../engine/post/settings.js');
+  const snippets = createSnippetStore({ path: path.join(home, 'snippets.json') });
+  const settings = createSettingsStore({ configPath: path.join(home, 'config.json') });
+  // Lưu ý: createPostProcessor hiện tại có thể chưa nhận snippets/settings (đang ghép dần với
+  // worker khác); truyền sẵn để có hiệu lực ngay khi tham số đó được thêm, không gây lỗi nếu chưa.
+  const post = createPostProcessor({
+    dictionaryPath: path.join(home, 'dictionary.json'), config, fetchImpl: fetch, now: () => new Date(),
+    snippets, settings,
+  });
   const stt = createStt({ home, config });
   const log = (e) => err(JSON.stringify({ ts: new Date().toISOString(), ...e }));
-  const server = createServer({ stt, post, token, log });
+  const server = createServer({ stt, post, token, snippets, settings, log });
   const real = await listen(server, port);
   err(`vflow engine đang nghe http://127.0.0.1:${real} (token: ${path.join(home, 'token')}${created ? ', vừa tạo' : ''})`);
   try {
@@ -140,6 +154,67 @@ async function cmdServe(args) {
     process.once('SIGINT', stop);
     process.once('SIGTERM', stop);
   });
+}
+
+async function cmdSnippets(args) {
+  const [sub, ...rest] = args;
+  const { createSnippetStore } = await import('../engine/post/snippets.js');
+  const store = createSnippetStore({ path: path.join(home, 'snippets.json') });
+  if (sub === 'list') {
+    const { entries } = store.list();
+    if (entries.length === 0) { process.stdout.write('(chưa có snippet nào)\n'); return; }
+    for (const e of entries) {
+      process.stdout.write(`${e.trigger}\t(dùng ${e.uses} lần${e.last_used ? `, gần nhất ${e.last_used}` : ''})\n`);
+    }
+    return;
+  }
+  if (sub === 'add') {
+    const [trigger, ...textParts] = rest;
+    if (!trigger || textParts.length === 0) throw new UsageError('snippets add cần <trigger> <text>');
+    const text = textParts.join(' ');
+    const { entries } = store.list();
+    store.replaceAll([...entries.filter((e) => e.trigger !== trigger), { trigger, text }]);
+    process.stdout.write(`Đã lưu snippet "${trigger}".\n`);
+    return;
+  }
+  if (sub === 'remove') {
+    const [trigger] = rest;
+    if (!trigger) throw new UsageError('snippets remove cần <trigger>');
+    const { entries } = store.list();
+    const next = entries.filter((e) => e.trigger !== trigger);
+    if (next.length === entries.length) throw new Error(`Không có snippet "${trigger}".`);
+    store.replaceAll(next);
+    process.stdout.write(`Đã xoá snippet "${trigger}".\n`);
+    return;
+  }
+  throw new UsageError('snippets cần "list", "add <trigger> <text>" hoặc "remove <trigger>"');
+}
+
+/** @param {string} s */
+function parseSettingValue(s) {
+  if (s === 'true') return true;
+  if (s === 'false') return false;
+  if (s === 'null') return null;
+  if (/^-?\d+$/.test(s)) return Number(s);
+  return s;
+}
+
+async function cmdSettings(args) {
+  const [sub, ...rest] = args;
+  const { createSettingsStore } = await import('../engine/post/settings.js');
+  const store = createSettingsStore({ configPath: path.join(home, 'config.json') });
+  if (sub === 'get') {
+    process.stdout.write(JSON.stringify(store.get(), null, 2) + '\n');
+    return;
+  }
+  if (sub === 'set') {
+    const [key, value] = rest;
+    if (!key || value === undefined) throw new UsageError('settings set cần <khoá> <giá trị>');
+    const next = store.update({ [key]: parseSettingValue(value) });
+    process.stdout.write(JSON.stringify(next, null, 2) + '\n');
+    return;
+  }
+  throw new UsageError('settings cần "get" hoặc "set <khoá> <giá trị>"');
 }
 
 /** @param {string} target @returns {Promise<string[]>} */
@@ -335,6 +410,8 @@ async function main(argv) {
     case 'transcribe': return cmdTranscribe(args);
     case 'models': return cmdModels(args);
     case 'serve': return cmdServe(args);
+    case 'snippets': return cmdSnippets(args);
+    case 'settings': return cmdSettings(args);
     case 'bench': return cmdBench(args);
     case 'eval': return cmdEval(args);
     case 'doctor': return cmdDoctor();

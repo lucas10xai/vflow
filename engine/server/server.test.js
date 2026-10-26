@@ -88,6 +88,7 @@ function request(port, { method = 'GET', path: p, headers = {}, body }) {
 }
 
 let tmp; let server; let port; let token; let logs; let fakes; let post; let realServer; let realPort;
+let snippetsFake; let settingsFake; let fullServer; let fullPort; let fullLogs;
 
 /** Liệt kê đệ quy mọi tệp dưới một thư mục. */
 function listFiles(dir) {
@@ -109,11 +110,22 @@ before(async () => {
   const realStt = createStt({ home: path.join(tmp, 'empty-home'), env: {} });
   realServer = createServer({ stt: realStt, post: fakePost(), token, log: () => {} });
   realPort = await listen(realServer, 0);
+  // Server đầy đủ (snippets/settings/command) cho các route mới — bộ nhớ giả riêng, độc lập với trên.
+  snippetsFake = fakeSnippets();
+  settingsFake = fakeSettings();
+  fullLogs = [];
+  const fullStt = createStt({ home: tmp, providerFactory: fakes.factory, config: { default_model: 'fake' } });
+  fullServer = createServer({
+    stt: fullStt, post: fakePostWithCommand(settingsFake), token, snippets: snippetsFake, settings: settingsFake,
+    log: (e) => fullLogs.push(JSON.stringify(e)),
+  });
+  fullPort = await listen(fullServer, 0);
 });
 
 after(async () => {
   await new Promise((r) => server.close(r));
   await new Promise((r) => realServer.close(r));
+  await new Promise((r) => fullServer.close(r));
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
@@ -352,4 +364,185 @@ test('/v1/dictionary và /v1/corrections chuyển tiếp sang post.dictionary; l
   assert.deepEqual(c.json, { suggestions: [{ term: 'deploy', spoken: ['đi plôi'] }] });
   const cBad = await request(port, { method: 'POST', path: '/v1/corrections', headers: auth(), body: JSON.stringify({ before: 1 }) });
   assert.equal(cBad.status, 400);
+});
+
+test('/v1/transcribe: post.actions luôn có mặt (mảng, mặc định rỗng khi hậu xử lý chưa trả)', async () => {
+  const r = await request(port, { method: 'POST', path: '/v1/transcribe', headers: { ...auth(), 'content-type': 'audio/wav' }, body: wav(16000, 1) });
+  assert.equal(r.status, 200, r.text);
+  assert.deepEqual(r.json.post.actions, []);
+});
+
+// --- Snippets, Cài đặt, Command Mode: hậu xử lý giả có command() + bộ nhớ snippets/settings giả ---
+
+/** Bộ nhớ snippets giả: đủ để kiểm GET/PUT chuyển tiếp và lỗi kiểm dữ liệu/nội bộ. */
+function fakeSnippets() {
+  const state = { entries: [{ trigger: 'chữ ký', text: 'Nguyễn Văn An', uses: 0, last_used: null }] };
+  return {
+    state,
+    list: () => ({ entries: state.entries }),
+    replaceAll: (entries) => {
+      if (entries.some((e) => typeof e.trigger !== 'string')) {
+        throw Object.assign(new Error('entries[0].trigger phải là chuỗi'), { code: 'bad_request' });
+      }
+      if (entries.some((e) => e.trigger === 'disk')) throw Object.assign(new Error('EACCES: /secret/path'), { code: 'EACCES' });
+      state.entries = entries;
+    },
+  };
+}
+
+/** Bộ nhớ settings giả: đủ để kiểm GET/PUT, và được command() đọc để quyết cloud_disabled. */
+function fakeSettings() {
+  let state = { cloud_llm: true, llm_model: null, llm_timeout_ms: 8000, actions_enabled: true };
+  return {
+    get: () => ({ ...state }),
+    update: (patch) => {
+      if (!patch || typeof patch !== 'object' || Object.keys(patch).some((k) => !(k in state))) {
+        throw Object.assign(new Error('khoá lạ'), { code: 'bad_request' });
+      }
+      if ('llm_timeout_ms' in patch && (typeof patch.llm_timeout_ms !== 'number' || patch.llm_timeout_ms < 1000 || patch.llm_timeout_ms > 30000)) {
+        throw Object.assign(new Error('llm_timeout_ms không hợp lệ'), { code: 'bad_request' });
+      }
+      if ('cloud_llm' in patch && typeof patch.cloud_llm !== 'boolean') {
+        throw Object.assign(new Error('cloud_llm phải là boolean'), { code: 'bad_request' });
+      }
+      state = { ...state, ...patch };
+      return { ...state };
+    },
+  };
+}
+
+class FakeCommandError extends Error {
+  /** @param {string} code @param {string} message */
+  constructor(code, message) {
+    super(message);
+    this.code = code;
+  }
+}
+
+/** post giả có command(): đọc settingsStore.get().cloud_llm để trả cloud_disabled đúng như thật. */
+function fakePostWithCommand(settingsStore) {
+  return {
+    ...fakePost(),
+    async command({ instruction, selection }) {
+      if (!settingsStore.get().cloud_llm) throw new FakeCommandError('cloud_disabled', 'LLM đám mây đang tắt.');
+      if (instruction === 'xin-timeout') throw new FakeCommandError('timeout', 'Lệnh quá thời gian.');
+      if (instruction === 'xin-no-model') throw new FakeCommandError('rewrite_unavailable', 'Chưa đặt model viết lại.');
+      if (instruction === 'xin-vo-ro') throw new Error('lỗi nội bộ bí mật: /secret/path/credentials');
+      const kind = selection ? 'edit' : 'draft';
+      return { text: `[${kind}] ${instruction}`, kind, timings_ms: { llm: 1 } };
+    },
+  };
+}
+
+test('GET/PUT /v1/snippets: chuyển tiếp, kiểm dữ liệu ⇒ bad_request, lỗi khác ⇒ internal không lộ chi tiết, tối đa 500 mục', async () => {
+  const g = await request(fullPort, { path: '/v1/snippets', headers: auth() });
+  assert.equal(g.status, 200);
+  assert.equal(g.json.entries[0].trigger, 'chữ ký');
+  const entries = [{ trigger: 'link lịch', text: 'https://cal.example' }];
+  const p = await request(fullPort, { method: 'PUT', path: '/v1/snippets', headers: auth(), body: JSON.stringify({ entries }) });
+  assert.equal(p.status, 200);
+  assert.deepEqual(p.json.entries, entries);
+  const bad = await request(fullPort, { method: 'PUT', path: '/v1/snippets', headers: auth(), body: JSON.stringify({ entries: [{ trigger: 1 }] }) });
+  assert.equal(bad.status, 400);
+  assert.equal(bad.json.error.code, 'bad_request');
+  const disk = await request(fullPort, { method: 'PUT', path: '/v1/snippets', headers: auth(), body: JSON.stringify({ entries: [{ trigger: 'disk', text: 'x' }] }) });
+  assert.equal(disk.status, 500);
+  assert.equal(disk.json.error.code, 'internal');
+  assert.ok(!disk.text.includes('/secret/path'));
+  const notArray = await request(fullPort, { method: 'PUT', path: '/v1/snippets', headers: auth(), body: JSON.stringify({ entries: 'x' }) });
+  assert.equal(notArray.status, 400);
+  const tooMany = await request(fullPort, { method: 'PUT', path: '/v1/snippets', headers: auth(), body: JSON.stringify({ entries: new Array(501).fill({ trigger: 'a', text: 'x' }) }) });
+  assert.equal(tooMany.status, 400);
+  const noToken = await request(fullPort, { path: '/v1/snippets' });
+  assert.equal(noToken.status, 401);
+  const wrongMethod = await request(fullPort, { method: 'DELETE', path: '/v1/snippets', headers: auth() });
+  assert.equal(wrongMethod.status, 405);
+});
+
+test('GET/PUT /v1/settings: chuyển tiếp, hiệu lực ngay, kiểm giá trị ⇒ bad_request, không bao giờ trả khoá', async () => {
+  const g = await request(fullPort, { path: '/v1/settings', headers: auth() });
+  assert.equal(g.status, 200);
+  assert.deepEqual(g.json, { cloud_llm: true, llm_model: null, llm_timeout_ms: 8000, actions_enabled: true });
+  const p = await request(fullPort, { method: 'PUT', path: '/v1/settings', headers: auth(), body: JSON.stringify({ llm_timeout_ms: 5000 }) });
+  assert.equal(p.status, 200);
+  assert.equal(p.json.llm_timeout_ms, 5000);
+  const g2 = await request(fullPort, { path: '/v1/settings', headers: auth() });
+  assert.equal(g2.json.llm_timeout_ms, 5000, 'hiệu lực ngay, không cần khởi động lại');
+  assert.ok(!('key' in g2.json) && !('api_key' in g2.json));
+  const badTimeout = await request(fullPort, { method: 'PUT', path: '/v1/settings', headers: auth(), body: JSON.stringify({ llm_timeout_ms: 1 }) });
+  assert.equal(badTimeout.status, 400);
+  assert.equal(badTimeout.json.error.code, 'bad_request');
+  const badKey = await request(fullPort, { method: 'PUT', path: '/v1/settings', headers: auth(), body: JSON.stringify({ secret_key: 'x' }) });
+  assert.equal(badKey.status, 400);
+  const notObject = await request(fullPort, { method: 'PUT', path: '/v1/settings', headers: auth(), body: JSON.stringify([1, 2]) });
+  assert.equal(notObject.status, 400);
+  // Đặt lại để không ảnh hưởng các test command phía dưới.
+  await request(fullPort, { method: 'PUT', path: '/v1/settings', headers: auth(), body: JSON.stringify({ llm_timeout_ms: 8000, cloud_llm: true }) });
+});
+
+test('POST /v1/command: edit khi có selection, draft khi không, mã lỗi CommandError ⇒ HTTP đúng bảng, lỗi khác ⇒ internal không lộ chi tiết', async () => {
+  const draft = await request(fullPort, { method: 'POST', path: '/v1/command', headers: auth(), body: JSON.stringify({ instruction: 'soạn email xin nghỉ' }) });
+  assert.equal(draft.status, 200, draft.text);
+  assert.equal(draft.json.kind, 'draft');
+  assert.match(draft.json.text, /^\[draft\]/);
+  assert.equal(typeof draft.json.timings_ms, 'object');
+
+  const edit = await request(fullPort, { method: 'POST', path: '/v1/command', headers: auth(), body: JSON.stringify({ instruction: 'sửa lại cho lịch sự', selection: 'ok gửi đi' }) });
+  assert.equal(edit.status, 200);
+  assert.equal(edit.json.kind, 'edit');
+
+  const timeout = await request(fullPort, { method: 'POST', path: '/v1/command', headers: auth(), body: JSON.stringify({ instruction: 'xin-timeout' }) });
+  assert.equal(timeout.status, 504);
+  assert.equal(timeout.json.error.code, 'timeout');
+
+  const noModel = await request(fullPort, { method: 'POST', path: '/v1/command', headers: auth(), body: JSON.stringify({ instruction: 'xin-no-model' }) });
+  assert.equal(noModel.status, 503);
+  assert.equal(noModel.json.error.code, 'rewrite_unavailable');
+
+  const internal = await request(fullPort, { method: 'POST', path: '/v1/command', headers: auth(), body: JSON.stringify({ instruction: 'xin-vo-ro' }) });
+  assert.equal(internal.status, 500);
+  assert.equal(internal.json.error.code, 'internal');
+  assert.ok(!internal.text.includes('/secret/path'));
+
+  // bad_request: thiếu instruction, trường quá dài, kiểu sai.
+  const noInstruction = await request(fullPort, { method: 'POST', path: '/v1/command', headers: auth(), body: JSON.stringify({}) });
+  assert.equal(noInstruction.status, 400);
+  const tooLong = await request(fullPort, { method: 'POST', path: '/v1/command', headers: auth(), body: JSON.stringify({ instruction: 'x'.repeat(20001) }) });
+  assert.equal(tooLong.status, 400);
+  const badSelection = await request(fullPort, { method: 'POST', path: '/v1/command', headers: auth(), body: JSON.stringify({ instruction: 'ok', selection: 1 }) });
+  assert.equal(badSelection.status, 400);
+  const wrongMethod = await request(fullPort, { path: '/v1/command', headers: auth() });
+  assert.equal(wrongMethod.status, 405);
+});
+
+test('POST /v1/command: cloud_llm=false ⇒ cloud_disabled (503), không có yêu cầu mạng LLM nào (bất biến 9, qua settings dùng chung)', async () => {
+  const off = await request(fullPort, { method: 'PUT', path: '/v1/settings', headers: auth(), body: JSON.stringify({ cloud_llm: false }) });
+  assert.equal(off.status, 200);
+  const r = await request(fullPort, { method: 'POST', path: '/v1/command', headers: auth(), body: JSON.stringify({ instruction: 'soạn thư' }) });
+  assert.equal(r.status, 503);
+  assert.equal(r.json.error.code, 'cloud_disabled');
+  await request(fullPort, { method: 'PUT', path: '/v1/settings', headers: auth(), body: JSON.stringify({ cloud_llm: true }) });
+});
+
+test('Trần JSON 1 MB cho snippets/settings/command ⇒ payload_too_large', async () => {
+  const huge = JSON.stringify({ entries: [{ trigger: 'a', text: 'x'.repeat(2 * 1024 * 1024) }] });
+  const r1 = await request(fullPort, { method: 'PUT', path: '/v1/snippets', headers: auth(), body: huge });
+  assert.equal(r1.status, 413);
+  assert.equal(r1.json.error.code, 'payload_too_large');
+  const r2 = await request(fullPort, { method: 'PUT', path: '/v1/settings', headers: auth(), body: huge });
+  assert.equal(r2.status, 413);
+  const r3 = await request(fullPort, { method: 'POST', path: '/v1/command', headers: auth(), body: JSON.stringify({ instruction: 'x'.repeat(1024 * 1024 * 2) }) });
+  assert.equal(r3.status, 413);
+});
+
+test('log không chứa nội dung lệnh/snippet (instruction/selection/context/trigger/text)', async () => {
+  fullLogs.length = 0;
+  const secretInstruction = 'VIET_LAI_BI_MAT_KHONG_DUOC_LO';
+  const secretSelection = 'DOAN_DANG_CHON_RIENG_TU';
+  await request(fullPort, { method: 'POST', path: '/v1/command', headers: auth(), body: JSON.stringify({ instruction: secretInstruction, selection: secretSelection }) });
+  await request(fullPort, { method: 'PUT', path: '/v1/snippets', headers: auth(), body: JSON.stringify({ entries: [{ trigger: 'BI_MAT_TRIGGER', text: 'BI_MAT_NOI_DUNG_SNIPPET' }] }) });
+  const all = fullLogs.join('\n');
+  for (const secret of [secretInstruction, secretSelection, 'BI_MAT_TRIGGER', 'BI_MAT_NOI_DUNG_SNIPPET', token]) {
+    assert.ok(!all.includes(secret), `log lộ "${secret}"`);
+  }
 });

@@ -15,13 +15,24 @@ export const MAX_AUDIO_SECONDS = 120;
 /** Trần byte thân âm thanh (đọc trong RAM); thời lượng thật kiểm sau khi giải mã. */
 export const MAX_AUDIO_BYTES = 48 * 1024 * 1024;
 const MAX_JSON_BYTES = 4 * 1024 * 1024;
+/** Trần JSON cho các route cài đặt/snippets/command (nhỏ hơn: không mang âm thanh hay danh sách lớn). */
+const MAX_SETTINGS_JSON_BYTES = 1 * 1024 * 1024;
 const MAX_DICTIONARY_ENTRIES = 5000;
-const MODES = new Set(['normal', 'clean', 'email', 'auto']);
+const MAX_SNIPPET_ENTRIES = 500;
+/** Trần ký tự mỗi trường của POST /v1/command (contract/engine-api.md, mục Command Mode). */
+const COMMAND_FIELD_MAX = 20000;
+/** Giá trị query `mode` client được gửi (contract/engine-api.md, mục Chế độ: gồm cả tidy/dev,
+ * không chỉ qua auto+app). */
+const MODES = new Set(['normal', 'clean', 'email', 'tidy', 'dev', 'auto']);
+/** Chế độ thật có thể xuất hiện trong post.mode của phản hồi: `auto` đã được post/index.js (E1a)
+ * phân giải thành một trong các chế độ cụ thể này (không bao giờ còn là "auto"). */
+const RESOLVED_MODES = new Set(['normal', 'clean', 'email', 'tidy', 'dev']);
 const LANGS = new Set(['vi', 'auto']);
 
 const STATUS = {
   unauthorized: 401, bad_audio: 400, bad_request: 400, model_unavailable: 503,
   timeout: 504, payload_too_large: 413, internal: 500,
+  rewrite_unavailable: 503, cloud_disabled: 503,
 };
 
 class HttpError extends Error {
@@ -93,9 +104,9 @@ function readBody(req, limit) {
   });
 }
 
-/** @param {http.IncomingMessage} req */
-async function readJson(req) {
-  const bytes = await readBody(req, MAX_JSON_BYTES);
+/** @param {http.IncomingMessage} req @param {number} [limit] */
+async function readJson(req, limit = MAX_JSON_BYTES) {
+  const bytes = await readBody(req, limit);
   try {
     return JSON.parse(Buffer.from(bytes).toString('utf8'));
   } catch {
@@ -120,22 +131,41 @@ function serialQueue() {
 
 /**
  * @typedef {{
- *   process: (input: { textRaw: string, mode: string, app?: string }) => Promise<{ text: string, applied: any[], rewrite: { used: boolean, error: string|null } }>,
+ *   process: (input: { textRaw: string, mode: string, app?: string }) => Promise<{ text: string, mode?: string, applied: any[], rewrite: { used: boolean, error: string|null }, actions?: string[] }>,
+ *   command?: (input: { instruction: string, selection: string, context: string, app?: string }) => Promise<{ text: string, kind: 'edit'|'draft', timings_ms?: Record<string, number> }>,
  *   dictionary: { list: () => any, replaceAll: (entries: any[]) => any, learnCorrection: (x: { before: string, after: string }) => any },
  * }} PostProcessor
+ * @typedef {{ list: () => any, replaceAll: (entries: any[]) => any, expand?: (text: string) => any }} SnippetStore
+ * @typedef {{ get: () => any, update: (patch: any) => any }} SettingsStore
  */
+
+/** Dùng khi chưa truyền snippets/settings (ví dụ test cũ chưa cần hai route này). */
+const NOOP_SNIPPETS = {
+  list: () => ({ entries: [] }),
+  replaceAll: () => { throw new HttpError('internal', 'Chưa cấu hình snippets cho engine này.'); },
+  expand: (text) => ({ text, applied: [], matched: false }),
+};
+const NOOP_SETTINGS = {
+  get: () => ({ cloud_llm: true, llm_model: null, llm_timeout_ms: 8000, actions_enabled: true }),
+  update: () => { throw new HttpError('internal', 'Chưa cấu hình settings cho engine này.'); },
+};
 
 /**
  * @param {{
  *   stt: ReturnType<typeof import('../stt/index.js').createStt>,
  *   post: PostProcessor,
  *   token: string,
+ *   snippets?: SnippetStore,
+ *   settings?: SettingsStore,
  *   log?: (entry: Record<string, unknown>) => void,
  *   maxAudioSeconds?: number,
  *   requestTimeoutMs?: number,
  * }} opts
  */
-export function createServer({ stt, post, token, log = () => {}, maxAudioSeconds = MAX_AUDIO_SECONDS, requestTimeoutMs = 60000 }) {
+export function createServer({
+  stt, post, token, snippets = NOOP_SNIPPETS, settings = NOOP_SETTINGS,
+  log = () => {}, maxAudioSeconds = MAX_AUDIO_SECONDS, requestTimeoutMs = 60000,
+}) {
   if (!token) throw new Error('createServer cần token');
   const enqueue = serialQueue();
   /** @type {http.Server} */
@@ -206,6 +236,45 @@ export function createServer({ stt, post, token, log = () => {}, maxAudioSeconds
         entry.status = 200;
         return;
       }
+      if (url.pathname === '/v1/snippets') {
+        if (req.method === 'GET') {
+          sendJson(res, 200, await callPost(() => snippets.list()));
+        } else if (req.method === 'PUT') {
+          const body = await readJson(req, MAX_SETTINGS_JSON_BYTES);
+          if (!body || typeof body !== 'object' || !Array.isArray(body.entries)) {
+            throw new HttpError('bad_request', 'Cần JSON dạng {"entries": [...]}.');
+          }
+          if (body.entries.length > MAX_SNIPPET_ENTRIES) {
+            throw new HttpError('bad_request', `Tối đa ${MAX_SNIPPET_ENTRIES} mục snippets.`);
+          }
+          await callPost(() => snippets.replaceAll(body.entries));
+          sendJson(res, 200, await callPost(() => snippets.list()));
+        } else {
+          throw new HttpError('bad_request', 'Chỉ hỗ trợ GET hoặc PUT.', 405);
+        }
+        entry.status = 200;
+        return;
+      }
+      if (url.pathname === '/v1/settings') {
+        if (req.method === 'GET') {
+          sendJson(res, 200, await callPost(() => settings.get()));
+        } else if (req.method === 'PUT') {
+          const body = await readJson(req, MAX_SETTINGS_JSON_BYTES);
+          if (!body || typeof body !== 'object' || Array.isArray(body)) {
+            throw new HttpError('bad_request', 'Cần JSON object.');
+          }
+          sendJson(res, 200, await callPost(() => settings.update(body)));
+        } else {
+          throw new HttpError('bad_request', 'Chỉ hỗ trợ GET hoặc PUT.', 405);
+        }
+        entry.status = 200;
+        return;
+      }
+      if (url.pathname === '/v1/command') {
+        if (req.method !== 'POST') throw new HttpError('bad_request', 'Chỉ hỗ trợ POST.', 405);
+        await command(req, res, entry);
+        return;
+      }
       throw new HttpError('bad_request', 'Không có đường dẫn này.', 404);
     } catch (err) {
       const e = toHttpError(err);
@@ -228,6 +297,50 @@ export function createServer({ stt, post, token, log = () => {}, maxAudioSeconds
     } catch (err) {
       throw toHttpError(err, 'bad_request');
     }
+  }
+
+  /**
+   * POST /v1/command: sửa/soạn văn bản bằng lời (contract/engine-api.md, mục Command Mode).
+   * Không log instruction/selection/context/app (có thể chứa nội dung của người dùng).
+   * @param {http.IncomingMessage} req @param {http.ServerResponse} res @param {Record<string, unknown>} entry
+   */
+  async function command(req, res, entry) {
+    const body = await readJson(req, MAX_SETTINGS_JSON_BYTES);
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      throw new HttpError('bad_request', 'Cần JSON object.');
+    }
+    const { instruction, selection = '', context = '', app } = /** @type {any} */ (body);
+    if (typeof instruction !== 'string' || instruction.trim() === '' || instruction.length > COMMAND_FIELD_MAX) {
+      throw new HttpError('bad_request', `instruction phải là chuỗi khác rỗng, tối đa ${COMMAND_FIELD_MAX} ký tự.`);
+    }
+    if (typeof selection !== 'string' || selection.length > COMMAND_FIELD_MAX) {
+      throw new HttpError('bad_request', `selection phải là chuỗi, tối đa ${COMMAND_FIELD_MAX} ký tự.`);
+    }
+    if (typeof context !== 'string' || context.length > COMMAND_FIELD_MAX) {
+      throw new HttpError('bad_request', `context phải là chuỗi, tối đa ${COMMAND_FIELD_MAX} ký tự.`);
+    }
+    if (app !== undefined && typeof app !== 'string') {
+      throw new HttpError('bad_request', 'app phải là chuỗi.');
+    }
+    if (typeof post.command !== 'function') {
+      throw new HttpError('internal', 'Chưa cấu hình Command Mode cho engine này.');
+    }
+    let result;
+    try {
+      result = await withTimeout(
+        Promise.resolve().then(() => post.command({ instruction, selection, context, ...(app !== undefined ? { app } : {}) })),
+        requestTimeoutMs, 'Lệnh quá thời gian.',
+      );
+    } catch (err) {
+      // CommandError.code (rewrite_unavailable|cloud_disabled|timeout|bad_request) đi qua STATUS;
+      // mã lạ/lỗi khác ⇒ internal, không lộ chi tiết.
+      throw toHttpError(err);
+    }
+    if (!result || typeof result.text !== 'string' || (result.kind !== 'edit' && result.kind !== 'draft')) {
+      throw new HttpError('internal', 'Lệnh trả kết quả không hợp lệ.');
+    }
+    sendJson(res, 200, { text: result.text, kind: result.kind, timings_ms: result.timings_ms ?? {} });
+    entry.status = 200;
   }
 
   /**
@@ -284,7 +397,7 @@ export function createServer({ stt, post, token, log = () => {}, maxAudioSeconds
     /** @type {Record<string, unknown>} */
     const body = {
       // Chế độ thực sự đã áp (auto đã phân giải) nếu hậu xử lý báo; không thì chế độ yêu cầu.
-      id, model, mode: typeof postOut.mode === 'string' && MODES.has(postOut.mode) ? postOut.mode : mode, language: 'vi',
+      id, model, mode: typeof postOut.mode === 'string' && RESOLVED_MODES.has(postOut.mode) ? postOut.mode : mode, language: 'vi',
       text_raw: r.textRaw,
       text: postOut.text,
       audio_ms: audioMs,
@@ -292,6 +405,7 @@ export function createServer({ stt, post, token, log = () => {}, maxAudioSeconds
       rtf: audioMs > 0 ? Math.round((r.sttMs / audioMs) * 1000) / 1000 : 0,
       post: {
         applied: Array.isArray(postOut.applied) ? postOut.applied : [],
+        actions: Array.isArray(postOut.actions) ? postOut.actions : [],
         rewrite: postOut.rewrite ?? { used: false, error: null },
       },
     };

@@ -17,8 +17,11 @@ test('không có tệp ⇒ mặc định theo contract', (t) => {
   assert.equal(c.rewrite.timeout_ms, 8000);
   assert.equal(c.rewrite.model, null);
   assert.equal(c.auto.apps['com.apple.mail'], 'email');
-  assert.equal(c.auto.apps['com.googlecode.iterm2'], 'clean');
+  assert.equal(c.auto.apps['com.googlecode.iterm2'], 'dev');
   assert.equal(c.auto.apps['com.google.Chrome'], undefined);
+  assert.equal(c.auto.apps['com.apple.Terminal'], 'dev');
+  assert.equal(c.auto.apps['com.tinyspeck.slackmacgap'], 'tidy');
+  assert.equal(c.tidy.guard.min_token_overlap, 0.85);
   assert.deepEqual(loadConfig(), loadConfig(join(tmp(t), 'x.json')));
 });
 
@@ -48,6 +51,9 @@ test('sai schema ⇒ ConfigError bad_config', (t) => {
     { auto: { apps: [] } },
     { remote: { phowhisper: { url: 7 } } },
     { default_model: '' },
+    { tidy: 'x' },
+    { tidy: { guard: { min_token_overlap: 0 } } },
+    { tidy: { guard: { min_length_ratio: 1.5, max_length_ratio: 1.4 } } },
   ];
   for (const b of bad) {
     writeFileSync(p, JSON.stringify(b));

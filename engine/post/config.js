@@ -3,34 +3,47 @@ import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
-export const MODES = ['normal', 'clean', 'email', 'auto'];
+export const MODES = ['normal', 'clean', 'email', 'tidy', 'dev', 'auto'];
+
+/** Chế độ hợp lệ cho auto.apps (không bao gồm "auto" — tránh đệ quy). */
+const AUTO_TARGET_MODES = ['normal', 'clean', 'email', 'tidy', 'dev'];
 
 /** Mặc định. Bảng auto.apps: bundle id -> chế độ; không có trong bảng thì là normal. */
 export const DEFAULT_CONFIG = Object.freeze({
   default_model: 'zipformer-vi-30m',
   rewrite: {
     url: 'http://127.0.0.1:20128/v1',
-    // Không đoán tên model của 9Router: chưa đặt thì email trả rewrite.error = "no_model".
+    // Không đoán tên model của 9Router: chưa đặt thì email/tidy trả rewrite.error = "no_model".
     model: null,
     timeout_ms: 8000,
     key_file: '~/.vflow/rewrite.key',
   },
   remote: { phowhisper: { url: 'http://127.0.0.1:7612' } },
+  // Ngưỡng guard cho chế độ tidy (bất biến 6, xem tidy.js): vi phạm ⇒ guard_rejected.
+  tidy: {
+    guard: {
+      min_token_overlap: 0.85,
+      min_length_ratio: 0.3,
+      max_length_ratio: 1.4,
+    },
+  },
   auto: {
     apps: {
       'com.apple.mail': 'email',
       'com.microsoft.Outlook': 'email',
       'com.readdle.smartemail-Mac': 'email',
       'com.mimestream.Mimestream': 'email',
-      'com.apple.Terminal': 'clean',
-      'com.googlecode.iterm2': 'clean',
-      'dev.warp.Warp-Stable': 'clean',
-      'com.mitchellh.ghostty': 'clean',
-      'com.tinyspeck.slackmacgap': 'clean',
-      'ru.keepcoder.Telegram': 'clean',
-      'com.hnc.Discord': 'clean',
-      'com.apple.MobileSMS': 'clean',
-      'net.whatsapp.WhatsApp': 'clean',
+      'com.apple.Terminal': 'dev',
+      'com.googlecode.iterm2': 'dev',
+      'dev.warp.Warp-Stable': 'dev',
+      'com.microsoft.VSCode': 'dev',
+      'com.todesktop.230313mzl4w4u92': 'dev',
+      'com.mitchellh.ghostty': 'dev',
+      'com.tinyspeck.slackmacgap': 'tidy',
+      'ru.keepcoder.Telegram': 'tidy',
+      'com.hnc.Discord': 'tidy',
+      'com.apple.MobileSMS': 'tidy',
+      'net.whatsapp.WhatsApp': 'tidy',
     },
   },
 });
@@ -125,9 +138,23 @@ export function validateConfig(input) {
   }
   const apps = { ...d.auto.apps, ...(autoIn.apps ?? {}) };
   for (const [id, mode] of Object.entries(apps)) {
-    if (!['normal', 'clean', 'email'].includes(mode)) {
-      throw new ConfigError(`auto.apps["${id}"] phải là normal, clean hoặc email`);
+    if (!AUTO_TARGET_MODES.includes(mode)) {
+      throw new ConfigError(`auto.apps["${id}"] phải là ${AUTO_TARGET_MODES.join(', ')}`);
     }
+  }
+
+  const tidyIn = c.tidy ?? {};
+  if (!isObj(tidyIn) || (tidyIn.guard !== undefined && !isObj(tidyIn.guard))) {
+    throw new ConfigError('tidy.guard phải là object');
+  }
+  const guard = { ...d.tidy.guard, ...(tidyIn.guard ?? {}) };
+  for (const k of ['min_token_overlap', 'min_length_ratio', 'max_length_ratio']) {
+    if (typeof guard[k] !== 'number' || !Number.isFinite(guard[k]) || guard[k] <= 0) {
+      throw new ConfigError(`tidy.guard.${k} phải là số dương`);
+    }
+  }
+  if (guard.min_length_ratio >= guard.max_length_ratio) {
+    throw new ConfigError('tidy.guard.min_length_ratio phải nhỏ hơn max_length_ratio');
   }
 
   return {
@@ -135,6 +162,7 @@ export function validateConfig(input) {
     default_model: defaultModel,
     rewrite,
     remote: { ...remoteIn, phowhisper },
+    tidy: { ...tidyIn, guard },
     auto: { ...autoIn, apps },
   };
 }

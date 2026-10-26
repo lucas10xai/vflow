@@ -22,7 +22,12 @@ before(() => { home = fs.mkdtempSync(path.join(os.tmpdir(), 'vflow-cli-test-'));
 after(() => fs.rmSync(home, { recursive: true, force: true }));
 
 test('sai cú pháp ⇒ mã 2 kèm hướng dẫn', () => {
-  for (const args of [[], ['khong-co'], ['transcribe'], ['models'], ['models', 'pull'], ['bench', 'x.wav', '--runs', '0'], ['eval'], ['transcribe', 'a.wav', '--model', 'khong-co'], ['transcribe', '--la', 'a.wav']]) {
+  for (const args of [
+    [], ['khong-co'], ['transcribe'], ['models'], ['models', 'pull'], ['bench', 'x.wav', '--runs', '0'], ['eval'],
+    ['transcribe', 'a.wav', '--model', 'khong-co'], ['transcribe', '--la', 'a.wav'],
+    ['snippets'], ['snippets', 'khong-ro'], ['snippets', 'add'], ['snippets', 'add', 'chi-trigger'], ['snippets', 'remove'],
+    ['settings'], ['settings', 'khong-ro'], ['settings', 'set'], ['settings', 'set', 'chi-mot-tham-so'],
+  ]) {
     const r = run(args);
     assert.equal(r.code, 2, `${args.join(' ')} → ${r.code}: ${r.err}`);
   }
@@ -58,6 +63,42 @@ test('models list báo trạng thái thật; eval với thư mục không có c�
   const e = run(['eval', '--set', empty]);
   assert.equal(e.code, 1);
   assert.match(e.err, /Không có cặp/);
+});
+
+test('snippets list|add|remove đọc/ghi ~/.vflow/snippets.json qua VFLOW_HOME', () => {
+  assert.match(run(['snippets', 'list']).out, /chưa có snippet/);
+  const add = run(['snippets', 'add', 'chữ ký', 'Nguyễn Văn An — AIOS']);
+  assert.equal(add.code, 0, add.err);
+  assert.match(add.out, /Đã lưu snippet/);
+  const list = run(['snippets', 'list']);
+  assert.match(list.out, /chữ ký/);
+  const stored = JSON.parse(fs.readFileSync(path.join(home, 'snippets.json'), 'utf8'));
+  assert.deepEqual(stored.entries[0].trigger, 'chữ ký');
+  assert.equal(stored.entries[0].text, 'Nguyễn Văn An — AIOS');
+  if (process.platform !== 'win32') assert.equal(fs.statSync(path.join(home, 'snippets.json')).mode & 0o777, 0o600);
+  const addBad = run(['snippets', 'add', 'x'.repeat(61), 'y']);
+  assert.equal(addBad.code, 1);
+  const rm = run(['snippets', 'remove', 'chữ ký']);
+  assert.equal(rm.code, 0);
+  assert.match(run(['snippets', 'list']).out, /chưa có snippet/);
+  const rmMissing = run(['snippets', 'remove', 'không-có']);
+  assert.equal(rmMissing.code, 1);
+});
+
+test('settings get|set đọc/ghi ~/.vflow/config.json qua VFLOW_HOME, kiểm giá trị, giữ khoá khác', () => {
+  fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({ default_model: 'zipformer-vi-30m' }));
+  const get0 = JSON.parse(run(['settings', 'get']).out);
+  assert.deepEqual(get0, { cloud_llm: true, llm_model: null, llm_timeout_ms: 8000, actions_enabled: true });
+  const set = run(['settings', 'set', 'cloud_llm', 'false']);
+  assert.equal(set.code, 0, set.err);
+  assert.equal(JSON.parse(set.out).cloud_llm, false);
+  assert.equal(JSON.parse(run(['settings', 'get']).out).cloud_llm, false);
+  const raw = JSON.parse(fs.readFileSync(path.join(home, 'config.json'), 'utf8'));
+  assert.equal(raw.default_model, 'zipformer-vi-30m', 'giữ khoá khác trong config.json');
+  const bad = run(['settings', 'set', 'llm_timeout_ms', '1']);
+  assert.equal(bad.code, 1);
+  const badKey = run(['settings', 'set', 'khong_ton_tai', '1']);
+  assert.equal(badKey.code, 1);
 });
 
 test('doctor trả mã 1 khi model mặc định chưa có, và không in token từ xa', () => {

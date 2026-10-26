@@ -91,9 +91,13 @@ test('normal không bỏ từ đệm, không sửa dấu câu', async (t) => {
 test('auto chọn chế độ theo bundle id; không biết ⇒ normal; bảng sửa được qua cấu hình', async (t) => {
   const p = setup(t, { auto: { apps: { 'com.example.Notes': 'clean', 'com.apple.Terminal': 'normal' } } });
   const run = (app) => p.process({ textRaw: 'ừm đi plôi', mode: 'auto', app });
-  assert.equal((await run('com.googlecode.iterm2')).mode, 'clean');
+  assert.equal((await run('com.googlecode.iterm2')).mode, 'dev');
   assert.equal((await run('com.googlecode.iterm2')).text, 'deploy');
-  assert.equal((await run('com.tinyspeck.slackmacgap')).mode, 'clean');
+  assert.equal((await run('com.tinyspeck.slackmacgap')).mode, 'tidy');
+  // chưa đặt rewrite.model ⇒ tidy không gọi được LLM, dùng văn bản dự phòng (dict+clean).
+  const slack = await run('com.tinyspeck.slackmacgap');
+  assert.equal(slack.text, 'deploy');
+  assert.equal(slack.rewrite.error, 'no_model');
   assert.equal((await run('com.google.Chrome')).mode, 'normal');
   assert.equal((await run(undefined)).mode, 'normal');
   assert.equal((await run('com.example.Notes')).mode, 'clean');

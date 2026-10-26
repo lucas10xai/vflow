@@ -1,0 +1,215 @@
+{
+  "_note": "Bộ ca đo tidy (eval/tidy-bench.js). Không dấu câu, có từ đệm, tự sửa giữa câu, liệt kê, câu hỏi nằm trong nội dung KHÔNG được trả lời, số liệu, đường dẫn/lệnh, thuật ngữ tiếng Anh xen vào — theo cách chủ dự án nói với agent. expect_contains/expect_not_contains so khớp không phân biệt hoa/thường, chỉ kiểm một phần (substring), không phải toàn bộ câu chuẩn.",
+  "cases": [
+    {
+      "id": "filler-1",
+      "type": "filler",
+      "input": "ừm anh nghĩ là mình nên deploy cái bản mới lên production luôn",
+      "expect_contains": ["deploy", "production"],
+      "expect_not_contains": ["ừm"]
+    },
+    {
+      "id": "filler-2",
+      "type": "filler",
+      "input": "à thì cái branch này ờ merge vào main được chưa nhỉ",
+      "expect_contains": ["branch", "main"],
+      "expect_not_contains": []
+    },
+    {
+      "id": "backtrack-1",
+      "type": "backtrack",
+      "input": "họp vào thứ sáu à nhầm thứ năm nhé anh",
+      "expect_contains": ["thứ Năm"],
+      "expect_not_contains": ["thứ Sáu", "thứ sáu"]
+    },
+    {
+      "id": "backtrack-2",
+      "type": "backtrack",
+      "input": "gửi file cho chị Lan không phải chị Lan mà là anh Nam",
+      "expect_contains": ["Nam"],
+      "expect_not_contains": []
+    },
+    {
+      "id": "backtrack-3",
+      "type": "backtrack",
+      "input": "deploy lên staging ý tôi là lên production trước",
+      "expect_contains": ["production"],
+      "expect_not_contains": ["staging"]
+    },
+    {
+      "id": "backtrack-4",
+      "type": "backtrack",
+      "input": "merge vào branch main à không merge vào branch dev trước",
+      "expect_contains": ["dev"],
+      "expect_not_contains": ["main"]
+    },
+    {
+      "id": "backtrack-5",
+      "type": "backtrack",
+      "input": "sửa cái config port tám trăm sorry à không port chín trăm",
+      "expect_contains": ["chín trăm"],
+      "expect_not_contains": ["tám trăm"]
+    },
+    {
+      "id": "backtrack-6",
+      "type": "backtrack",
+      "input": "em báo cáo xong rồi gửi qua slack à nhầm gửi qua email cho anh",
+      "expect_contains": ["email"],
+      "expect_not_contains": ["slack"]
+    },
+    {
+      "id": "list-1",
+      "type": "list",
+      "input": "có ba việc cần làm một là deploy lên production hai là review code ba là viết test",
+      "expect_contains": ["1", "2", "3", "deploy", "review", "test"],
+      "expect_not_contains": []
+    },
+    {
+      "id": "list-2",
+      "type": "list",
+      "input": "thứ nhất là kiểm tra log thứ hai là restart service thứ ba là báo lại cho anh",
+      "expect_contains": ["1", "2", "3", "log", "restart"],
+      "expect_not_contains": []
+    },
+    {
+      "id": "list-3",
+      "type": "list",
+      "input": "một là commit code hai là push lên remote",
+      "expect_contains": ["1", "2", "commit", "push"],
+      "expect_not_contains": []
+    },
+    {
+      "id": "question-1",
+      "type": "question",
+      "input": "nó hỏi là hai cộng hai bằng mấy thì tôi chưa trả lời vội",
+      "expect_contains": ["hai cộng hai"],
+      "expect_not_contains": ["bằng 4", "là 4", "bằng bốn", "là bốn"]
+    },
+    {
+      "id": "question-2",
+      "type": "question",
+      "input": "sếp hỏi là deadline có phải thứ hai không thì mình chưa biết trả lời sao",
+      "expect_contains": ["deadline", "thứ Hai"],
+      "expect_not_contains": []
+    },
+    {
+      "id": "question-3",
+      "type": "question",
+      "input": "khách hỏi là bên mình còn bao nhiêu chỗ trống thì để anh kiểm tra lại rồi báo",
+      "expect_contains": ["chỗ trống"],
+      "expect_not_contains": []
+    },
+    {
+      "id": "numbers-1",
+      "type": "numbers",
+      "input": "bản hai chấm ba đã deploy xong rồi anh kiểm tra thử nhé",
+      "expect_contains": ["deploy"],
+      "expect_not_contains": []
+    },
+    {
+      "id": "numbers-2",
+      "type": "numbers",
+      "input": "giá gói này là một triệu hai trăm nghìn một tháng",
+      "expect_contains": [],
+      "expect_not_contains": []
+    },
+    {
+      "id": "numbers-3",
+      "type": "numbers",
+      "input": "cuộc họp lúc chín giờ sáng thứ tư tuần sau nhé",
+      "expect_contains": ["chín giờ", "thứ Tư"],
+      "expect_not_contains": []
+    },
+    {
+      "id": "path-1",
+      "type": "path",
+      "input": "chạy file src gạch chéo app chấm ts trước đã",
+      "expect_contains": ["src/app.ts"],
+      "expect_not_contains": []
+    },
+    {
+      "id": "path-2",
+      "type": "path",
+      "input": "sửa cái biến viết thường nối gạch dưới user name, rồi commit lại",
+      "expect_contains": ["user_name", "commit"],
+      "expect_not_contains": []
+    },
+    {
+      "id": "path-3",
+      "type": "path",
+      "input": "mở terminal gõ npm install rồi chờ xong",
+      "expect_contains": ["npm install"],
+      "expect_not_contains": []
+    },
+    {
+      "id": "english-1",
+      "type": "english",
+      "input": "cái pull request này cần review trước khi merge vào main",
+      "expect_contains": ["pull request", "review", "merge", "main"],
+      "expect_not_contains": []
+    },
+    {
+      "id": "english-2",
+      "type": "english",
+      "input": "con worktree này đang conflict với branch kia phải rebase lại",
+      "expect_contains": ["worktree", "conflict", "branch", "rebase"],
+      "expect_not_contains": []
+    },
+    {
+      "id": "english-3",
+      "type": "english",
+      "input": "cái agent chạy trong orca bị treo phải restart lại session",
+      "expect_contains": ["agent", "orca", "restart", "session"],
+      "expect_not_contains": []
+    },
+    {
+      "id": "english-4",
+      "type": "english",
+      "input": "con api này trả về lỗi năm trăm phải check lại log server",
+      "expect_contains": ["api", "năm trăm", "log", "server"],
+      "expect_not_contains": []
+    },
+    {
+      "id": "plain-1",
+      "type": "plain",
+      "input": "chiều nay anh họp với khách hàng lúc ba giờ",
+      "expect_contains": ["ba giờ"],
+      "expect_not_contains": []
+    },
+    {
+      "id": "plain-2",
+      "type": "plain",
+      "input": "em gửi hợp đồng cho chị Hương rồi nhé",
+      "expect_contains": ["Hương"],
+      "expect_not_contains": []
+    },
+    {
+      "id": "plain-3",
+      "type": "plain",
+      "input": "nhớ nhắc anh uống thuốc lúc bảy giờ tối nay",
+      "expect_contains": ["bảy giờ"],
+      "expect_not_contains": []
+    },
+    {
+      "id": "mixed-1",
+      "type": "mixed",
+      "input": "ừm thì cái bug này à nhầm cái feature này cần fix trước khi release bản hai chấm không",
+      "expect_contains": ["feature", "fix", "release"],
+      "expect_not_contains": ["bug này"]
+    },
+    {
+      "id": "mixed-2",
+      "type": "mixed",
+      "input": "có hai việc một là merge branch dev hai là deploy lên staging à nhầm production",
+      "expect_contains": ["1", "2", "merge", "dev", "production"],
+      "expect_not_contains": ["staging"]
+    },
+    {
+      "id": "mixed-3",
+      "type": "mixed",
+      "input": "sếp hỏi là chi phí server tháng này là bao nhiêu thì để em tính lại rồi báo qua email",
+      "expect_contains": ["server", "email"],
+      "expect_not_contains": []
+    }
+  ]
+}
