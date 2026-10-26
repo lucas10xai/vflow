@@ -283,4 +283,18 @@ private func settle() async {
         #expect(ClientConfig.repoFromBundle("/Users/n/Developer/vflow/client/build/VFlow.app") == "/Users/n/Developer/vflow")
         #expect(ClientConfig.repoFromBundle("/Applications/VFlow.app") == nil)
     }
+
+    /// `vflowHome` tôn trọng `VFLOW_HOME`: client.json được đọc từ đó, không còn phải là
+    /// `<home>/.vflow`; "repo"/"node" (dùng `~`) vẫn mở rộng theo `home` thật, không theo VFLOW_HOME.
+    @Test func vflowHomeOverridesClientJSONLocationButNotTildeExpansion() throws {
+        let cfg = #"{"node":"~/n/node"}"#
+        let f = fs(files: ["/tmp/vflow-test-home/client.json": cfg, "/r/bin/vflow.js": ""], exec: ["/Users/u/n/node"])
+        let s = try ClientConfig.resolve(home: "/Users/u", vflowHome: "/tmp/vflow-test-home",
+                                         bundlePath: "/r/client/build/VFlow.app", fs: f).get()
+        #expect(s.node == "/Users/u/n/node")
+        // Không có vflowHome ⇒ hành vi cũ không đổi (đọc ở <home>/.vflow/client.json).
+        let old = ClientConfig.resolve(home: "/tmp/vflow-test-home", bundlePath: "/r/client/build/VFlow.app", fs: f)
+        guard case .failure(.configInvalid(let m)) = old else { Issue.record("không có client.json ở <home>/.vflow ⇒ dùng node mặc định, không có node mặc định trong fs giả này nên phải lỗi"); return }
+        #expect(m.contains("node"))
+    }
 }

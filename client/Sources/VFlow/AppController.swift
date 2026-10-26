@@ -22,8 +22,26 @@ final class AppController: NSObject {
     private var recordingStartedAt: TimeInterval = 0
     private let session: URLSession
     private let home = FileManager.default.homeDirectoryForCurrentUser.path
+    /// `<VFLOW_HOME>` thật (mặc định `~/.vflow`) — token, lịch sử… Tôn trọng biến môi trường để
+    /// thử nghiệm không đụng dữ liệu thật (xem `VFlowHome`).
+    private let vflowHome = VFlowHome.resolve()
+    private lazy var historyStore = HistoryStore(path: vflowHome + "/history.jsonl")
     private let conflictDetector = ConflictDetector()
     private let runningApps: RunningAppsProvider = WorkspaceRunningApps()
+
+    /// Đường dẫn dữ liệu hiện dùng (hiện ở tab Cài đặt).
+    var dataHomePath: String { vflowHome }
+
+    var historyEnabled: Bool {
+        get { (UserDefaults.standard.object(forKey: "historyEnabled") as? Bool) ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "historyEnabled") }
+    }
+
+    /// Công tắc "Hiện biểu tượng trên thanh menu" (mặc định bật).
+    var showMenuBarIcon: Bool {
+        get { (UserDefaults.standard.object(forKey: "showMenuBarIcon") as? Bool) ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "showMenuBarIcon"); menu?.setVisible(newValue) }
+    }
 
     private(set) var engineState: EngineState = .stopped
     private(set) var configError: ClientError?
@@ -64,6 +82,7 @@ final class AppController: NSObject {
 
     func start() {
         menu = StatusMenu(controller: self)
+        menu.setVisible(showMenuBarIcon)
         statusWindow = StatusWindowController(controller: self)
         recorder.onLevel = { [weak self] l in self?.overlay.setLevel(l) }
         recorder.onInterrupted = { [weak self] why in self?.micInterrupted(why) }
@@ -73,7 +92,7 @@ final class AppController: NSObject {
         if AudioRecorder.permission() == .notDetermined { PermissionKind.microphone.request() }
         startHotkeys()
 
-        switch ClientConfig.resolve(home: home, bundlePath: Bundle.main.bundlePath, fs: .live) {
+        switch ClientConfig.resolve(home: home, vflowHome: vflowHome, bundlePath: Bundle.main.bundlePath, fs: .live) {
         case .failure(let e):
             configError = e
             setError(ErrorText.message(e), showOverlay: true)
@@ -102,17 +121,21 @@ final class AppController: NSObject {
         await supervisor?.stop()
     }
 
-    /// Cách điều khiển chính không phụ thuộc biểu tượng thanh menu: mở lại app (`open VFlow.app`
-    /// khi đang chạy), menu › "Mở cửa sổ vflow", hoặc (nếu bật) tự mở khi khởi động.
-    func openStatusWindow() {
+    /// Cách điều khiển chính không phụ thuộc biểu tượng thanh menu: bấm biểu tượng Dock/`open
+    /// VFlow.app` khi đang chạy, menu ứng dụng/menu thanh trạng thái, hoặc (nếu bật) tự mở khi
+    /// khởi động. `tab`: dùng cho `--open-tab` (chụp ảnh từng tab) và "Cài đặt…" (⌘,).
+    func openStatusWindow(tab: MainTab? = nil) {
         refreshUI()
-        statusWindow.show()
+        statusWindow.show(tab: tab)
         NSApp.activate()
     }
 
     func openDataFolder() {
-        NSWorkspace.shared.open(FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".vflow"))
+        NSWorkspace.shared.open(URL(fileURLWithPath: vflowHome))
     }
+
+    /// Trợ giúp (menu ứng dụng): repo của engine đang dùng, nếu đã biết (để tìm README cạnh đó).
+    func repoPathForHelp() -> String? { supervisor?.spec.repo }
 
     private func refreshUI() {
         let model = statusModel
@@ -284,22 +307,30 @@ final class AppController: NSObject {
     private func send(pcm: Data, mode: DictationMode, app: String?) {
         overlay.show(.transcribing)
         refreshUI()
-        let port = supervisor?.spec.port ?? ClientConfig.defaultPort
-        let tokenPath = home + "/.vflow/token"
+        let port = currentPort
         inflight = Task { [session] in
             let result: Result<TranscribeResult, ClientError>
-            if let contents = try? String(contentsOfFile: tokenPath, encoding: .utf8) {
-                if let token = EngineAPI.parseToken(contents) {
-                    result = await Self.transcribe(session: session, port: port, token: token, pcm: pcm, mode: mode, app: app)
-                } else {
-                    result = .failure(.tokenInvalid(path: tokenPath))
-                }
-            } else {
-                result = .failure(.tokenMissing(path: tokenPath))
+            switch readToken() {
+            case .success(let token):
+                result = await Self.transcribe(session: session, port: port, token: token, pcm: pcm, mode: mode, app: app)
+            case .failure(let e):
+                result = .failure(e)
             }
             guard !Task.isCancelled else { return }
             await self.deliver(result)
         }
+    }
+
+    private var currentPort: Int { supervisor?.spec.port ?? ClientConfig.defaultPort }
+
+    /// Token đọc từ `<VFLOW_HOME>/token` ở MỖI lần gửi (engine tự tạo khi chạy lần đầu).
+    private func readToken() -> Result<String, ClientError> {
+        let tokenPath = vflowHome + "/token"
+        guard let contents = try? String(contentsOfFile: tokenPath, encoding: .utf8) else {
+            return .failure(.tokenMissing(path: tokenPath))
+        }
+        guard let token = EngineAPI.parseToken(contents) else { return .failure(.tokenInvalid(path: tokenPath)) }
+        return .success(token)
     }
 
     nonisolated static func transcribe(session: URLSession, port: Int, token: String, pcm: Data,
@@ -329,10 +360,22 @@ final class AppController: NSObject {
             overlayState = DictationDecision.overlay(after: outcome, planned: plan.overlay)
         }
         if case .error(let m) = overlayState { lastError = m } else { lastError = nil }
+        recordHistoryIfNeeded(result: result, insertedText: plan.insert)
         overlay.show(overlayState)
         machine.finished(optionHeld: HotkeyMonitor.leftOptionHeldNow())
         updateTicking()
         refreshUI()
+    }
+
+    /// Kết quả lỗi/im lặng không bao giờ vào lịch sử (`insertedText == nil` lúc đó). CHỈ lưu văn
+    /// bản (text_raw, text, mode, app, model, audio_ms, timings) — tuyệt đối không có âm thanh.
+    private func recordHistoryIfNeeded(result: Result<TranscribeResult, ClientError>, insertedText: String?) {
+        guard case .success(let r) = result, HistoryGate.shouldRecord(enabled: historyEnabled, insertedText: insertedText) else { return }
+        let entry = HistoryEntry(at: Date(), appBundleId: targetApp, mode: r.mode, model: r.model,
+                                 textRaw: r.textRaw, text: r.text, audioMs: r.audioMs, totalMs: r.totalMs)
+        do { try historyStore.append(entry) } catch {
+            if lastError == nil { lastError = "Không ghi được lịch sử: \(error)" }
+        }
     }
 
     private func setError(_ message: String, showOverlay: Bool) {
@@ -342,6 +385,82 @@ final class AppController: NSObject {
     }
 
     var phase: HotkeyPhase { machine.phase }
+
+    // MARK: lịch sử
+
+    func listHistory(query: String?) throws -> HistoryStore.ReadResult { try historyStore.list(query: query) }
+    func deleteHistory(id: String) throws { try historyStore.delete(id: id) }
+    func clearHistory() throws { try historyStore.clearAll() }
+
+    // MARK: từ điển + gợi ý sửa (đọc-sửa-ghi qua `DictionaryOrchestration`)
+
+    func fetchDictionary() async -> Result<[DictionaryEntry], ClientError> {
+        switch readToken() {
+        case .failure(let e): return .failure(e)
+        case .success(let token): return await Self.requestDictionaryList(session: session, port: currentPort, token: token)
+        }
+    }
+
+    func applyDictionaryChange(_ change: DictionaryChange) async -> Result<[DictionaryEntry], ClientError> {
+        switch readToken() {
+        case .failure(let e): return .failure(e)
+        case .success(let token):
+            let port = currentPort
+            let session = self.session // không bắt `self` (MainActor) vào closure @Sendable
+            return await DictionaryOrchestration.applyChange(
+                change,
+                get: { await Self.requestDictionaryList(session: session, port: port, token: token) },
+                put: { entries in await Self.requestDictionaryPut(session: session, port: port, token: token, entries: entries) })
+        }
+    }
+
+    func acceptSuggestion(_ suggestion: CorrectionSuggestion) async -> Result<[DictionaryEntry], ClientError> {
+        switch readToken() {
+        case .failure(let e): return .failure(e)
+        case .success(let token):
+            let port = currentPort
+            let session = self.session
+            return await DictionaryOrchestration.acceptSuggestion(
+                suggestion,
+                get: { await Self.requestDictionaryList(session: session, port: port, token: token) },
+                put: { entries in await Self.requestDictionaryPut(session: session, port: port, token: token, entries: entries) })
+        }
+    }
+
+    func fetchCorrectionSuggestions(before: String, after: String) async -> Result<[CorrectionSuggestion], ClientError> {
+        switch readToken() {
+        case .failure(let e): return .failure(e)
+        case .success(let token):
+            return await Self.requestCorrections(session: session, port: currentPort, token: token, before: before, after: after)
+        }
+    }
+
+    nonisolated static func requestDictionaryList(session: URLSession, port: Int, token: String) async -> Result<[DictionaryEntry], ClientError> {
+        do {
+            let (data, resp) = try await session.data(for: EngineAPI.dictionaryGetRequest(port: port, token: token))
+            return EngineAPI.parseDictionaryList(status: (resp as? HTTPURLResponse)?.statusCode ?? 0, data: data)
+        } catch {
+            return .failure(.network(error.localizedDescription))
+        }
+    }
+
+    nonisolated static func requestDictionaryPut(session: URLSession, port: Int, token: String, entries: [DictionaryEntry]) async -> Result<[DictionaryEntry], ClientError> {
+        do {
+            let (data, resp) = try await session.data(for: EngineAPI.dictionaryPutRequest(port: port, token: token, entries: entries))
+            return EngineAPI.parseDictionaryList(status: (resp as? HTTPURLResponse)?.statusCode ?? 0, data: data)
+        } catch {
+            return .failure(.network(error.localizedDescription))
+        }
+    }
+
+    nonisolated static func requestCorrections(session: URLSession, port: Int, token: String, before: String, after: String) async -> Result<[CorrectionSuggestion], ClientError> {
+        do {
+            let (data, resp) = try await session.data(for: EngineAPI.correctionsRequest(port: port, token: token, before: before, after: after))
+            return EngineAPI.parseCorrections(status: (resp as? HTTPURLResponse)?.statusCode ?? 0, data: data)
+        } catch {
+            return .failure(.network(error.localizedDescription))
+        }
+    }
 
     // MARK: đăng nhập
 

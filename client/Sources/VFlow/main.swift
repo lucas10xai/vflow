@@ -16,6 +16,72 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let c = AppController()
         controller = c
         c.start()
+        buildMainMenu(controller: c)
+        if let i = args.firstIndex(of: "--open-tab") {
+            guard args.count > i + 1, let tab = MainTab(flag: args[i + 1]) else {
+                FileHandle.standardError.write(Data("dùng: --open-tab tongquan|lichsu|tudien|caidat\n".utf8))
+                exit(64)
+            }
+            c.openStatusWindow(tab: tab)
+        }
+    }
+
+    /// Menu ứng dụng đầy đủ (app thường, không còn `.accessory`): "vflow" (Giới thiệu, Cài đặt…,
+    /// Ẩn, Thoát), Cửa sổ, Trợ giúp.
+    private func buildMainMenu(controller: AppController) {
+        let main = NSMenu()
+
+        let appMenu = NSMenu()
+        appMenu.addItem(withTitle: "Giới thiệu vflow", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        appMenu.addItem(.separator())
+        let settings = NSMenuItem(title: "Cài đặt…", action: #selector(AppDelegate.openSettings), keyEquivalent: ",")
+        settings.target = self
+        appMenu.addItem(settings)
+        appMenu.addItem(.separator())
+        appMenu.addItem(withTitle: "Ẩn vflow", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        let hideOthers = NSMenuItem(title: "Ẩn ứng dụng khác", action: #selector(NSApplication.hideOtherApplications(_:)), keyEquivalent: "h")
+        hideOthers.keyEquivalentModifierMask = [.command, .option]
+        appMenu.addItem(hideOthers)
+        appMenu.addItem(withTitle: "Hiện tất cả", action: #selector(NSApplication.unhideAllApplications(_:)), keyEquivalent: "")
+        appMenu.addItem(.separator())
+        appMenu.addItem(withTitle: "Thoát vflow", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        let appMenuItem = NSMenuItem()
+        appMenuItem.submenu = appMenu
+        main.addItem(appMenuItem)
+
+        let windowMenu = NSMenu(title: "Cửa sổ")
+        windowMenu.addItem(withTitle: "Thu nhỏ", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
+        windowMenu.addItem(withTitle: "Đóng", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        windowMenu.addItem(.separator())
+        windowMenu.addItem(withTitle: "Đưa tất cả ra trước", action: #selector(NSApplication.arrangeInFront(_:)), keyEquivalent: "")
+        let windowMenuItem = NSMenuItem()
+        windowMenuItem.submenu = windowMenu
+        main.addItem(windowMenuItem)
+        NSApp.windowsMenu = windowMenu
+
+        let helpMenu = NSMenu(title: "Trợ giúp")
+        let help = NSMenuItem(title: "Trợ giúp vflow", action: #selector(AppDelegate.openHelp), keyEquivalent: "")
+        help.target = self
+        helpMenu.addItem(help)
+        let helpMenuItem = NSMenuItem()
+        helpMenuItem.submenu = helpMenu
+        main.addItem(helpMenuItem)
+        NSApp.helpMenu = helpMenu
+
+        NSApp.mainMenu = main
+    }
+
+    @objc private func openSettings() { controller?.openStatusWindow(tab: .settings) }
+
+    /// "mở README hoặc hướng dẫn quyền": có README cạnh nhị phân (chạy từ repo) ⇒ mở; không có
+    /// (bản đóng gói sau này, hoặc chạy ở nơi khác) ⇒ mở cửa sổ chính (đã có hướng dẫn cấp quyền).
+    @objc private func openHelp() {
+        if let repo = controller?.repoPathForHelp(),
+           FileManager.default.fileExists(atPath: repo + "/client/README.md") {
+            NSWorkspace.shared.open(URL(fileURLWithPath: repo + "/client/README.md"))
+        } else {
+            controller?.openStatusWindow(tab: .overview)
+        }
     }
 
     /// `--demo-overlay <ghi|dich|xong|loi> [--demo-seconds N]`: chỉ hiện thanh trạng thái để chụp ảnh.
@@ -66,7 +132,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 let app = NSApplication.shared
 let delegate = AppDelegate()
 app.delegate = delegate
-app.setActivationPolicy(.accessory)
+app.setActivationPolicy(.regular)
 // SIGTERM/SIGINT (vd. `kill`, đăng xuất) ⇒ đi qua đường thoát bình thường để đóng engine con.
 // Không gọi terminate trong khối main-queue: `.terminateLater` chờ một Task cũng chạy trên main-queue
 // ⇒ kẹt. Đẩy qua run loop chính thay vì main-queue.

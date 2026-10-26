@@ -29,6 +29,8 @@ public enum ClientError: Error, Equatable, Sendable {
     case inputMonitoringDenied
     case engineGaveUp(String)
     case configInvalid(String)
+    /// Kiểm hợp lệ phía client (từ điển) thất bại trước khi gửi engine — không phải lỗi engine.
+    case dictionaryInvalid(String)
 }
 
 public enum ErrorText {
@@ -60,6 +62,7 @@ public enum ErrorText {
         case .inputMonitoringDenied: return "Thiếu quyền Theo dõi đầu vào (Input Monitoring)"
         case let .engineGaveUp(d): return "Engine chết liên tục, đã ngừng khởi động lại: \(d)"
         case let .configInvalid(d): return "Cấu hình client lỗi: \(d)"
+        case let .dictionaryInvalid(d): return d
         }
     }
 
@@ -81,6 +84,9 @@ public struct TranscribeResult: Equatable, Sendable {
     /// `post.rewrite.error` khi chế độ email viết lại hỏng (text vẫn dùng được).
     public var rewriteError: String?
     public var totalMs: Int?
+    /// Chữ gốc do STT trả (chưa qua từ điển/viết lại) — dùng cho Lịch sử, không hiện ở thanh trạng thái.
+    public var textRaw: String = ""
+    public var audioMs: Int?
 }
 
 public struct ModelStatus: Equatable, Sendable {
@@ -151,7 +157,74 @@ public enum EngineAPI {
             mode: obj["mode"] as? String ?? "",
             model: obj["model"] as? String ?? "",
             rewriteError: rewrite?["error"] as? String,
-            totalMs: timings?["total"] as? Int))
+            totalMs: timings?["total"] as? Int,
+            textRaw: obj["text_raw"] as? String ?? "",
+            audioMs: obj["audio_ms"] as? Int))
+    }
+
+    // MARK: từ điển + gợi ý sửa
+
+    public static func dictionaryGetRequest(port: Int, token: String) -> URLRequest {
+        var r = URLRequest(url: baseURL(port: port).appendingPathComponent("v1/dictionary"),
+                           cachePolicy: .reloadIgnoringLocalAndRemoteCacheData, timeoutInterval: 10)
+        r.httpMethod = "GET"
+        r.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        return r
+    }
+
+    public static func dictionaryPutRequest(port: Int, token: String, entries: [DictionaryEntry]) -> URLRequest {
+        var r = URLRequest(url: baseURL(port: port).appendingPathComponent("v1/dictionary"),
+                           cachePolicy: .reloadIgnoringLocalAndRemoteCacheData, timeoutInterval: 10)
+        r.httpMethod = "PUT"
+        r.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        r.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        r.httpBody = try? JSONSerialization.data(withJSONObject: ["entries": entries.map(encodeEntry)])
+        return r
+    }
+
+    public static func correctionsRequest(port: Int, token: String, before: String, after: String) -> URLRequest {
+        var r = URLRequest(url: baseURL(port: port).appendingPathComponent("v1/corrections"),
+                           cachePolicy: .reloadIgnoringLocalAndRemoteCacheData, timeoutInterval: 10)
+        r.httpMethod = "POST"
+        r.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        r.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        r.httpBody = try? JSONSerialization.data(withJSONObject: ["before": before, "after": after])
+        return r
+    }
+
+    static func encodeEntry(_ e: DictionaryEntry) -> [String: Any] {
+        var obj: [String: Any] = ["term": e.term, "spoken": e.spoken, "kind": e.kind, "uses": e.uses]
+        if e.caseExact { obj["case"] = "exact" }
+        if let l = e.lastUsed { obj["last_used"] = l }
+        return obj
+    }
+
+    static func decodeEntry(_ obj: [String: Any]) -> DictionaryEntry? {
+        guard let term = obj["term"] as? String, let spoken = obj["spoken"] as? [String] else { return nil }
+        return DictionaryEntry(term: term, spoken: spoken, kind: obj["kind"] as? String ?? "term",
+                               caseExact: (obj["case"] as? String) == "exact", uses: obj["uses"] as? Int ?? 0,
+                               lastUsed: obj["last_used"] as? String)
+    }
+
+    public static func parseDictionaryList(status: Int, data: Data) -> Result<[DictionaryEntry], ClientError> {
+        guard status == 200 else { return .failure(errorFrom(status: status, data: data)) }
+        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let rawEntries = obj["entries"] as? [[String: Any]] else {
+            return .failure(.badResponse(status: status, detail: "thiếu trường entries"))
+        }
+        return .success(rawEntries.compactMap(decodeEntry))
+    }
+
+    public static func parseCorrections(status: Int, data: Data) -> Result<[CorrectionSuggestion], ClientError> {
+        guard status == 200 else { return .failure(errorFrom(status: status, data: data)) }
+        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let rawSuggestions = obj["suggestions"] as? [[String: Any]] else {
+            return .failure(.badResponse(status: status, detail: "thiếu trường suggestions"))
+        }
+        return .success(rawSuggestions.compactMap { s in
+            guard let term = s["term"] as? String, let spoken = s["spoken"] as? [String] else { return nil }
+            return CorrectionSuggestion(term: term, spoken: spoken)
+        })
     }
 
     /// `nil` ⇒ có gì đó nghe cổng nhưng không phải engine vflow.

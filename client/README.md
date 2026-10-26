@@ -1,9 +1,12 @@
-# vflow — client macOS (menu bar)
+# vflow — client macOS
 
 Giữ **⌥ Option trái**, nói, nhả phím ⇒ chữ được dán vào ô đang gõ ở mọi ứng dụng (kể cả Terminal). Client chỉ nói chuyện với engine cục bộ `http://127.0.0.1:7611` theo `contract/engine-api.md`; không mạng ngoài, không analytics, không tự cập nhật, không thư viện bên thứ ba.
 
+Từ M4a, vflow là **app thường**: biểu tượng Dock, ⌘-Tab, menu ứng dụng đầy đủ, và cửa sổ chính **"vflow"** với 4 mục — **Tổng quan**, **Lịch sử**, **Từ điển**, **Cài đặt**. Biểu tượng thanh menu vẫn còn nhưng chỉ là phụ (có công tắc ẩn/hiện ở Cài đặt, mặc định bật). **Đóng cửa sổ chính (nút đỏ) KHÔNG thoát app** — ghi âm bằng phím nóng và engine vẫn hoạt động; thoát hẳn bằng **⌘Q** hoặc menu "vflow › Thoát vflow".
+
 ## Dựng và chạy
 ```sh
+client/scripts/make-icon.sh            # (chỉ cần khi đổi thiết kế biểu tượng) ⇒ client/Resources/AppIcon.icns
 client/scripts/build-app.sh            # ⇒ client/build/VFlow.app (release, ký ad-hoc, codesign --verify)
 client/scripts/build-app.sh --clean    # như trên rồi xoá client/.build (~ vài trăm MB)
 open client/build/VFlow.app
@@ -12,12 +15,15 @@ cd client && swift test                # test logic thuần (VFlowCore)
 Yêu cầu: macOS 14+, Xcode/Swift 6. Cờ dòng lệnh của nhị phân `VFlow.app/Contents/MacOS/VFlow`:
 - `--demo-overlay ghi|dich|xong|loi [--demo-seconds N]`: chỉ hiện thanh trạng thái ở một trạng thái (để chụp ảnh), không chạy engine/phím nóng.
 - `--no-prompt`: không bật hộp thoại xin quyền (dùng khi chạy thử tự động); vẫn kiểm và báo trạng thái quyền.
+- `--open-tab tongquan|lichsu|tudien|caidat`: mở cửa sổ chính thẳng vào tab đó (dùng để chụp ảnh từng tab).
+
+Biến môi trường `VFLOW_HOME` (mặc định `~/.vflow`, giống engine) đổi nơi client đọc `client.json`/`token` và lưu `history.jsonl` — dùng để thử nghiệm mà không đụng dữ liệu thật, ví dụ: `VFLOW_HOME=/tmp/vflow-test VFlow.app/Contents/MacOS/VFlow`.
 
 ## Cấu trúc
 | Target | Nội dung |
 |---|---|
-| `VFlowCore` (thư viện, test được) | `Hotkey.swift` máy trạng thái phím + phân loại CGEvent; `Audio.swift` bộ chuyển 16 kHz mono Int16 theo khối (sinc cửa sổ Blackman, chống răng cưa), downmix, LE, mức âm, bộ đệm “thử lại”; `Clipboard.swift` chèn bằng clipboard + khôi phục; `EngineAPI.swift` yêu cầu/phản hồi/ánh xạ lỗi tiếng Việt; `EngineSupervisor.swift` giám sát engine con; `ClientConfig.swift`; `Dictation.swift`, `Overlay.swift` quyết định hiển thị; `StatusModel.swift` mô hình thuần dùng CHUNG cho menu và cửa sổ trạng thái (`StatusModel`, `PermissionKind`/`PermissionItem`, `ConflictDetector`/`ConflictText` dò ứng dụng đọc chính tả khác qua `RunningAppsProvider`, `ShowWindowPreference`). |
-| `VFlow` (AppKit/SwiftUI mỏng) | event tap, AVAudioEngine, NSPasteboard + ⌘V, NSPanel thanh trạng thái, `StatusWindow.swift` cửa sổ “vflow” (điều khiển chính), NSStatusItem + menu, `Permissions.swift` (quyền thật, nối `PermissionKind`), `ConflictProvider.swift` (`NSWorkspace` thật), SMAppService. |
+| `VFlowCore` (thư viện, test được) | `Hotkey.swift` máy trạng thái phím + phân loại CGEvent; `Audio.swift` bộ chuyển 16 kHz mono Int16 theo khối (sinc cửa sổ Blackman, chống răng cưa), downmix, LE, mức âm, bộ đệm “thử lại”; `Clipboard.swift` chèn bằng clipboard + khôi phục; `EngineAPI.swift` yêu cầu/phản hồi/ánh xạ lỗi tiếng Việt (transcribe, healthz, dictionary, corrections); `EngineSupervisor.swift` giám sát engine con; `ClientConfig.swift`; `VFlowHome.swift` tôn trọng `VFLOW_HOME`; `History.swift` (`HistoryStore`, `HistoryEntry`, `HistoryGate`) lưu lịch sử chỉ-văn-bản vào `history.jsonl`; `Dictionary.swift` (`DictionaryEntry`, `DictionaryValidation`, `DictionaryPlanner`) kiểm hợp lệ + hợp nhất biến thể, khớp luật engine; `DictionaryOrchestration.swift` mẫu đọc-sửa-ghi chung cho `/v1/dictionary`; `Dictation.swift`, `Overlay.swift` quyết định hiển thị; `StatusModel.swift` mô hình thuần dùng CHUNG cho menu và tab Tổng quan (`StatusModel`, `PermissionKind`/`PermissionItem`, `ConflictDetector`/`ConflictText` dò ứng dụng đọc chính tả khác qua `RunningAppsProvider`, `ShowWindowPreference`). |
+| `VFlow` (AppKit/SwiftUI mỏng) | event tap, AVAudioEngine, NSPasteboard + ⌘V, NSPanel thanh trạng thái, `main.swift` (menu ứng dụng, `--open-tab`), `StatusWindow.swift` cửa sổ chính "vflow" (`MainWindowView`, sidebar 4 tab), `OverviewView.swift`/`HistoryView.swift`/`DictionaryView.swift`/`SettingsView.swift` nội dung từng tab, `MainTab.swift`, NSStatusItem + menu (`StatusMenu.swift`, có `setVisible`), `Permissions.swift` (quyền thật, nối `PermissionKind`), `ConflictProvider.swift` (`NSWorkspace` thật), SMAppService. |
 | `VFlowCoreTests` | swift-testing, chỉ logic thuần, dùng bộ chạy tiến trình/clipboard/đồng hồ giả. |
 
 ## Engine
@@ -58,27 +64,29 @@ Không cần: Ghi màn hình, Tự động hoá (Apple Events), đọc nội dun
 - Khi khởi động app kiểm cả 3 quyền; thiếu quyền nào thì menu có dòng “Thiếu quyền … — mở Cài đặt…” mở đúng trang (`x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone|Privacy_ListenEvent|Privacy_Accessibility`). Event tap chỉ được tạo khi đã có Input Monitoring; app thử lại mỗi 3 s nên thường không cần mở lại (nếu vẫn không nhận phím thì thoát và mở lại).
 - **Bản ký ad-hoc**: TCC gắn quyền với chữ ký; mỗi lần chạy lại `build-app.sh` có thể tạo chữ ký mới ⇒ macOS có thể đòi cấp lại (bật/tắt lại vflow trong danh sách). vflow không bao giờ sửa/xoá cơ sở dữ liệu TCC.
 
-## Không thấy biểu tượng?
-Trên thanh menu chật (nhiều mục, hoặc notch của MacBook che bớt), macOS có thể **ẩn biểu tượng `org.aios.vflow`** mà không báo gì — app vẫn chạy bình thường, chỉ là không thấy để bấm vào. Cách điều khiển CHÍNH vì vậy KHÔNG phụ thuộc biểu tượng này: cửa sổ **“vflow”** (`StatusWindow`).
-- Mặc định cửa sổ tự hiện khi mở app (công tắc “Hiện cửa sổ này khi mở app” trong chính cửa sổ, lưu UserDefaults, tắt được nếu không muốn).
-- Chạy `open client/build/VFlow.app` lần nữa khi app đang chạy ⇒ **không** mở tiến trình thứ hai, chỉ đưa cửa sổ lên trước (macOS tự route `open` vào tiến trình đang chạy qua `applicationShouldHandleReopen`).
-- Nếu cửa sổ cũng bị đóng: thoát app (Activity Monitor hoặc `pkill -x VFlow` nếu cần) rồi mở lại.
-- Đóng cửa sổ **không** thoát app (vẫn còn ở menu bar/Dock-less); thoát hẳn dùng nút “Thoát vflow” trong cửa sổ hoặc mục menu “Thoát vflow”.
+## Dock, menu ứng dụng, biểu tượng thanh menu
+Từ M4a, `NSApp.setActivationPolicy(.regular)`: có biểu tượng Dock, hiện trong ⌘-Tab, và có menu ứng dụng đầy đủ ("vflow" — Giới thiệu, Cài đặt… ⌘,, Ẩn ⌘H, Thoát ⌘Q; "Cửa sổ"; "Trợ giúp" mở `client/README.md` nếu chạy từ repo, không thì mở cửa sổ chính). Bấm biểu tượng Dock hoặc `open client/build/VFlow.app` lần nữa khi app đang chạy ⇒ **không** mở tiến trình thứ hai, chỉ đưa cửa sổ chính lên trước (`applicationShouldHandleReopen`).
 
-## Cửa sổ trạng thái "vflow"
-Cửa sổ AppKit/SwiftUI thường (`.titled`, có thể đổi cỡ), giữ activation policy `.accessory` (không có biểu tượng Dock). Nội dung — lấy từ CÙNG MỘT mô hình thuần `StatusModel` (VFlowCore) với menu, nên hai nơi không bao giờ nói khác nhau:
-- Dòng hướng dẫn: “Giữ ⌥ Option trái để nói, nhả ra để chữ hiện ở chỗ con trỏ”.
-- **Cảnh báo xung đột phím**: nếu phát hiện ứng dụng đọc chính tả khác đang chạy có thể dùng chung ⌥ trái (danh sách mặc định trong `VFlowCore.ConflictConfig`, đầu tiên là `com.sonpiaz.haynoi`/Haynoi; dò bằng `NSWorkspace.runningApplications`), hiện rõ: “<tên app> đang chạy: cả hai sẽ phản ứng khi giữ ⌥ trái. Hãy thoát một trong hai.” vflow không tự thoát ứng dụng kia.
-- Engine + danh sách model (như menu; `loaded:false` luôn kèm `reason`).
-- 3 quyền (Micro, Theo dõi đầu vào, Trợ năng): biểu tượng + “Đã cấp”/“Chưa cấp” + nút “Cấp quyền…” (mở đúng trang System Settings); tự kiểm lại mỗi 2 giây trong lúc cửa sổ đang hiện.
-- Chọn chế độ (auto/normal/clean/email) — dùng chung UserDefaults với menu.
-- Lỗi gần nhất, đầy đủ (không cắt ngắn như thanh trạng thái nổi).
-- Thao tác: “Thử lại lần cuối” (chỉ bật khi còn âm thanh trong RAM), “Khởi động lại engine”, “Mở thư mục dữ liệu”, công tắc “Hiện cửa sổ này khi mở app” và “Bật khi đăng nhập”, nút “Thoát vflow”.
-- Mẹo cuối cửa sổ nhắc lại: nếu không thấy biểu tượng, mở lại app để hiện cửa sổ này.
+Biểu tượng thanh menu (`org.aios.vflow`) vẫn còn nhưng giờ chỉ là PHỤ — có công tắc "Hiện biểu tượng trên thanh menu" ở tab Cài đặt (mặc định bật). Trên thanh menu chật (nhiều mục, hoặc notch của MacBook che bớt) macOS có thể tự ẩn biểu tượng mà không báo gì; cách điều khiển CHÍNH không phụ thuộc nó: cửa sổ **"vflow"**, mở được từ Dock, ⌘-Tab, hoặc menu ứng dụng bất cứ lúc nào.
+
+**Đóng cửa sổ chính (nút đỏ) KHÔNG thoát app** — ghi âm bằng phím nóng vẫn hoạt động, engine con vẫn chạy; cửa sổ tự ghi chú điều này ở chân mỗi tab. Thoát hẳn bằng **⌘Q** hoặc menu "vflow › Thoát vflow" (cũng có ở tab Cài đặt). Nếu cửa sổ bị đóng và cần mở lại: bấm Dock, `open client/build/VFlow.app`, hoặc menu thanh trạng thái "Mở cửa sổ vflow".
+
+## Cửa sổ chính "vflow"
+Một cửa sổ (`.titled`, đổi cỡ được, nhớ kích thước/vị trí), thanh bên 4 mục (`NavigationSplitView`, điều khiển được bằng bàn phím/VoiceOver):
+
+**Tổng quan** — đúng nội dung cửa sổ trạng thái cũ (M3b), lấy từ CÙNG MỘT mô hình thuần `StatusModel` (VFlowCore) với menu thanh trạng thái nên hai nơi không bao giờ nói khác nhau:
+- Dòng hướng dẫn giữ ⌥ trái; **cảnh báo xung đột phím** nếu phát hiện ứng dụng đọc chính tả khác đang chạy (danh sách mặc định trong `VFlowCore.ConflictConfig`, đầu tiên là `com.sonpiaz.haynoi`/Haynoi; dò bằng `NSWorkspace.runningApplications`) — "<tên app> đang chạy: cả hai sẽ phản ứng khi giữ ⌥ trái. Hãy thoát một trong hai."; vflow không tự thoát ứng dụng kia.
+- Engine + danh sách model (`loaded:false` luôn kèm `reason`); 3 quyền (Micro, Theo dõi đầu vào, Trợ năng) + nút "Cấp quyền…", tự kiểm lại mỗi 2 giây trong lúc cửa sổ đang hiện; chọn chế độ; lỗi gần nhất đầy đủ; "Thử lại lần cuối", "Khởi động lại engine", "Mở thư mục dữ liệu".
+
+**Lịch sử** — các câu đã đọc chính tả (mới nhất trên cùng; thời gian, app đích, chế độ, model, văn bản). CHỈ lưu văn bản (`text_raw`, `text`, mode, app bundle id, model, audio_ms, timings) — **tuyệt đối không có âm thanh**. Lưu `<VFLOW_HOME>/history.jsonl` (JSONL, quyền 0600, ghi nối nguyên tử + tự dọn giữ tối đa 500 mục/30 ngày, dòng hỏng bị bỏ qua và đếm chứ không làm sập — xem `VFlowCore.HistoryStore`). Tìm kiếm, Sao chép, "Sửa…" (mở hộp sửa văn bản cuối; Lưu ⇒ `POST /v1/corrections` ⇒ hiện gợi ý `{term, spoken}`, CHỈ ghi vào từ điển khi người dùng bấm xác nhận từng gợi ý; không gợi ý thì nói rõ "Không có gợi ý"; không tự dán lại văn bản đã sửa vào đâu cả), xoá một mục, "Xoá toàn bộ lịch sử…" (xác nhận). Công tắc "Lưu lịch sử" ở tab Cài đặt (mặc định bật; tắt ⇒ không ghi mục mới, không xoá mục cũ). Kết quả lỗi/im lặng không bao giờ vào lịch sử.
+
+**Từ điển** — đọc `GET /v1/dictionary`, thêm/sửa/xoá qua `PUT /v1/dictionary` kiểu **đọc-sửa-ghi** (đọc lại ngay trước khi ghi, xem `VFlowCore.DictionaryOrchestration`, để không đè thay đổi của engine/cửa sổ khác giữa chừng). Kiểm hợp lệ phía client khớp luật engine (`VFlowCore.DictionaryValidation`: spoken 1–20 chuỗi ≤100 ký tự, term không trùng, tối đa 5000 mục) trước khi gửi; lỗi `bad_request` của engine hiện nguyên văn (đã là tiếng Việt theo contract), không nuốt. Engine không chạy ⇒ nói rõ bằng chữ đỏ, KHÔNG hiện danh sách rỗng giả.
+
+**Cài đặt** — chế độ mặc định, Bật khi đăng nhập, Hiện cửa sổ khi mở app, Hiện biểu tượng trên thanh menu, Lưu lịch sử + "Xoá toàn bộ lịch sử…", đường dẫn dữ liệu hiện dùng (tôn trọng `VFLOW_HOME`), phiên bản, Thoát vflow.
 
 ## Thanh trạng thái nổi và menu
 - NSPanel không viền, không lấy focus, bỏ qua chuột, nổi trên mọi Space/toàn màn hình, giữa đáy màn hình có con trỏ chuột (phía trên Dock). 4 trạng thái bằng SF Symbols: “Đang nghe” (`mic.fill` + thanh mức âm), “Đang dịch” (`waveform`), “Xong” (`checkmark.circle.fill`), “Lỗi: …” (`exclamationmark.triangle.fill`); thông báo ngắn “Đã huỷ”/“Không nghe thấy gì” (`info.circle`). Chữ 13 pt, tôn trọng Reduce Motion (thanh mức không hoạt ảnh), nhãn VoiceOver và thông báo VoiceOver khi đổi trạng thái (trừ lúc đang nghe).
-- Menu bar: “Mở cửa sổ vflow” (đầu menu); trạng thái engine; cảnh báo xung đột phím (nếu có); lỗi gần nhất (đầy đủ); quyền thiếu; Chế độ (auto/normal/clean/email, nhớ trong UserDefaults `org.aios.vflow`); Model (từ `/healthz`, model `loaded:false` hiện kèm lý do); Thử lại lần cuối; Khởi động lại engine (khi đã bỏ cuộc); Bật khi đăng nhập (SMAppService); Mở thư mục dữ liệu (`~/.vflow`); “Hướng dẫn cấp quyền…” (mở cửa sổ “vflow”); Thoát.
+- Menu bar: “Mở cửa sổ vflow” (đầu menu); trạng thái engine; cảnh báo xung đột phím (nếu có); lỗi gần nhất (đầy đủ); quyền thiếu; Chế độ (auto/normal/clean/email, nhớ trong UserDefaults `org.aios.vflow`); Model (từ `/healthz`, model `loaded:false` hiện kèm lý do); Thử lại lần cuối; Khởi động lại engine (khi đã bỏ cuộc); Bật khi đăng nhập (SMAppService); Mở thư mục dữ liệu (`~/.vflow`); “Hướng dẫn cấp quyền…” (mở cửa sổ “vflow”); Thoát. Công tắc ẩn/hiện biểu tượng này nằm ở tab Cài đặt của cửa sổ chính.
 
 ## Rủi ro đã biết
 - **Va chạm ⌥**: vì tap chỉ nghe, ký tự gõ bằng ⌥ (å, ∫, “…) vẫn vào ứng dụng như thường. Nếu giữ ⌥ ≥ 200 ms rồi mới bấm phím (⌥← chậm, ⌥-kéo chuột) thì micro bật thoáng qua rồi huỷ (“Đã huỷ”), chỉ báo micro màu cam có thể nháy. Giữ ⌥ một mình (ví dụ chờ để ⌥-click) sẽ bắt đầu ghi.

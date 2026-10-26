@@ -13,8 +13,13 @@ BIN="$(swift build -c release --product VFlow --show-bin-path)/VFlow"
 [ -x "$BIN" ] || { echo "LỖI: không thấy nhị phân $BIN" >&2; exit 1; }
 
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/VFlow"
+if [ -f "$CLIENT_DIR/Resources/AppIcon.icns" ]; then
+  cp "$CLIENT_DIR/Resources/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
+else
+  echo "CẢNH BÁO: thiếu $CLIENT_DIR/Resources/AppIcon.icns — chạy client/scripts/make-icon.sh trước." >&2
+fi
 
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -25,12 +30,13 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
   <key>CFBundleName</key><string>vflow</string>
   <key>CFBundleDisplayName</key><string>vflow</string>
   <key>CFBundleExecutable</key><string>VFlow</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>0.1.0</string>
   <key>CFBundleVersion</key><string>1</string>
   <key>CFBundleDevelopmentRegion</key><string>vi</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
-  <key>LSUIElement</key><true/>
+  <key>LSApplicationCategoryType</key><string>public.app-category.productivity</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSMicrophoneUsageDescription</key>
   <string>vflow dùng micro để ghi giọng nói của anh trong lúc giữ phím ⌥ trái, rồi chuyển thành chữ ngay trên máy này. Âm thanh chỉ nằm trong bộ nhớ, không ghi xuống đĩa và không gửi ra ngoài máy.</string>

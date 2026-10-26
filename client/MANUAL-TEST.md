@@ -3,10 +3,12 @@
 Dành cho chủ dự án, trên Mac thật. Mỗi bước có **Dự kiến**; khác dự kiến thì ghi lại bước + thông điệp trên thanh/menu.
 Chuẩn bị: `client/scripts/build-app.sh`; model `zipformer-vi-30m` đã có trong `~/.vflow/models`; chưa có engine nào chạy (`lsof -nP -iTCP:7611 -sTCP:LISTEN` rỗng).
 
-## A. Khởi động, cửa sổ "vflow" và cấp quyền
+## A. Khởi động, Dock, cửa sổ "vflow" và cấp quyền
 1. `open client/build/VFlow.app`.
-   **Dự kiến:** không có biểu tượng Dock; biểu tượng micro trên menu bar (có thể bị ẩn nếu thanh menu chật/notch che — xem bước 1b); **cửa sổ "vflow" tự hiện** (mặc định bật) với: dòng hướng dẫn giữ ⌥ trái, trạng thái engine + model, 3 quyền (Chưa cấp lúc đầu), chế độ, lỗi gần nhất nếu có; hộp thoại xin quyền Micro (chữ tiếng Việt từ Info.plist); hộp thoại/nhắc “Theo dõi đầu vào”; cửa sổ hiện lỗi “Thiếu quyền Theo dõi đầu vào (Input Monitoring)”.
-1b. Thu nhỏ cửa sổ "vflow" lại (đừng thoát app), giả lập biểu tượng thanh menu bị ẩn (thử thu nhỏ cửa sổ trình duyệt/mở nhiều ứng dụng để thanh menu chật). Chạy lại `open client/build/VFlow.app`.
+   **Dự kiến:** **có biểu tượng Dock** (micro cam trên nền tối) và app xuất hiện trong ⌘-Tab; biểu tượng micro trên menu bar cũng có (phụ, có thể bị ẩn nếu thanh menu chật/notch che — xem bước 1b, tắt được ở Cài đặt); **cửa sổ chính "vflow" tự hiện** (mặc định bật) ở tab **Tổng quan** với: dòng hướng dẫn giữ ⌥ trái, trạng thái engine + model, 3 quyền (Chưa cấp lúc đầu), chế độ, lỗi gần nhất nếu có; thanh bên có đủ 4 mục Tổng quan/Lịch sử/Từ điển/Cài đặt; hộp thoại xin quyền Micro (chữ tiếng Việt từ Info.plist); hộp thoại/nhắc “Theo dõi đầu vào”; cửa sổ hiện lỗi “Thiếu quyền Theo dõi đầu vào (Input Monitoring)”. Menu ứng dụng ở góc trên trái có tên "vflow" với Giới thiệu/Cài đặt…(⌘,)/Ẩn(⌘H)/Thoát(⌘Q).
+1a. Bấm menu "vflow" › "Cài đặt…" (hoặc ⌘,).
+   **Dự kiến:** cửa sổ chuyển sang tab **Cài đặt** (không mở cửa sổ mới).
+1b. Thu nhỏ cửa sổ "vflow" lại (đừng thoát app), giả lập biểu tượng thanh menu bị ẩn (thử thu nhỏ cửa sổ trình duyệt/mở nhiều ứng dụng để thanh menu chật). Bấm biểu tượng Dock của vflow (hoặc chạy lại `open client/build/VFlow.app`).
    **Dự kiến:** KHÔNG có tiến trình VFlow thứ hai (`pgrep -fl "VFlow.app/Contents/MacOS/VFlow"` chỉ ra đúng 1 dòng); cửa sổ "vflow" được đưa ra trước thay vì mở lại từ đầu.
 2. Bấm “Cho phép” Micro.
 3. Trong cửa sổ "vflow" › hàng “Theo dõi đầu vào (Input Monitoring)” bấm “Cấp quyền…”.
@@ -16,8 +18,8 @@ Chuẩn bị: `client/scripts/build-app.sh`; model `zipformer-vi-30m` đã có t
    **Dự kiến:** cả 3 quyền trong cửa sổ đều “Đã cấp”; menu không còn dòng “Thiếu quyền …”.
 5. `curl -s 127.0.0.1:7611/healthz` và `pgrep -fl "vflow.js serve"`.
    **Dự kiến:** `ok:true`, `zipformer-vi-30m` `loaded:true` (sau vài giây); có một tiến trình node là con của VFlow. Cửa sổ "vflow" và menu đều nói “engine con v0.1.0, sẵn sàng” (không bao giờ khác nhau); mục Engine trong cửa sổ liệt kê từng model, model chưa tải có lý do (`not_downloaded`, `missing_token`…).
-5b. Đóng cửa sổ "vflow" bằng nút đóng (không phải nút Thoát).
-   **Dự kiến:** app vẫn chạy (`pgrep -fl "VFlow.app/Contents/MacOS/VFlow"` còn); engine con vẫn sống. Menu › “Mở cửa sổ vflow” (mục đầu menu) đưa cửa sổ lại.
+5b. Đóng cửa sổ "vflow" bằng nút đóng đỏ (không phải ⌘Q/nút Thoát). Thử giữ ⌥ trái đọc chính tả một câu khi cửa sổ đang đóng.
+   **Dự kiến:** app vẫn chạy (`pgrep -fl "VFlow.app/Contents/MacOS/VFlow"` còn, vẫn còn trong Dock/⌘-Tab); engine con vẫn sống; **phím nóng vẫn hoạt động bình thường** (chữ vẫn chèn được) — đóng cửa sổ không tắt tính năng chính. Menu › “Mở cửa sổ vflow” (mục đầu menu), bấm biểu tượng Dock, hoặc `open client/build/VFlow.app` đều đưa cửa sổ lại (giữ nguyên tab đang chọn lúc đóng).
 5c. (Chỉ nếu có cài [Haynoi](https://github.com/sonpiaz/haynoi) hoặc ứng dụng đọc chính tả khác cùng danh sách xung đột) Mở Haynoi, rồi mở lại cửa sổ "vflow".
    **Dự kiến:** cửa sổ (và menu) hiện cảnh báo đỏ “Haynoi đang chạy: cả hai sẽ phản ứng khi giữ ⌥ trái. Hãy thoát một trong hai.”; vflow không tự thoát Haynoi. Thoát Haynoi ⇒ trong ~2 s cảnh báo biến mất.
 
@@ -59,11 +61,25 @@ Chuẩn bị: `client/scripts/build-app.sh`; model `zipformer-vi-30m` đã có t
 22. Tắt quyền Trợ năng, đọc chính tả.
     **Dự kiến:** “Lỗi: Không dán được (thiếu quyền Trợ năng); chữ đã nằm trong clipboard, bấm ⌘V”; ⌘V tay dán đúng chữ.
 
-## D. Khác
+## D. Lịch sử và Từ điển
+D1. Mở tab "Lịch sử", đọc chính tả vài câu ở Terminal.
+    **Dự kiến:** mỗi câu (không rỗng, không "Không nghe thấy gì") xuất hiện ở đầu danh sách sau khi chèn xong — mới nhất trên cùng, kèm giờ, bundle id ứng dụng đích, chế độ, model. "Sao chép" đưa đúng văn bản vào clipboard. Gõ vào ô tìm kiếm lọc đúng theo nội dung.
+D2. Bấm "Sửa…" ở một mục, sửa vài chữ rồi "Lưu".
+    **Dự kiến:** gọi `/v1/corrections`; nếu engine nhận ra thuật ngữ đổi (vd. "đi plôi" → "deploy") thì hiện gợi ý "Thêm '<term>' ← '<spoken>'?"; bấm "Thêm" mới ghi vào từ điển (xem lại ở tab Từ điển, mục đó có biến thể mới); KHÔNG tự dán văn bản đã sửa vào Terminal hay ứng dụng nào. Sửa câu mà không đổi gì đáng kể (chỉ khác hoa/thường) ⇒ "Không có gợi ý".
+D3. Xoá một mục lịch sử; rồi "Xoá toàn bộ lịch sử…" và xác nhận.
+    **Dự kiến:** mục biến mất ngay; xoá toàn bộ cần xác nhận trước, sau đó danh sách trống hẳn ("Chưa có câu nào trong lịch sử.").
+D4. Tab Cài đặt › tắt "Lưu lịch sử", đọc chính tả một câu, bật lại.
+    **Dự kiến:** lúc tắt, câu mới KHÔNG xuất hiện ở tab Lịch sử (và `~/.vflow/history.jsonl` không có dòng mới — kiểm bằng `wc -l`); lịch sử cũ vẫn còn nguyên, không bị xoá chỉ vì tắt công tắc.
+D5. Mở tab "Từ điển", bấm "Thêm mục…", nhập thuật ngữ + vài cách nói (mỗi dòng một cách), Lưu.
+    **Dự kiến:** mục mới xuất hiện trong danh sách, số lần dùng 0. Thử Lưu với thuật ngữ trùng mục có sẵn ⇒ báo lỗi tiếng Việt rõ ràng (không đè, không nuốt lỗi). Sửa một mục (đổi cách nói), Xoá một mục (có xác nhận) — số mục cập nhật đúng ngay.
+D6. Tắt engine (Tổng quan › "Khởi động lại engine" trong lúc đang tắt, hoặc `pkill -9 -f "vflow.js serve"` rồi nhanh tay mở tab Từ điển trước khi engine con tự khởi động lại), mở tab "Từ điển".
+    **Dự kiến:** hiện rõ chữ đỏ "Không kết nối được engine: …" — KHÔNG hiện danh sách trống như thể từ điển thật sự rỗng.
+
+## E. Khác
 23. Bật VoiceOver (⌘F5), đọc chính tả một câu.
     **Dự kiến:** VoiceOver đọc “vflow đang dịch giọng nói”, “vflow đã chèn chữ”; biểu tượng menu bar có nhãn.
-23b. VoiceOver vẫn bật: mở cửa sổ "vflow", dùng Tab/VoiceOver để duyệt qua từng hàng quyền, nút “Cấp quyền…”, Picker chế độ, các nút thao tác — không dùng chuột.
-    **Dự kiến:** mọi điều khiển đọc được tên + trạng thái bằng VoiceOver và bấm được bằng bàn phím (Space/Return); không có phần tử “mồ côi” không tên.
+23b. VoiceOver vẫn bật: mở cửa sổ "vflow", dùng Tab/VoiceOver để duyệt qua thanh bên 4 tab, từng hàng quyền, nút “Cấp quyền…”, Picker chế độ, các nút thao tác ở Lịch sử/Từ điển/Cài đặt — không dùng chuột.
+    **Dự kiến:** mọi điều khiển đọc được tên + trạng thái bằng VoiceOver và bấm được bằng bàn phím (Space/Return, mũi tên để đổi tab); không có phần tử “mồ côi” không tên.
 24. Bật Giảm chuyển động (Trợ năng › Màn hình), giữ ⌥.
     **Dự kiến:** thanh mức âm đổi tức thì, không hoạt ảnh.
 25. Ứng dụng toàn màn hình / Space khác: giữ ⌥.

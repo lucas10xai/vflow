@@ -21,6 +21,10 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         refresh(model)
     }
 
+    /// Công tắc "Hiện biểu tượng trên thanh menu" (Cài đặt). Biểu tượng vẫn tồn tại, chỉ ẩn/hiện —
+    /// app luôn có chỗ đứng chính ở cửa sổ chính + Dock.
+    func setVisible(_ visible: Bool) { item.isVisible = visible }
+
     /// Cùng một `StatusModel` với `StatusWindow`: menu và cửa sổ không bao giờ nói khác nhau.
     func refresh(_ model: StatusModel) {
         self.model = model

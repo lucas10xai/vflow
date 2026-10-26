@@ -69,7 +69,7 @@ private func err(_ code: String, _ msg: String) -> Data { json(#"{"error":{"code
         """#)
         let r = try EngineAPI.parseTranscribe(status: 200, data: body).get()
         #expect(r == TranscribeResult(text: "xin chào", silence: false, mode: "clean", model: "zipformer-vi-30m",
-                                      rewriteError: nil, totalMs: 103))
+                                      rewriteError: nil, totalMs: 103, textRaw: "ừm xin chào", audioMs: 1200))
     }
 
     @Test func silenceMeansNothingInserted() throws {
@@ -158,6 +158,62 @@ private func err(_ code: String, _ msg: String) -> Data { json(#"{"error":{"code
         #expect(EngineAPI.parseHealth(status: 200, data: json(#"{"status":"ok"}"#)) == nil)
         #expect(EngineAPI.parseHealth(status: 200, data: json(#"{"ok":false,"version":"0.1.0","models":[]}"#)) == nil)
         #expect(EngineAPI.parseHealth(status: 404, data: json("")) == nil)
+    }
+}
+
+@Suite struct DictionaryRequestTests {
+    @Test func getRequestMatchesContract() throws {
+        let r = EngineAPI.dictionaryGetRequest(port: 7611, token: "abc")
+        #expect(r.url?.absoluteString == "http://127.0.0.1:7611/v1/dictionary")
+        #expect(r.httpMethod == "GET")
+        #expect(r.value(forHTTPHeaderField: "Authorization") == "Bearer abc")
+    }
+
+    @Test func putRequestEncodesEntriesMatchingEngineSchema() throws {
+        let e = DictionaryEntry(term: "deploy", spoken: ["đi plôi", "đì ploi"], kind: "term", caseExact: true, uses: 3, lastUsed: "2026-10-26T01:00:00Z")
+        let r = EngineAPI.dictionaryPutRequest(port: 7611, token: "abc", entries: [e])
+        #expect(r.httpMethod == "PUT")
+        let body = try #require(r.httpBody)
+        let obj = try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+        let entries = try #require(obj["entries"] as? [[String: Any]])
+        #expect(entries.count == 1)
+        #expect(entries[0]["term"] as? String == "deploy")
+        #expect(entries[0]["spoken"] as? [String] == ["đi plôi", "đì ploi"])
+        #expect(entries[0]["case"] as? String == "exact")
+        #expect(entries[0]["uses"] as? Int == 3)
+    }
+
+    @Test func putRequestOmitsCaseKeyWhenNotExact() throws {
+        let r = EngineAPI.dictionaryPutRequest(port: 7611, token: "abc", entries: [DictionaryEntry(term: "deploy", spoken: ["x"])])
+        let body = try #require(r.httpBody)
+        let obj = try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+        let entries = try #require(obj["entries"] as? [[String: Any]])
+        #expect(entries[0]["case"] == nil)
+    }
+
+    @Test func listParsingRoundTrips() throws {
+        let body = json(#"{"entries":[{"term":"deploy","spoken":["đi plôi"],"kind":"term","uses":12,"last_used":"2026-10-26T01:00:00Z"}]}"#)
+        let entries = try EngineAPI.parseDictionaryList(status: 200, data: body).get()
+        #expect(entries == [DictionaryEntry(term: "deploy", spoken: ["đi plôi"], kind: "term", caseExact: false, uses: 12, lastUsed: "2026-10-26T01:00:00Z")])
+    }
+
+    @Test func listParsingSurfacesEngineErrorNotSwallowed() {
+        guard case .failure(.engine(400, "bad_request", let msg)) = EngineAPI.parseDictionaryList(status: 400, data: err("bad_request", "entries phải là một mảng")) else {
+            Issue.record("phải forward lỗi bad_request"); return
+        }
+        #expect(msg.contains("mảng"))
+    }
+
+    @Test func correctionsRequestAndEmptySuggestionsParse() throws {
+        let r = EngineAPI.correctionsRequest(port: 7611, token: "abc", before: "đi plôi", after: "deploy")
+        let body = try #require(r.httpBody)
+        let obj = try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+        #expect(obj["before"] as? String == "đi plôi")
+        #expect(obj["after"] as? String == "deploy")
+        let empty = try EngineAPI.parseCorrections(status: 200, data: json(#"{"suggestions":[]}"#)).get()
+        #expect(empty.isEmpty, "không có gợi ý ⇒ mảng rỗng, không phải lỗi")
+        let some = try EngineAPI.parseCorrections(status: 200, data: json(#"{"suggestions":[{"term":"deploy","spoken":["đi plôi"]}]}"#)).get()
+        #expect(some == [CorrectionSuggestion(term: "deploy", spoken: ["đi plôi"])])
     }
 }
 

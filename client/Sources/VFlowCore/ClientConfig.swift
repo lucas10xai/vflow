@@ -38,8 +38,11 @@ public enum ClientConfig {
     }
 
     /// - Parameter bundlePath: đường dẫn `VFlow.app`; nếu app nằm ở `<repo>/client/build/` thì dùng repo đó khi cấu hình không chỉ định.
-    public static func resolve(home: String, bundlePath: String?, fs: FileSystem) -> Result<EngineLaunchSpec, ClientError> {
-        let configPath = home + "/.vflow/client.json"
+    /// - Parameter vflowHome: thư mục chứa `client.json` (mặc định `<home>/.vflow`); đặt riêng để tôn trọng `VFLOW_HOME`
+    ///   (xem `VFlowHome`) mà không đổi cách mở rộng `~` của "repo"/"node" (luôn dựa trên `home` thật).
+    public static func resolve(home: String, vflowHome: String? = nil, bundlePath: String?, fs: FileSystem) -> Result<EngineLaunchSpec, ClientError> {
+        let dataHome = vflowHome ?? (home + "/.vflow")
+        let configPath = dataHome + "/client.json"
         var obj: [String: Any] = [:]
         if let data = fs.read(configPath) {
             guard let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
