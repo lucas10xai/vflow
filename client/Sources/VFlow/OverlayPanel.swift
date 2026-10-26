@@ -15,6 +15,9 @@ struct OverlayView: View {
     var body: some View {
         let p = OverlayText.present(model.state)
         HStack(spacing: 8) {
+            if let mark = BrandIcon.headerMark(pointSize: 16) {
+                Image(nsImage: mark).resizable().frame(width: 16, height: 16).accessibilityHidden(true)
+            }
             Image(systemName: p.symbol)
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(p.isError ? Color.red : (p.showsLevel ? Color.orange : Color.white))
@@ -89,7 +92,9 @@ final class OverlayController {
         panel.contentView = hosting
     }
 
-    func show(_ state: OverlayState) {
+    /// `thenRestore`: sau khi `state` tự ẩn (vd. cảnh báo "còn ~20s" trong lúc vẫn đang ghi), hiện
+    /// lại trạng thái này thay vì ẩn hẳn thanh — tránh thanh "Đang nghe" biến mất giữa chừng.
+    func show(_ state: OverlayState, thenRestore: OverlayState? = nil) {
         model.state = state
         let p = OverlayText.present(state)
         hosting.layoutSubtreeIfNeeded()
@@ -106,7 +111,9 @@ final class OverlayController {
         hideTimer = nil
         if let after = p.autoHide, !sticky {
             hideTimer = Timer.scheduledTimer(withTimeInterval: after, repeats: false) { [weak self] _ in
-                MainActor.assumeIsolated { self?.hide() }
+                MainActor.assumeIsolated {
+                    if let thenRestore { self?.show(thenRestore) } else { self?.hide() }
+                }
             }
         }
     }

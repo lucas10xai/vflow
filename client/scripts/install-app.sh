@@ -82,4 +82,8 @@ codesign --verify --deep --strict "$DEST_APP"
 echo "  OK"
 
 echo "Xong: $DEST_APP ($(du -sh "$DEST_APP" | cut -f1))"
-echo "LƯU Ý: chữ ký ad-hoc của bản trong /Applications khác bản trong client/build (ký lại mỗi lần cài) nên macOS sẽ đòi cấp quyền macOS (Micro/Theo dõi đầu vào/Trợ năng) lại cho bản này — đó là bản dùng thật."
+if security find-identity -v -p codesigning 2>/dev/null | grep -qF '"vflow Local Signing"'; then
+  echo "LƯU Ý: đã ký bằng danh tính ổn định \"vflow Local Signing\" (xem build-app.sh) — quyền macOS (Micro/Theo dõi đầu vào/Trợ năng) THƯỜNG được giữ qua các lần cài lại, không đảm bảo tuyệt đối."
+else
+  echo "LƯU Ý: chữ ký ad-hoc của bản trong /Applications khác bản trong client/build (ký lại mỗi lần cài) nên macOS sẽ đòi cấp quyền macOS (Micro/Theo dõi đầu vào/Trợ năng) lại cho bản này — đó là bản dùng thật. Chạy client/scripts/make-signing-identity.sh --yes để tránh việc này."
+fi

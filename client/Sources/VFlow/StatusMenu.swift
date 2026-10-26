@@ -28,26 +28,33 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     /// Cùng một `StatusModel` với `StatusWindow`: menu và cửa sổ không bao giờ nói khác nhau.
     func refresh(_ model: StatusModel) {
         self.model = model
-        let (symbol, label) = iconState()
-        let img = NSImage(systemSymbolName: symbol, accessibilityDescription: label)
-        img?.isTemplate = true
+        let (symbol, badge, label) = iconState()
+        // Có logo thương hiệu đóng gói ⇒ dùng (logo + chấm trạng thái phủ góc, xem `BrandIcon`);
+        // không có (vd. chạy `swift build` không qua `build-app.sh`) ⇒ rơi về SF Symbol cũ.
+        let img = BrandIcon.statusImage(badge: badge) ?? {
+            let i = NSImage(systemSymbolName: symbol, accessibilityDescription: label)
+            i?.isTemplate = true
+            return i
+        }()
         item.button?.image = img
         item.button?.toolTip = label
         item.button?.setAccessibilityLabel(label)
     }
 
-    private func iconState() -> (String, String) {
+    private func iconState() -> (symbol: String, badge: MenuBarBadge, label: String) {
         switch controller.phase {
-        case .recording: return ("mic.fill", "vflow: đang nghe")
-        case .busy: return ("waveform", "vflow: đang dịch")
+        case .recording: return ("mic.fill", .listening, "vflow: đang nghe")
+        case .recordingLocked: return ("mic.fill", .listening, "vflow: đang nghe (đã khoá)")
+        case .recordingCommand: return ("command", .command, "vflow: đang nghe lệnh")
+        case .busy, .busyCommand: return ("waveform", .busy, "vflow: đang dịch")
         default: break
         }
-        if model.conflictWarning != nil { return ("exclamationmark.triangle", "vflow: xung đột phím ⌥") }
-        if model.missingPermissions.isEmpty == false || !model.hotkeysActive { return ("exclamationmark.triangle", "vflow: cần xử lý lỗi") }
-        if model.models.contains(where: \.loaded) { return ("mic", "vflow: sẵn sàng") }
-        if model.engineHasFailed { return ("exclamationmark.triangle", "vflow: engine lỗi") }
-        if !model.models.isEmpty { return ("mic.badge.xmark", "vflow: engine chạy nhưng chưa có model sẵn sàng") }
-        return ("mic.slash", "vflow: engine chưa sẵn sàng")
+        if model.conflictWarning != nil { return ("exclamationmark.triangle", .warning, "vflow: xung đột phím ⌥") }
+        if model.missingPermissions.isEmpty == false || !model.hotkeysActive { return ("exclamationmark.triangle", .warning, "vflow: cần xử lý lỗi") }
+        if model.models.contains(where: \.loaded) { return ("mic", .none, "vflow: sẵn sàng") }
+        if model.engineHasFailed { return ("exclamationmark.triangle", .warning, "vflow: engine lỗi") }
+        if !model.models.isEmpty { return ("mic.badge.xmark", .warning, "vflow: engine chạy nhưng chưa có model sẵn sàng") }
+        return ("mic.slash", .warning, "vflow: engine chưa sẵn sàng")
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) { rebuild() }

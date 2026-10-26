@@ -23,6 +23,13 @@ final class AppController: NSObject {
     private var inflight: Task<Void, Never>?
     private var targetApp: String?
     private var recordingStartedAt: TimeInterval = 0
+    /// Lấy đoạn đang chọn (AX/⌘C) chạy song song với ghi âm lệnh Command Mode (xem `SelectionCapture`).
+    private var commandSelectionTask: Task<String?, Never>?
+    /// Đã hiện cảnh báo "còn ~20s" cho lần ghi hiện tại chưa (tránh lặp lại mỗi tick).
+    private var warnedApproachingLimit = false
+    /// Cache của `GET/PUT /v1/settings` — dùng để quyết định gửi Enter (xem `EnterAction`); mặc
+    /// định khớp `DEFAULT_SETTINGS` của engine cho tới khi đọc được bản thật.
+    private(set) var cachedSettings = AppSettings(cloudLlm: true, llmModel: nil, llmTimeoutMs: 8000, actionsEnabled: true)
     private let session: URLSession
     private let home = FileManager.default.homeDirectoryForCurrentUser.path
     /// `<VFLOW_HOME>` thật (mặc định `~/.vflow`) — token, lịch sử… Tôn trọng biến môi trường để
@@ -116,6 +123,7 @@ final class AppController: NSObject {
             healthTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
                 MainActor.assumeIsolated { if let s = self?.supervisor { Task { await s.refresh() } } }
             }
+            Task { _ = await self.fetchSettings() } // best-effort; cachedSettings giữ mặc định nếu lỗi
         }
         refreshUI()
         if showWindowOnLaunch { openStatusWindow() }
@@ -258,6 +266,7 @@ final class AppController: NSObject {
                 MainActor.assumeIsolated {
                     guard let self else { return }
                     self.perform(self.machine.tick(at: Self.now, optionHeld: HotkeyMonitor.leftOptionHeldNow()))
+                    self.checkApproachingLimit()
                     self.updateTicking()
                 }
             }
@@ -267,12 +276,31 @@ final class AppController: NSObject {
         }
     }
 
+    /// Cảnh báo một lần khi còn ~20 s (giây 100/120) trước khi tự gửi — không cần giữ với ghi khoá.
+    private func checkApproachingLimit() {
+        guard let remaining = machine.secondsRemaining(at: Self.now), remaining <= 20, !warnedApproachingLimit else { return }
+        warnedApproachingLimit = true
+        overlay.show(.notice("Còn khoảng 20 giây sẽ tự gửi"), thenRestore: currentListeningOverlay())
+    }
+
+    private func currentListeningOverlay() -> OverlayState {
+        switch machine.phase {
+        case .recordingLocked: return .listeningLocked(level: 0)
+        case .recordingCommand: return .listeningCommand(level: 0)
+        default: return .listening(level: 0)
+        }
+    }
+
     private func perform(_ action: HotkeyAction) {
         switch action {
         case .none: break
         case .startRecording: beginRecording()
         case .stopAndSend: finishRecording()
+        case .startCommandRecording: beginCommandRecording()
+        case .stopAndSendCommand: finishCommandRecording()
         case .cancel:
+            commandSelectionTask?.cancel()
+            commandSelectionTask = nil
             recorder.cancel()
             overlay.show(.notice(OverlayText.cancelled))
             refreshUI()
@@ -285,6 +313,8 @@ final class AppController: NSObject {
 
     private func abortRecording(_ error: ClientError) {
         _ = machine.reset(optionHeld: HotkeyMonitor.leftOptionHeldNow())
+        commandSelectionTask?.cancel()
+        commandSelectionTask = nil
         recorder.cancel()
         setError(ErrorText.message(error), showOverlay: true)
         updateTicking()
@@ -313,9 +343,50 @@ final class AppController: NSObject {
             return abortRecording(.micUnavailable(error.localizedDescription))
         }
         recordingStartedAt = Self.now
+        warnedApproachingLimit = false
         overlay.setLevel(0)
-        overlay.show(.listening(level: 0))
+        overlay.show(machine.isLocked ? .listeningLocked(level: 0) : .listening(level: 0))
         refreshUI()
+    }
+
+    private func beginCommandRecording() {
+        switch AudioRecorder.permission() {
+        case .authorized: break
+        case .notDetermined:
+            PermissionKind.microphone.request()
+            return abortRecording(.micDenied)
+        default:
+            return abortRecording(.micDenied)
+        }
+        guard engineState.isReady else {
+            if let e = configError { return abortRecording(e) }
+            if case .failed(let e) = engineState { return abortRecording(e) }
+            return abortRecording(.engineNotRunning)
+        }
+        targetApp = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+        do {
+            try recorder.start()
+        } catch let e as ClientError {
+            return abortRecording(e)
+        } catch {
+            return abortRecording(.micUnavailable(error.localizedDescription))
+        }
+        recordingStartedAt = Self.now
+        warnedApproachingLimit = false
+        overlay.setLevel(0)
+        overlay.show(.listeningCommand(level: 0))
+        refreshUI()
+        // Lấy đoạn đang chọn NGAY LÚC BẮT ĐẦU, song song với ghi âm lệnh (xem contract/engine-api.md,
+        // mục Command Mode, bước a) — chờ ở `finishCommandRecording` nếu chưa xong.
+        let pb = pasteboard
+        commandSelectionTask = Task {
+            await SelectionCapture.capture(
+                ax: { AXSelection.selectedText() },
+                pasteboard: pb,
+                sendCopy: { CopyKeystroke.send() },
+                now: { Self.now },
+                sleep: { try? await Task.sleep(for: $0) })
+        }
     }
 
     private func micInterrupted(_ why: String) {
@@ -328,6 +399,51 @@ final class AppController: NSObject {
         let m = mode
         retry.store(pcm: pcm, mode: m.rawValue, app: targetApp, at: Self.now)
         send(pcm: pcm, mode: m, app: targetApp)
+    }
+
+    /// Command Mode: dừng ghi lệnh, chờ đoạn đã chọn (nếu chưa xong), rồi
+    /// `POST /v1/transcribe?mode=normal` lấy chữ lệnh, sau đó `POST /v1/command`.
+    private func finishCommandRecording() {
+        let pcm = recorder.stop()
+        let app = targetApp
+        let selectionTask = commandSelectionTask
+        commandSelectionTask = nil
+        overlay.show(.transcribing)
+        refreshUI()
+        let portResult = resolvedPort()
+        inflight = Task { [session] in
+            let selection = await selectionTask?.value
+            let result: Result<CommandDeliveryResult, ClientError>
+            switch portResult {
+            case .failure(let e):
+                result = .failure(e)
+            case .success(let port):
+                switch readToken() {
+                case .failure(let e):
+                    result = .failure(e)
+                case .success(let token):
+                    let transcribed = await Self.transcribe(session: session, port: port, token: token, pcm: pcm, mode: .normal, app: app)
+                    switch transcribed {
+                    case .failure(let e):
+                        result = .failure(e)
+                    case .success(let r):
+                        let instruction = r.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if r.silence || instruction.isEmpty {
+                            result = .success(CommandDeliveryResult(instruction: "", command: nil, audioMs: r.audioMs))
+                        } else {
+                            let cmdResult = await Self.command(session: session, port: port, token: token, instruction: instruction,
+                                                               selection: selection ?? "", context: "", app: app)
+                            switch cmdResult {
+                            case .failure(let e): result = .failure(e)
+                            case .success(let c): result = .success(CommandDeliveryResult(instruction: instruction, command: c, audioMs: r.audioMs))
+                            }
+                        }
+                    }
+                }
+            }
+            guard !Task.isCancelled else { return }
+            await self.deliverCommand(result)
+        }
     }
 
     func retryLast() {
@@ -397,6 +513,21 @@ final class AppController: NSObject {
         }
     }
 
+    nonisolated static func command(session: URLSession, port: Int, token: String, instruction: String,
+                                    selection: String, context: String, app: String?) async -> Result<CommandResult, ClientError> {
+        let req = EngineAPI.commandRequest(port: port, token: token, instruction: instruction, selection: selection, context: context, app: app)
+        do {
+            let (data, resp) = try await session.data(for: req)
+            return EngineAPI.parseCommand(status: (resp as? HTTPURLResponse)?.statusCode ?? 0, data: data)
+        } catch let e as URLError where e.code == .cannotConnectToHost || e.code == .networkConnectionLost {
+            return .failure(.engineNotRunning)
+        } catch let e as URLError where e.code == .timedOut {
+            return .failure(.engine(status: 0, code: "timeout", message: "hết thời gian chờ"))
+        } catch {
+            return .failure(.network(error.localizedDescription))
+        }
+    }
+
     private func deliver(_ result: Result<TranscribeResult, ClientError>) async {
         inflight = nil
         let plan = DictationDecision.plan(for: result)
@@ -407,6 +538,11 @@ final class AppController: NSObject {
                                              wait: { try? await Task.sleep(for: $0) })
             let outcome = await inserter.insert(text)
             overlayState = DictationDecision.overlay(after: outcome, planned: plan.overlay)
+            let pasted = outcome == .pastedRestored || outcome == .pastedNotRestoredUserChanged
+            if pasted, case .success(let r) = result, EnterAction.shouldSend(actions: r.actions, actionsEnabled: cachedSettings.actionsEnabled) {
+                try? await Task.sleep(for: .milliseconds(150))
+                if !ReturnKeystroke.send() { overlayState = .error(ErrorText.message(.enterKeystrokeFailed)) }
+            }
         }
         if case .error(let m) = overlayState { lastError = m } else { lastError = nil }
         recordHistoryIfNeeded(result: result, insertedText: plan.insert)
@@ -414,6 +550,50 @@ final class AppController: NSObject {
         machine.finished(optionHeld: HotkeyMonitor.leftOptionHeldNow())
         updateTicking()
         refreshUI()
+    }
+
+    /// Kết quả Command Mode: `instruction` rỗng ⇒ không nghe thấy gì (đã dừng trước khi gọi `/v1/command`).
+    private struct CommandDeliveryResult {
+        var instruction: String
+        var command: CommandResult?
+        var audioMs: Int?
+    }
+
+    private func deliverCommand(_ result: Result<CommandDeliveryResult, ClientError>) async {
+        inflight = nil
+        switch result {
+        case .failure(let e):
+            lastError = ErrorText.message(e)
+            overlay.show(.error(lastError!))
+        case .success(let r):
+            if r.instruction.isEmpty || r.command == nil {
+                overlay.show(.notice(OverlayText.heardNothing))
+                lastError = nil
+            } else {
+                let cmd = r.command!
+                let inserter = ClipboardInserter(pasteboard: pasteboard, sendPaste: { PasteKeystroke.send() },
+                                                 wait: { try? await Task.sleep(for: $0) })
+                let outcome = await inserter.insert(cmd.text)
+                let overlayState = DictationDecision.overlay(after: outcome, planned: .done)
+                if case .error(let m) = overlayState { lastError = m } else { lastError = nil }
+                overlay.show(overlayState)
+                recordCommandHistory(instruction: r.instruction, command: cmd, audioMs: r.audioMs)
+            }
+        }
+        machine.finished(optionHeld: HotkeyMonitor.leftOptionHeldNow())
+        updateTicking()
+        refreshUI()
+    }
+
+    /// CHỈ lưu lệnh và kết quả — TUYỆT ĐỐI không lưu đoạn đang chọn (xem contract/engine-api.md,
+    /// mục Command Mode).
+    private func recordCommandHistory(instruction: String, command: CommandResult, audioMs: Int?) {
+        guard historyEnabled else { return }
+        let entry = HistoryEntry(at: Date(), appBundleId: targetApp, mode: "command:\(command.kind)",
+                                 model: "", textRaw: instruction, text: command.text, audioMs: audioMs, totalMs: nil)
+        do { try historyStore.append(entry) } catch {
+            if lastError == nil { lastError = "Không ghi được lịch sử: \(error)" }
+        }
     }
 
     /// Kết quả lỗi/im lặng không bao giờ vào lịch sử (`insertedText == nil` lúc đó). CHỈ lưu văn
@@ -520,6 +700,101 @@ final class AppController: NSObject {
         do {
             let (data, resp) = try await session.data(for: EngineAPI.correctionsRequest(port: port, token: token, before: before, after: after))
             return EngineAPI.parseCorrections(status: (resp as? HTTPURLResponse)?.statusCode ?? 0, data: data)
+        } catch {
+            return .failure(.network(error.localizedDescription))
+        }
+    }
+
+    // MARK: snippets (đọc-sửa-ghi qua `SnippetOrchestration`, giống từ điển)
+
+    func fetchSnippets() async -> Result<[SnippetEntry], ClientError> {
+        switch resolvedPort() {
+        case .failure(let e): return .failure(e)
+        case .success(let port):
+            switch readToken() {
+            case .failure(let e): return .failure(e)
+            case .success(let token): return await Self.requestSnippetsList(session: session, port: port, token: token)
+            }
+        }
+    }
+
+    func applySnippetChange(_ change: SnippetChange) async -> Result<[SnippetEntry], ClientError> {
+        switch resolvedPort() {
+        case .failure(let e): return .failure(e)
+        case .success(let port):
+            switch readToken() {
+            case .failure(let e): return .failure(e)
+            case .success(let token):
+                let session = self.session
+                return await SnippetOrchestration.applyChange(
+                    change,
+                    get: { await Self.requestSnippetsList(session: session, port: port, token: token) },
+                    put: { entries in await Self.requestSnippetsPut(session: session, port: port, token: token, entries: entries) })
+            }
+        }
+    }
+
+    nonisolated static func requestSnippetsList(session: URLSession, port: Int, token: String) async -> Result<[SnippetEntry], ClientError> {
+        do {
+            let (data, resp) = try await session.data(for: EngineAPI.snippetsGetRequest(port: port, token: token))
+            return EngineAPI.parseSnippetList(status: (resp as? HTTPURLResponse)?.statusCode ?? 0, data: data)
+        } catch {
+            return .failure(.network(error.localizedDescription))
+        }
+    }
+
+    nonisolated static func requestSnippetsPut(session: URLSession, port: Int, token: String, entries: [SnippetEntry]) async -> Result<[SnippetEntry], ClientError> {
+        do {
+            let (data, resp) = try await session.data(for: EngineAPI.snippetsPutRequest(port: port, token: token, entries: entries))
+            return EngineAPI.parseSnippetList(status: (resp as? HTTPURLResponse)?.statusCode ?? 0, data: data)
+        } catch {
+            return .failure(.network(error.localizedDescription))
+        }
+    }
+
+    // MARK: cài đặt đám mây (GET/PUT /v1/settings)
+
+    func fetchSettings() async -> Result<AppSettings, ClientError> {
+        switch resolvedPort() {
+        case .failure(let e): return .failure(e)
+        case .success(let port):
+            switch readToken() {
+            case .failure(let e): return .failure(e)
+            case .success(let token):
+                let r = await Self.requestSettingsGet(session: session, port: port, token: token)
+                if case .success(let s) = r { cachedSettings = s }
+                return r
+            }
+        }
+    }
+
+    func applySettingsPatch(_ patch: SettingsPatch) async -> Result<AppSettings, ClientError> {
+        switch resolvedPort() {
+        case .failure(let e): return .failure(e)
+        case .success(let port):
+            switch readToken() {
+            case .failure(let e): return .failure(e)
+            case .success(let token):
+                let r = await Self.requestSettingsPut(session: session, port: port, token: token, patch: patch)
+                if case .success(let s) = r { cachedSettings = s }
+                return r
+            }
+        }
+    }
+
+    nonisolated static func requestSettingsGet(session: URLSession, port: Int, token: String) async -> Result<AppSettings, ClientError> {
+        do {
+            let (data, resp) = try await session.data(for: EngineAPI.settingsGetRequest(port: port, token: token))
+            return EngineAPI.parseSettings(status: (resp as? HTTPURLResponse)?.statusCode ?? 0, data: data)
+        } catch {
+            return .failure(.network(error.localizedDescription))
+        }
+    }
+
+    nonisolated static func requestSettingsPut(session: URLSession, port: Int, token: String, patch: SettingsPatch) async -> Result<AppSettings, ClientError> {
+        do {
+            let (data, resp) = try await session.data(for: EngineAPI.settingsPutRequest(port: port, token: token, patch: patch))
+            return EngineAPI.parseSettings(status: (resp as? HTTPURLResponse)?.statusCode ?? 0, data: data)
         } catch {
             return .failure(.network(error.localizedDescription))
         }

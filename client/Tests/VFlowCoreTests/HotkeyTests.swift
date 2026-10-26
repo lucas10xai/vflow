@@ -130,6 +130,206 @@ private func recording(at t0: Double = 0) -> HotkeyStateMachine {
     }
 }
 
+@Suite struct HandsFreeLockTests {
+    /// Chạm nhanh (<200 ms) hai lần, cách nhau ≤350 ms ⇒ ghi khoá, không cần giữ phím.
+    @Test func doubleTapLocksRecording() {
+        var m = HotkeyStateMachine()
+        _ = m.handle(.leftOptionDown(othersHeld: false), at: 0)
+        #expect(m.handle(.leftOptionUp, at: 0.1) == .none) // tap 1: bỏ qua, chỉ nhớ lại
+        #expect(m.phase == .idle)
+        _ = m.handle(.leftOptionDown(othersHeld: false), at: 0.3)
+        #expect(m.handle(.leftOptionUp, at: 0.35) == .startRecording) // tap 2 trong 0.35s ⇒ khoá
+        #expect(m.isLocked)
+        #expect(m.isRecording)
+    }
+
+    /// Hai lần chạm cách nhau > 350 ms ⇒ không tính là đúp (mỗi lần vẫn bị bỏ qua hoàn toàn).
+    @Test func tapsTooFarApartDoNotLock() {
+        var m = HotkeyStateMachine()
+        _ = m.handle(.leftOptionDown(othersHeld: false), at: 0)
+        #expect(m.handle(.leftOptionUp, at: 0.1) == .none)
+        _ = m.handle(.leftOptionDown(othersHeld: false), at: 0.5) // cách lần 1 0.4s > 0.35s
+        #expect(m.handle(.leftOptionUp, at: 0.55) == .none)
+        #expect(m.phase == .idle)
+        #expect(!m.isRecording)
+    }
+
+    /// Lần "chạm" thứ hai thực ra là GIỮ (qua ngưỡng 200 ms) ⇒ ghi kiểu giữ phím như cũ, không khoá.
+    @Test func secondPressHeldPastThresholdStartsNormalRecordingNotLocked() {
+        var m = HotkeyStateMachine()
+        _ = m.handle(.leftOptionDown(othersHeld: false), at: 0)
+        #expect(m.handle(.leftOptionUp, at: 0.1) == .none)
+        _ = m.handle(.leftOptionDown(othersHeld: false), at: 0.2)
+        #expect(m.tick(at: 0.41, optionHeld: true) == .startRecording) // giữ quá 200ms ⇒ ghi thường
+        #expect(m.isRecording && !m.isLocked)
+    }
+
+    /// Ghi khoá: nhả/giữ ⌥ không ảnh hưởng (không có sự kiện nào) — chỉ hết 120s mới tự gửi.
+    @Test func lockedRecordingIgnoresOptionHeldDuringTick() {
+        var m = HotkeyStateMachine()
+        _ = m.handle(.leftOptionDown(othersHeld: false), at: 0)
+        _ = m.handle(.leftOptionUp, at: 0.1)
+        _ = m.handle(.leftOptionDown(othersHeld: false), at: 0.3)
+        _ = m.handle(.leftOptionUp, at: 0.35)
+        #expect(m.isLocked)
+        // ⌥ không được giữ (tay đã rời phím) — KHÔNG được tự dừng như "mất sự kiện nhả" ở ghi thường.
+        #expect(m.tick(at: 1, optionHeld: false) == .none)
+        #expect(m.isLocked)
+    }
+
+    /// Bấm ⌥ một lần nữa (down rồi up) ⇒ dừng và gửi.
+    @Test func singlePressEndsLockedRecording() {
+        var m = HotkeyStateMachine()
+        _ = m.handle(.leftOptionDown(othersHeld: false), at: 0)
+        _ = m.handle(.leftOptionUp, at: 0.1)
+        _ = m.handle(.leftOptionDown(othersHeld: false), at: 0.3)
+        _ = m.handle(.leftOptionUp, at: 0.35)
+        _ = m.handle(.leftOptionDown(othersHeld: false), at: 5)
+        #expect(m.handle(.leftOptionUp, at: 5.05) == .stopAndSend(.released))
+        if case .busy = m.phase {} else { Issue.record("phải ở busy, đang \(m.phase)") }
+    }
+
+    /// Ghi khoá tự gửi sau 120 s.
+    @Test func lockedRecordingAutoSendsAt120Seconds() {
+        var m = HotkeyStateMachine()
+        _ = m.handle(.leftOptionDown(othersHeld: false), at: 0)
+        _ = m.handle(.leftOptionUp, at: 0.1)
+        _ = m.handle(.leftOptionDown(othersHeld: false), at: 0.3)
+        _ = m.handle(.leftOptionUp, at: 0.35)
+        #expect(m.tick(at: 0.35 + 119, optionHeld: false) == .none)
+        #expect(m.tick(at: 0.35 + 120, optionHeld: false) == .stopAndSend(.maxDuration))
+    }
+
+    /// Phím khác trong lúc ghi khoá ⇒ huỷ ngay (không có phím ⌥ nào đang giữ để chờ nhả).
+    @Test func otherKeyDuringLockedRecordingCancels() {
+        var m = HotkeyStateMachine()
+        _ = m.handle(.leftOptionDown(othersHeld: false), at: 0)
+        _ = m.handle(.leftOptionUp, at: 0.1)
+        _ = m.handle(.leftOptionDown(othersHeld: false), at: 0.3)
+        _ = m.handle(.leftOptionUp, at: 0.35)
+        #expect(m.handle(.keyDown, at: 1) == .cancel(.otherInput))
+        #expect(m.phase == .idle) // không chờ nhả gì cả — khác với ghi kiểu giữ phím
+    }
+}
+
+@Suite struct EscapeCancelTests {
+    /// Esc trong lúc ghi kiểu giữ phím ⇒ huỷ, không gửi; ⌥ coi như vẫn giữ nên chờ nhả.
+    @Test func escapeCancelsHoldRecording() {
+        var m = recording()
+        #expect(m.handle(.escape, at: 1) == .cancel(.escape))
+        #expect(m.phase == .suppressed)
+        #expect(m.handle(.leftOptionUp, at: 1.1) == .none) // không gửi lần nào
+        #expect(m.phase == .idle)
+    }
+
+    /// Esc trong lúc ghi khoá ⇒ huỷ ngay, về rảnh (không phím nào đang giữ).
+    @Test func escapeCancelsLockedRecording() {
+        var m = HotkeyStateMachine()
+        _ = m.handle(.leftOptionDown(othersHeld: false), at: 0)
+        _ = m.handle(.leftOptionUp, at: 0.1)
+        _ = m.handle(.leftOptionDown(othersHeld: false), at: 0.3)
+        _ = m.handle(.leftOptionUp, at: 0.35)
+        #expect(m.handle(.escape, at: 1) == .cancel(.escape))
+        #expect(m.phase == .idle)
+    }
+
+    /// Esc lúc chỉ đang "armed" (chưa ghi gì) ⇒ không có gì để huỷ, không trả cancel action.
+    @Test func escapeWhileArmedIsQuiet() {
+        var m = HotkeyStateMachine()
+        _ = m.handle(.leftOptionDown(othersHeld: false), at: 0)
+        #expect(m.handle(.escape, at: 0.05) == .none)
+        #expect(m.phase == .suppressed)
+    }
+
+    /// Esc trong lúc "đang dịch" (busy) không có tác dụng — không huỷ được yêu cầu đã gửi.
+    @Test func escapeDuringBusyIsIgnored() {
+        var m = recording()
+        _ = m.handle(.leftOptionUp, at: 1)
+        #expect(m.handle(.escape, at: 1.1) == .none)
+        if case .busy = m.phase {} else { Issue.record("phải vẫn ở busy") }
+    }
+}
+
+@Suite struct CommandModeTests {
+    /// ⌃ trái trong 400 ms đầu của lần giữ ⌥ (khi còn "armed", chưa qua ngưỡng ghi thường) ⇒ Command Mode.
+    @Test func controlWithinWindowWhileArmedStartsCommandMode() {
+        var m = HotkeyStateMachine()
+        _ = m.handle(.leftOptionDown(othersHeld: false), at: 0)
+        #expect(m.handle(.leftControlDown, at: 0.1) == .startCommandRecording)
+        if case .recordingCommand = m.phase {} else { Issue.record("phải ở recordingCommand, đang \(m.phase)") }
+    }
+
+    /// ⌃ trái trong 400 ms đầu NHƯNG sau khi ghi thường đã bắt đầu (200 ms < 400 ms) vẫn chuyển
+    /// được sang Command Mode (không bị kẹt ở ghi thường).
+    @Test func controlWithinWindowWhileNormalRecordingSwitchesToCommandMode() {
+        var m = recording(at: 0) // bắt đầu ghi thường ở 0.25
+        #expect(m.handle(.leftControlDown, at: 0.35) == .startCommandRecording)
+        if case .recordingCommand = m.phase {} else { Issue.record("phải ở recordingCommand, đang \(m.phase)") }
+    }
+
+    /// ⌃ trái đến SAU 400 ms ⇒ huỷ như luật cũ (tổ hợp phím khác), không vào Command Mode.
+    @Test func controlAfterWindowCancelsLikeOtherCombo() {
+        var m = HotkeyStateMachine()
+        _ = m.handle(.leftOptionDown(othersHeld: false), at: 0)
+        #expect(m.handle(.leftControlDown, at: 0.41) == .none)
+        #expect(m.phase == .suppressed)
+    }
+
+    @Test func controlAfterWindowDuringRecordingCancelsRecording() {
+        var m = recording(at: 0) // ghi thường bắt đầu ở 0.25
+        #expect(m.handle(.leftControlDown, at: 0.41) == .cancel(.otherInput))
+        #expect(m.phase == .suppressed)
+    }
+
+    /// Nhả ⌃ trong lúc ghi lệnh KHÔNG kết thúc — chỉ nhả ⌥ mới dừng và gửi.
+    @Test func releasingControlDuringCommandRecordingDoesNotEnd() {
+        var m = HotkeyStateMachine()
+        _ = m.handle(.leftOptionDown(othersHeld: false), at: 0)
+        _ = m.handle(.leftControlDown, at: 0.1)
+        #expect(m.handle(.leftControlUp, at: 0.5) == .none)
+        if case .recordingCommand = m.phase {} else { Issue.record("vẫn phải ở recordingCommand") }
+        #expect(m.handle(.leftOptionUp, at: 2) == .stopAndSendCommand(.released))
+        if case .busyCommand = m.phase {} else { Issue.record("phải ở busyCommand") }
+    }
+
+    /// Phím khác trong lúc ghi lệnh ⇒ huỷ, chờ nhả ⌥.
+    @Test func otherKeyDuringCommandRecordingCancels() {
+        var m = HotkeyStateMachine()
+        _ = m.handle(.leftOptionDown(othersHeld: false), at: 0)
+        _ = m.handle(.leftControlDown, at: 0.1)
+        #expect(m.handle(.keyDown, at: 0.5) == .cancel(.otherInput))
+        #expect(m.phase == .suppressed)
+    }
+
+    /// Ghi lệnh tự gửi sau 120 s, giống ghi thường.
+    @Test func commandRecordingAutoSendsAt120Seconds() {
+        var m = HotkeyStateMachine()
+        _ = m.handle(.leftOptionDown(othersHeld: false), at: 0)
+        _ = m.handle(.leftControlDown, at: 0.1) // ⇒ recordingCommand(since: 0.1)
+        #expect(m.tick(at: 120.05, optionHeld: true) == .none) // chưa đủ 120s kể từ 0.1
+        #expect(m.tick(at: 120.2, optionHeld: true) == .stopAndSendCommand(.maxDuration))
+    }
+
+    /// Mất sự kiện nhả ⌥ trong lúc ghi lệnh ⇒ phát hiện qua trạng thái phím thật, vẫn gửi.
+    @Test func commandRecordingRecoversLostReleaseEvent() {
+        var m = HotkeyStateMachine()
+        _ = m.handle(.leftOptionDown(othersHeld: false), at: 0)
+        _ = m.handle(.leftControlDown, at: 0.1)
+        #expect(m.tick(at: 1, optionHeld: false) == .stopAndSendCommand(.releaseMissed))
+    }
+
+    /// Không bao giờ ghi lệnh chồng lên khi đang bận (busyCommand).
+    @Test func commandNeverOverlapsWhileBusy() {
+        var m = HotkeyStateMachine()
+        _ = m.handle(.leftOptionDown(othersHeld: false), at: 0)
+        _ = m.handle(.leftControlDown, at: 0.1)
+        _ = m.handle(.leftOptionUp, at: 0.5) // ⇒ busyCommand
+        _ = m.handle(.leftOptionDown(othersHeld: false), at: 0.6)
+        #expect(m.tick(at: 1, optionHeld: true) == .none) // vẫn busyCommand, không ghi chồng
+        #expect(!m.isRecording)
+    }
+}
+
 @Suite struct KeyClassifierTests {
     typealias K = KeyClassifier
 
@@ -160,5 +360,17 @@ private func recording(at t0: Double = 0) -> HotkeyStateMachine {
         #expect(K.classify(kind: .keyDown, keyCode: 0, flags: K.maskAlternate) == .keyDown)
         #expect(K.classify(kind: .keyUp, keyCode: 0, flags: 0) == .ignored)
         #expect(K.classify(kind: .mouseDown, keyCode: 0, flags: 0) == .mouseDown)
+    }
+
+    @Test func leftControlIsSeparateFromOtherModifiers() {
+        #expect(K.classify(kind: .flagsChanged, keyCode: 59, flags: K.maskControl | K.deviceLeftControl) == .leftControlDown)
+        #expect(K.classify(kind: .flagsChanged, keyCode: 59, flags: 0) == .leftControlUp)
+        // ⌃ phải vẫn là tổ hợp chung, không phải Command Mode.
+        #expect(K.classify(kind: .flagsChanged, keyCode: 62, flags: K.maskControl | K.deviceRightControl) == .otherModifierDown)
+    }
+
+    @Test func escapeKeyIsClassifiedSeparatelyFromOtherKeys() {
+        #expect(K.classify(kind: .keyDown, keyCode: 53, flags: 0) == .escape)
+        #expect(K.classify(kind: .keyDown, keyCode: 1, flags: 0) == .keyDown)
     }
 }

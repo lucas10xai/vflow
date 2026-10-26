@@ -52,3 +52,49 @@ enum PasteKeystroke {
         return true
     }
 }
+
+/// ⌘C tổng hợp dùng để lấy đoạn đang chọn khi không có Accessibility (xem `SelectionCapture`).
+enum CopyKeystroke {
+    /// Mã phím ảo 8 = vị trí phím C trên bố cục ANSI.
+    static func send() -> Bool {
+        guard CGPreflightPostEventAccess() else { return false }
+        let src = CGEventSource(stateID: .hidSystemState)
+        guard let down = CGEvent(keyboardEventSource: src, virtualKey: 8, keyDown: true),
+              let up = CGEvent(keyboardEventSource: src, virtualKey: 8, keyDown: false) else { return false }
+        down.flags = .maskCommand
+        up.flags = .maskCommand
+        down.post(tap: .cghidEventTap)
+        up.post(tap: .cghidEventTap)
+        return true
+    }
+}
+
+/// Phím Return tổng hợp, gửi sau khi dán nếu `post.actions` chứa `"enter"` (xem `EnterAction`).
+enum ReturnKeystroke {
+    /// Mã phím ảo 36 = Return.
+    static func send() -> Bool {
+        guard CGPreflightPostEventAccess() else { return false }
+        let src = CGEventSource(stateID: .hidSystemState)
+        guard let down = CGEvent(keyboardEventSource: src, virtualKey: 36, keyDown: true),
+              let up = CGEvent(keyboardEventSource: src, virtualKey: 36, keyDown: false) else { return false }
+        down.post(tap: .cghidEventTap)
+        up.post(tap: .cghidEventTap)
+        return true
+    }
+}
+
+/// Đọc `kAXSelectedTextAttribute` của phần tử đang focus ở ứng dụng khác (Command Mode, bước a).
+/// `nil` ⇒ không có AX hoặc không có đoạn chọn — gọi `CopyKeystroke` để thử tiếp (xem `SelectionCapture`).
+enum AXSelection {
+    static func selectedText() -> String? {
+        let systemWide = AXUIElementCreateSystemWide()
+        var focusedRef: AnyObject?
+        guard AXUIElementCopyAttributeValue(systemWide, kAXFocusedUIElementAttribute as CFString, &focusedRef) == .success,
+              let focused = focusedRef else { return nil }
+        let axElement = focused as! AXUIElement
+        var selectedRef: AnyObject?
+        guard AXUIElementCopyAttributeValue(axElement, kAXSelectedTextAttribute as CFString, &selectedRef) == .success,
+              let text = selectedRef as? String else { return nil }
+        return text
+    }
+}

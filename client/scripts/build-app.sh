@@ -1,5 +1,6 @@
 #!/bin/bash
-# Dựng client/build/VFlow.app (bản release), ký ad-hoc và kiểm chữ ký.
+# Dựng client/build/VFlow.app (bản release), ký (dùng danh tính ổn định "vflow Local Signing" nếu
+# có trong keychain — xem make-signing-identity.sh — ngược lại ký ad-hoc) và kiểm chữ ký.
 # Dùng: client/scripts/build-app.sh [--clean] [--no-bundle]
 #   --clean       xoá .build trung gian sau khi dựng
 #   --no-bundle   bỏ qua bundle-engine.sh (dựng nhanh khi phát triển; app sẽ cần repo + Node hệ
@@ -32,6 +33,14 @@ if [ -f "$CLIENT_DIR/Resources/AppIcon.icns" ]; then
 else
   echo "CẢNH BÁO: thiếu $CLIENT_DIR/Resources/AppIcon.icns — chạy client/scripts/make-icon.sh trước." >&2
 fi
+MENUBAR_MARKS=("menubar-mark-18.png" "menubar-mark-18@2x.png" "menubar-mark-18@3x.png")
+for f in "${MENUBAR_MARKS[@]}"; do
+  if [ -f "$CLIENT_DIR/Resources/$f" ]; then
+    cp "$CLIENT_DIR/Resources/$f" "$APP/Contents/Resources/$f"
+  else
+    echo "CẢNH BÁO: thiếu $CLIENT_DIR/Resources/$f — chạy client/scripts/make-icon.sh trước." >&2
+  fi
+done
 
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -57,14 +66,26 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 PLIST
 plutil -lint "$APP/Contents/Info.plist" >/dev/null
 
+SIGN_IDENTITY_NAME="vflow Local Signing"
+if security find-identity -v -p codesigning 2>/dev/null | grep -qF "\"$SIGN_IDENTITY_NAME\""; then
+  SIGN_IDENTITY="$SIGN_IDENTITY_NAME"
+else
+  SIGN_IDENTITY="-" # ad-hoc
+fi
+
 if [ "$BUNDLE_ENGINE" = "1" ]; then
-  "$CLIENT_DIR/scripts/bundle-engine.sh" "$APP"
+  "$CLIENT_DIR/scripts/bundle-engine.sh" "$APP" "$SIGN_IDENTITY"
 else
   echo "• --no-bundle: bỏ qua đóng gói engine (app cần repo + Node hệ thống như trước M4b)"
 fi
 
-echo "• ký ad-hoc (cả bundle, sau khi engine/node/*.node/*.dylib đã được ký riêng ở bước trên)…"
-codesign --force --deep -s - --identifier org.aios.vflow "$APP"
+if [ "$SIGN_IDENTITY" = "-" ]; then
+  echo "• ký ad-hoc: macOS có thể đòi cấp lại quyền macOS (Theo dõi đầu vào/Trợ năng/Micro) mỗi lần dựng lại."
+  echo "  Chạy client/scripts/make-signing-identity.sh --yes để tạo danh tính ký ổn định (cần chủ dự án duyệt)."
+else
+  echo "• ký ổn định bằng \"$SIGN_IDENTITY\": quyền macOS được giữ qua các lần cài (xem README mục Chữ ký)."
+fi
+codesign --force --deep -s "$SIGN_IDENTITY" --identifier org.aios.vflow "$APP"
 codesign --verify --deep --strict "$APP"
 echo "• chữ ký OK"
 

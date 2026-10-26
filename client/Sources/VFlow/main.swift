@@ -19,7 +19,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         buildMainMenu(controller: c)
         if let i = args.firstIndex(of: "--open-tab") {
             guard args.count > i + 1, let tab = MainTab(flag: args[i + 1]) else {
-                FileHandle.standardError.write(Data("dùng: --open-tab tongquan|lichsu|tudien|caidat\n".utf8))
+                FileHandle.standardError.write(Data("dùng: --open-tab tongquan|lichsu|tudien|snippet|caidat\n".utf8))
                 exit(64)
             }
             c.openStatusWindow(tab: tab)

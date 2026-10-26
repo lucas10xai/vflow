@@ -1,7 +1,7 @@
 import Foundation
 
 public enum DictationMode: String, CaseIterable, Sendable {
-    case auto, normal, clean, email
+    case auto, normal, clean, email, tidy, dev
 
     public var title: String {
         switch self {
@@ -9,6 +9,28 @@ public enum DictationMode: String, CaseIterable, Sendable {
         case .normal: "Thường"
         case .clean: "Làm sạch"
         case .email: "Thư (viết lại)"
+        case .tidy: "Gọn"
+        case .dev: "Lập trình"
+        }
+    }
+
+    /// `true` ⇒ chế độ này gửi CHỮ (không phải âm thanh) ra 9Router; hiện ở tab Tổng quan/Cài đặt.
+    public var sendsTextToCloud: Bool {
+        switch self {
+        case .tidy, .email: true
+        case .auto, .normal, .clean, .dev: false
+        }
+    }
+
+    /// Mô tả ngắn dưới mỗi chế độ (chọn chế độ ở Tổng quan/Cài đặt).
+    public var subtitle: String {
+        switch self {
+        case .auto: "Chọn chế độ theo ứng dụng đang dùng"
+        case .normal: "Trong máy — chỉ nhận dạng giọng nói + từ điển"
+        case .clean: "Trong máy — bỏ từ đệm, sửa dấu câu cơ bản"
+        case .email: "Gửi chữ qua 9Router — viết lại thành thư chuyên nghiệp"
+        case .tidy: "Gửi chữ qua 9Router — thêm dấu câu, bỏ từ đệm, tự sửa giữa câu"
+        case .dev: "Trong máy — đọc kiểu lập trình (gạch dưới, snake_case…)"
         }
     }
 }
@@ -31,6 +53,10 @@ public enum ClientError: Error, Equatable, Sendable {
     case configInvalid(String)
     /// Kiểm hợp lệ phía client (từ điển) thất bại trước khi gửi engine — không phải lỗi engine.
     case dictionaryInvalid(String)
+    /// Kiểm hợp lệ phía client (snippets) thất bại trước khi gửi engine.
+    case snippetInvalid(String)
+    /// Không gửi được ⌘V/Return tổng hợp (thiếu quyền Trợ năng) khi gửi phím Enter sau khi dán.
+    case enterKeystrokeFailed
 }
 
 public enum ErrorText {
@@ -49,6 +75,8 @@ public enum ErrorText {
             case "timeout": return "Engine xử lý quá thời gian"
             case "payload_too_large": return "Đoạn ghi quá dài (tối đa 120 giây)"
             case "internal": return "Lỗi nội bộ engine"
+            case "rewrite_unavailable": return message.isEmpty ? "Dịch vụ viết lại không khả dụng" : message
+            case "cloud_disabled": return message.isEmpty ? "Chế độ đám mây đang tắt" : message
             default: return "Lỗi engine (\(code)): \(message)"
             }
         case let .badResponse(status, detail): return "Engine trả phản hồi lạ (HTTP \(status)): \(detail)"
@@ -63,6 +91,8 @@ public enum ErrorText {
         case let .engineGaveUp(d): return "Engine chết liên tục, đã ngừng khởi động lại: \(d)"
         case let .configInvalid(d): return "Cấu hình client lỗi: \(d)"
         case let .dictionaryInvalid(d): return d
+        case let .snippetInvalid(d): return d
+        case .enterKeystrokeFailed: return "Không gửi được phím Enter (thiếu quyền Trợ năng)"
         }
     }
 
@@ -87,6 +117,8 @@ public struct TranscribeResult: Equatable, Sendable {
     /// Chữ gốc do STT trả (chưa qua từ điển/viết lại) — dùng cho Lịch sử, không hiện ở thanh trạng thái.
     public var textRaw: String = ""
     public var audioMs: Int?
+    /// `post.actions` — hiện chỉ có `"enter"` (xem `EnterAction`).
+    public var actions: [String] = []
 }
 
 public struct ModelStatus: Equatable, Sendable {
@@ -159,7 +191,8 @@ public enum EngineAPI {
             rewriteError: rewrite?["error"] as? String,
             totalMs: timings?["total"] as? Int,
             textRaw: obj["text_raw"] as? String ?? "",
-            audioMs: obj["audio_ms"] as? Int))
+            audioMs: obj["audio_ms"] as? Int,
+            actions: (post?["actions"] as? [String]) ?? []))
     }
 
     // MARK: từ điển + gợi ý sửa
@@ -190,6 +223,102 @@ public enum EngineAPI {
         r.setValue("application/json", forHTTPHeaderField: "Content-Type")
         r.httpBody = try? JSONSerialization.data(withJSONObject: ["before": before, "after": after])
         return r
+    }
+
+    // MARK: snippets
+
+    public static func snippetsGetRequest(port: Int, token: String) -> URLRequest {
+        var r = URLRequest(url: baseURL(port: port).appendingPathComponent("v1/snippets"),
+                           cachePolicy: .reloadIgnoringLocalAndRemoteCacheData, timeoutInterval: 10)
+        r.httpMethod = "GET"
+        r.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        return r
+    }
+
+    public static func snippetsPutRequest(port: Int, token: String, entries: [SnippetEntry]) -> URLRequest {
+        var r = URLRequest(url: baseURL(port: port).appendingPathComponent("v1/snippets"),
+                           cachePolicy: .reloadIgnoringLocalAndRemoteCacheData, timeoutInterval: 10)
+        r.httpMethod = "PUT"
+        r.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        r.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        r.httpBody = try? JSONSerialization.data(withJSONObject: ["entries": entries.map(encodeSnippet)])
+        return r
+    }
+
+    static func encodeSnippet(_ e: SnippetEntry) -> [String: Any] {
+        var obj: [String: Any] = ["trigger": e.trigger, "text": e.text, "uses": e.uses]
+        if let l = e.lastUsed { obj["last_used"] = l }
+        return obj
+    }
+
+    static func decodeSnippet(_ obj: [String: Any]) -> SnippetEntry? {
+        guard let trigger = obj["trigger"] as? String, let text = obj["text"] as? String else { return nil }
+        return SnippetEntry(trigger: trigger, text: text, uses: obj["uses"] as? Int ?? 0, lastUsed: obj["last_used"] as? String)
+    }
+
+    public static func parseSnippetList(status: Int, data: Data) -> Result<[SnippetEntry], ClientError> {
+        guard status == 200 else { return .failure(errorFrom(status: status, data: data)) }
+        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let rawEntries = obj["entries"] as? [[String: Any]] else {
+            return .failure(.badResponse(status: status, detail: "thiếu trường entries"))
+        }
+        return .success(rawEntries.compactMap(decodeSnippet))
+    }
+
+    // MARK: cài đặt
+
+    public static func settingsGetRequest(port: Int, token: String) -> URLRequest {
+        var r = URLRequest(url: baseURL(port: port).appendingPathComponent("v1/settings"),
+                           cachePolicy: .reloadIgnoringLocalAndRemoteCacheData, timeoutInterval: 10)
+        r.httpMethod = "GET"
+        r.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        return r
+    }
+
+    public static func settingsPutRequest(port: Int, token: String, patch: SettingsPatch) -> URLRequest {
+        var r = URLRequest(url: baseURL(port: port).appendingPathComponent("v1/settings"),
+                           cachePolicy: .reloadIgnoringLocalAndRemoteCacheData, timeoutInterval: 10)
+        r.httpMethod = "PUT"
+        r.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        r.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        r.httpBody = try? JSONSerialization.data(withJSONObject: patch.jsonObject)
+        return r
+    }
+
+    public static func parseSettings(status: Int, data: Data) -> Result<AppSettings, ClientError> {
+        guard status == 200 else { return .failure(errorFrom(status: status, data: data)) }
+        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let cloudLlm = obj["cloud_llm"] as? Bool,
+              let llmTimeoutMs = obj["llm_timeout_ms"] as? Int,
+              let actionsEnabled = obj["actions_enabled"] as? Bool else {
+            return .failure(.badResponse(status: status, detail: "thiếu trường cài đặt"))
+        }
+        let llmModel = obj["llm_model"] as? String
+        return .success(AppSettings(cloudLlm: cloudLlm, llmModel: llmModel, llmTimeoutMs: llmTimeoutMs, actionsEnabled: actionsEnabled))
+    }
+
+    // MARK: Command Mode
+
+    public static func commandRequest(port: Int, token: String, instruction: String, selection: String,
+                                      context: String, app: String?, timeout: TimeInterval = 30) -> URLRequest {
+        var r = URLRequest(url: baseURL(port: port).appendingPathComponent("v1/command"),
+                           cachePolicy: .reloadIgnoringLocalAndRemoteCacheData, timeoutInterval: timeout)
+        r.httpMethod = "POST"
+        r.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        r.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        var body: [String: Any] = ["instruction": instruction, "selection": selection, "context": context]
+        if let app { body["app"] = app }
+        r.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        return r
+    }
+
+    public static func parseCommand(status: Int, data: Data) -> Result<CommandResult, ClientError> {
+        guard status == 200 else { return .failure(errorFrom(status: status, data: data)) }
+        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let text = obj["text"] as? String, let kind = obj["kind"] as? String else {
+            return .failure(.badResponse(status: status, detail: "thiếu trường text/kind"))
+        }
+        return .success(CommandResult(text: text, kind: kind))
     }
 
     static func encodeEntry(_ e: DictionaryEntry) -> [String: Any] {

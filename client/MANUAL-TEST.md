@@ -99,6 +99,49 @@ D6b. Làm engine bỏ cuộc hẳn: `pkill -9 -f "vflow.js serve"` liên tục (
 30. Lặp lại bước 29 lần nữa (model đã có ở `/tmp/vflow-selftest`).
     **Dự kiến:** KHÔNG chép lại, không có dòng "Đang chuẩn bị model" (hoặc hiện rồi biến mất ngay vì `.alreadyPresent`); thời gian mtime của tệp model không đổi.
 31. `client/scripts/install-app.sh`.
-    **Dự kiến:** thoát nhẹ nhàng bản vflow cũ đang chạy (nếu đường dẫn thực thi thuộc `client/build/` hoặc `/Applications/vflow.app`) — KHÔNG đụng Haynoi hay app khác; `/Applications/vflow.app` xuất hiện; `codesign --verify --deep --strict /Applications/vflow.app` OK. Mở `/Applications/vflow.app` lần đầu ⇒ macOS đòi cấp lại quyền macOS (chữ ký ad-hoc khác bản cũ).
+    **Dự kiến:** thoát nhẹ nhàng bản vflow cũ đang chạy (nếu đường dẫn thực thi thuộc `client/build/` hoặc `/Applications/vflow.app`) — KHÔNG đụng Haynoi hay app khác; `/Applications/vflow.app` xuất hiện; `codesign --verify --deep --strict /Applications/vflow.app` OK. Mở `/Applications/vflow.app` lần đầu ⇒ macOS đòi cấp lại quyền macOS (chữ ký ad-hoc khác bản cũ) — trừ khi đã chạy `make-signing-identity.sh --yes` trước (xem mục H).
 32. `client/scripts/uninstall-app.sh`.
     **Dự kiến:** thoát vflow đang chạy từ `/Applications/vflow.app` rồi xoá; `~/.vflow` (token, từ điển, lịch sử) KHÔNG bị đụng — kiểm bằng `ls ~/.vflow`.
+
+## G. Hands-free, Esc, Command Mode, Enter bằng giọng, Snippets, Cài đặt đám mây
+33. Đúp ⌥ trái thật nhanh (hai lần chạm < 0,2 s mỗi lần, cách nhau ≤ 0,35 s), bỏ tay ra khỏi phím.
+    **Dự kiến:** thanh trạng thái "Đang nghe (đã khoá, bấm ⌥ để xong, Esc để huỷ)"; thanh mức âm vẫn nhảy theo giọng dù không giữ phím. Nói một câu, rồi bấm ⌥ một lần (nhấn thả nhanh).
+    **Dự kiến:** "Đang dịch" rồi "Xong"; chữ chèn đúng chỗ, giống ghi kiểu giữ phím.
+34. Lặp lại đúp ⌥ để vào ghi khoá, lần này bấm **Esc** thay vì bấm lại ⌥.
+    **Dự kiến:** "Đã huỷ" ngay lập tức, không chèn gì, không gửi âm thanh. Gõ thử Esc ở một ô văn bản khác (vd. Spotlight) ngay sau đó để chắc Esc không bị "nuốt" mất lần đó — phải đóng Spotlight bình thường.
+35. Giữ ⌥ trái (kiểu giữ phím) đang "Đang nghe", bấm **Esc**.
+    **Dự kiến:** "Đã huỷ"; vẫn đang giữ ⌥ thì chưa ghi lại tới khi nhả rồi bấm lại.
+36. Mở **Notes**, bôi đen một đoạn văn bản có sẵn. Giữ ⌥ trái; trong 400 ms đầu bấm thêm **⌃ trái** (vẫn giữ cả hai), nói một lệnh sửa (vd. "viết hoa toàn bộ"), nhả cả hai phím.
+    **Dự kiến:** thanh trạng thái chuyển "Đang nghe lệnh" ngay khi bấm ⌃; sau khi nhả ⇒ "Đang dịch" rồi "Xong"; đoạn bôi đen được THAY bằng kết quả (không còn lời dẫn, không có "Lệnh:"); nếu chưa đặt model 9Router (tab Cài đặt) thì thay vào đó hiện lỗi "Chế độ đám mây đang tắt…"/"Không thể xử lý lệnh…" và đoạn bôi đen giữ NGUYÊN (không bị xoá/thay bằng gì).
+37. Lặp lại bước 36 nhưng KHÔNG bôi đen gì trước (chỉ đặt con trỏ vào ô trống), nói "soạn một câu chào buổi sáng ngắn gọn".
+    **Dự kiến:** câu mới được dán vào đúng vị trí con trỏ (chế độ "soạn mới" — `draft`, không có đoạn chọn để thay).
+38. Mở **Terminal**, gõ vài chữ rồi bôi đen bằng chuột (Terminal thường KHÔNG hỗ trợ Accessibility `kAXSelectedTextAttribute`). Giữ ⌥+⌃ như bước 36, nói một lệnh sửa đoạn đó.
+    **Dự kiến:** vẫn lấy được đoạn đang bôi đen (qua đường ⌘C tổng hợp dự phòng, chậm hơn một chút); sau khi xong, thử ⌘V ở một chỗ khác để xác nhận clipboard GỐC (trước khi vflow mượn tạm) đã được khôi phục đúng, không phải đoạn vừa bôi đen trong Terminal.
+39. Tab **Lịch sử**: tìm mục vừa tạo ở bước 36/37.
+    **Dự kiến:** có một dòng kiểu lệnh (`mode` bắt đầu bằng "command:"), `text_raw` là câu LỆNH đã nói, `text` là KẾT QUẢ — **không có bất kỳ dòng nào chứa đoạn văn bản đã bôi đen** ở Notes/Terminal.
+40. Tab **Cài đặt** › mục "Đám mây (9Router)": tắt công tắc "Cho phép gửi chữ qua 9Router".
+    **Dự kiến:** đổi ngay (không cần Lưu riêng). Thử chế độ Gọn hoặc Command Mode (bước 36) lúc này.
+    **Dự kiến:** không có yêu cầu mạng nào tới 9Router; Gọn vẫn dán được bản đã qua từ điển + làm sạch bằng quy tắc, kèm lỗi "Chế độ đám mây đang tắt…"; Command Mode báo lỗi rõ, không dán gì. Bật lại công tắc.
+41. Tab Cài đặt › xoá trắng ô "Model", bấm Lưu.
+    **Dự kiến:** dòng cảnh báo cam "Chưa đặt model: Gọn/Thư/Command Mode sẽ không chạy được." hiện ra. Thử chế độ Gọn ⇒ lỗi rõ ràng (không phải "không rõ lý do"). Đặt lại tên model cũ.
+42. Tab Cài đặt › đổi "Thời gian chờ (giây)" xuống 1, mục Model đặt một model KHÔNG tồn tại trên 9Router thật.
+    **Dự kiến:** chế độ Gọn/Thư/Command Mode báo lỗi "quá thời gian" hoặc lỗi dịch vụ rõ ràng trong khoảng 1 giây, không treo lâu. Đặt lại 8 giây.
+43. Mở **Terminal**, chọn chế độ **Lập trình** (menu hoặc tab Tổng quan), giữ ⌥ nói "biến tên gạch dưới người dùng mới bằng mười, rồi nhấn enter". Trước đó, tab Cài đặt bật "Nhấn Enter bằng giọng".
+    **Dự kiến:** chữ chèn vào Terminal là `biến tên_người_dùng_mới bằng mười` (không còn cụm "nhấn enter" trong chữ chèn) — RỒI dòng lệnh đó tự chạy (phím Return được gửi ~150 ms sau khi dán). Tắt công tắc "Nhấn Enter bằng giọng" ở Cài đặt rồi lặp lại câu tương tự.
+    **Dự kiến:** chữ vẫn chèn đúng nhưng Return KHÔNG được gửi — con trỏ nằm cuối dòng lệnh, chưa chạy, phải tự bấm Enter.
+44. Tab **Snippets** › "Thêm mục…", trigger "chữ ký email", nội dung nhiều dòng (vd. "Trân trọng,\nAn"), Lưu.
+    **Dự kiến:** mục mới xuất hiện, số lần dùng 0. Mở Notes, giữ ⌥ nói đúng "chữ ký email" (cả câu, không thêm gì khác), nhả.
+    **Dự kiến:** nội dung nhiều dòng đã lưu được chèn NGUYÊN VĂN (không qua từ điển/làm sạch). Thử nói "chèn chữ ký email vào cuối thư" (cụm "chèn <trigger>" ở giữa câu).
+    **Dự kiến:** phần "chữ ký email" trong câu được thay bằng nội dung đã lưu, phần còn lại của câu giữ nguyên. Quay lại tab Snippets, số lần dùng đã tăng.
+45. Tab Snippets › thêm trigger trùng (sau khi bỏ dấu/hoa thường/dấu câu) với một trigger có sẵn.
+    **Dự kiến:** báo lỗi tiếng Việt rõ ràng ("trùng với một mục khác…"), không lưu, không đè mục cũ.
+
+## H. Chữ ký ổn định (chạy MỘT LẦN, cần chủ dự án tự duyệt)
+46. `client/scripts/make-signing-identity.sh --dry-run` trước để xem các lệnh sẽ chạy (không đổi gì).
+    **Dự kiến:** in ra 4 lệnh (`openssl req`, `openssl pkcs12`, `security import`, `security set-key-partition-list`), không hỏi mật khẩu, không tạo gì trong keychain.
+47. `client/scripts/make-signing-identity.sh --yes`.
+    **Dự kiến:** 1–2 hộp thoại hệ thống hỏi mật khẩu/Touch ID (Keychain Access) — xác nhận cho phép `codesign`/`security` dùng khoá riêng mới. Xong, `security find-identity -v -p codesigning | grep vflow` ra đúng 1 dòng "vflow Local Signing". Chạy lại script lần nữa (không cờ khác) ⇒ in "Đã có … — không làm gì thêm" rồi thoát ngay, không hỏi mật khẩu lần nữa.
+48. `client/scripts/build-app.sh`.
+    **Dự kiến:** dòng "ký ổn định bằng "vflow Local Signing": quyền macOS được giữ qua các lần cài" thay vì cảnh báo ad-hoc. `codesign -dvvv client/build/VFlow.app | grep Authority` ra `Authority=vflow Local Signing`.
+49. Mở app đã ký ổn định lần đầu, cấp đủ 3 quyền macOS. Xoá `client/build/VFlow.app`, chạy lại `build-app.sh`, mở lại.
+    **Dự kiến:** KHÔNG bị đòi cấp lại quyền (khác hẳn bản ad-hoc ở bước 28/31) — vì chữ ký (danh tính) giống hệt lần trước dù nhị phân có thể đổi byte.

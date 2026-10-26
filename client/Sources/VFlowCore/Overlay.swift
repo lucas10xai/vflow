@@ -1,8 +1,12 @@
 import Foundation
 
-/// Bốn trạng thái của thanh trạng thái nổi (cộng “thông báo ngắn” dùng chung kiểu xong/lỗi).
+/// Các trạng thái của thanh trạng thái nổi (cộng “thông báo ngắn” dùng chung kiểu xong/lỗi).
 public enum OverlayState: Equatable, Sendable {
     case listening(level: Float)
+    /// Ghi "khoá" (hands-free, đúp ⌥): không cần giữ phím, bấm ⌥ để xong, Esc để huỷ.
+    case listeningLocked(level: Float)
+    /// Đang ghi lệnh (Command Mode, ⌥+⌃).
+    case listeningCommand(level: Float)
     case transcribing
     case done
     case notice(String)
@@ -27,6 +31,13 @@ public enum OverlayText {
         switch s {
         case .listening:
             return .init(symbol: "mic.fill", text: "Đang nghe", accessibilityLabel: "vflow đang nghe",
+                         showsLevel: true, autoHide: nil, isError: false)
+        case .listeningLocked:
+            return .init(symbol: "mic.fill", text: "Đang nghe (đã khoá, bấm ⌥ để xong, Esc để huỷ)",
+                         accessibilityLabel: "vflow đang nghe, đã khoá, bấm Option để xong, Esc để huỷ",
+                         showsLevel: true, autoHide: nil, isError: false)
+        case .listeningCommand:
+            return .init(symbol: "command", text: "Đang nghe lệnh", accessibilityLabel: "vflow đang nghe lệnh",
                          showsLevel: true, autoHide: nil, isError: false)
         case .transcribing:
             return .init(symbol: "waveform", text: "Đang dịch", accessibilityLabel: "vflow đang dịch giọng nói",

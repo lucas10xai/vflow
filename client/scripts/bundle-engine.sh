@@ -1,11 +1,12 @@
 #!/bin/bash
 # Đóng gói Node 22 + mã engine + node_modules (chỉ darwin-arm64) + model zipformer-vi-30m + LICENSES
 # vào VFlow.app/Contents/Resources/ để app TỰ ĐỦ (không cần repo hay Node hệ thống trên máy chạy).
-# Dùng: client/scripts/bundle-engine.sh <đường-dẫn-VFlow.app>
+# Dùng: client/scripts/bundle-engine.sh <đường-dẫn-VFlow.app> [danh tính ký, mặc định "-" = ad-hoc]
 # Gọi từ build-app.sh (mặc định có bundle); build-app.sh --no-bundle bỏ qua script này.
 set -euo pipefail
 
-APP="${1:?dùng: bundle-engine.sh <đường-dẫn-VFlow.app>}"
+APP="${1:?dùng: bundle-engine.sh <đường-dẫn-VFlow.app> [danh tính ký]}"
+SIGN_IDENTITY="${2:--}"
 SCRIPTS_DIR="$(cd "$(dirname "$0")" && pwd)"
 CLIENT_DIR="$(cd "$SCRIPTS_DIR/.." && pwd)"
 REPO="$(cd "$CLIENT_DIR/.." && pwd)"
@@ -131,12 +132,12 @@ CHỈ DÙNG CÁ NHÂN, PHI THƯƠNG MẠI. Không được sửa đổi/phân ph
 (ND = NoDerivatives). Xem manifest.json cạnh model trong bundle để biết checksum/nguồn gốc từng tệp.
 EOF
 
-# ── 7. Ký ad-hoc MỌI nhị phân lồng nhau rồi ký cả bundle ────────────────────────────────────────
-echo "• ký ad-hoc nhị phân lồng nhau…"
+# ── 7. Ký MỌI nhị phân lồng nhau (cùng danh tính truyền vào — ổn định nếu có, ad-hoc nếu không) ──
+echo "• ký nhị phân lồng nhau (danh tính: $SIGN_IDENTITY)…"
 find "$ENGINE_DEST" \( -name "*.node" -o -name "*.dylib" \) -print0 | while IFS= read -r -d '' f; do
-  codesign --force -s - "$f"
+  codesign --force -s "$SIGN_IDENTITY" "$f"
 done
-codesign --force -s - "$ENGINE_DEST/node/bin/node"
+codesign --force -s "$SIGN_IDENTITY" "$ENGINE_DEST/node/bin/node"
 
 SIZE="$(du -sh "$APP" | cut -f1)"
 echo "Xong: engine đóng gói vào $ENGINE_DEST ($SIZE tổng cộng $APP)"

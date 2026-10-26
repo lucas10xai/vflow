@@ -92,6 +92,8 @@ struct MainWindowView: View {
             .navigationSplitViewColumnWidth(min: 150, ideal: 170, max: 220)
         } detail: {
             VStack(spacing: 0) {
+                HeaderBar(tab: viewModel.selectedTab)
+                Divider()
                 ScrollView {
                     tabContent
                         .padding(20)
@@ -112,7 +114,32 @@ struct MainWindowView: View {
         case .overview: OverviewView(model: model, controller: controller)
         case .history: HistoryView(controller: controller)
         case .dictionary: DictionaryView(model: model, controller: controller)
+        case .snippets: SnippetsView(model: model, controller: controller)
         case .settings: SettingsView(model: model, controller: controller)
         }
+    }
+}
+
+/// Đầu cửa sổ chính: logo-mark (~28pt, xem `BrandIcon`) cạnh tiêu đề tab đang chọn. Không có logo
+/// đóng gói (vd. chạy ngoài `build-app.sh`) ⇒ chỉ hiện chữ, không vỡ giao diện.
+private struct HeaderBar: View {
+    let tab: MainTab
+
+    var body: some View {
+        HStack(spacing: 10) {
+            if let mark = BrandIcon.headerMark(pointSize: 28) {
+                Image(nsImage: mark)
+                    .resizable()
+                    .frame(width: 28, height: 28)
+                    .accessibilityHidden(true)
+            }
+            Text(tab.title)
+                .font(.system(size: 17, weight: .semibold))
+            Spacer()
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 12)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("vflow — \(tab.title)")
     }
 }

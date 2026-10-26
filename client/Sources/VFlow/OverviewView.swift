@@ -124,8 +124,17 @@ struct ModeSection: View {
                     Text(m.title).tag(m)
                 }
             }
-            .pickerStyle(.segmented)
+            .pickerStyle(.menu)
             .labelsHidden()
+            .frame(maxWidth: 260, alignment: .leading)
+            Text(mode.subtitle)
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+            Text(mode.sendsTextToCloud
+                 ? "Chế độ này gửi CHỮ (không phải âm thanh) qua 9Router."
+                 : "Chế độ này hoàn toàn trong máy, không gửi gì ra ngoài.")
+                .font(.system(size: 11))
+                .foregroundStyle(mode.sendsTextToCloud ? Color.orange : Color.secondary)
         }
     }
 }
