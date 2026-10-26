@@ -1,0 +1,10 @@
+# Đã kiểm trên gpu-host (Python 3.12, driver 595.84 / CUDA 13.2, RTX A4000), 2026-10-26.
+# Cài torch trước, từ chỉ mục CUDA:
+#   venv/bin/pip install torch==2.5.1 --index-url https://download.pytorch.org/whl/cu124
+# torch cần cho bước chuyển đổi model (convert.py) và backend hf; cũng cung cấp
+# thư viện cuBLAS/cuDNN 12 mà CTranslate2 dùng.
+ctranslate2==4.8.4
+faster-whisper==1.2.1
+transformers==4.57.6
+tokenizers==0.22.2
+numpy==2.5.4
