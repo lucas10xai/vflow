@@ -46,38 +46,60 @@ fi
 
 HOME_FULL="$(mktemp -d /tmp/vflow-snapshot-full.XXXXXX)"
 HOME_EMPTY="$(mktemp -d /tmp/vflow-snapshot-empty.XXXXXX)"
-ENGINE_PID=""
+# Thống kê "tắt" (item 7): seed GIỐNG HOME_FULL nhưng config.json đặt sẵn stats_enabled:false trước
+# khi engine khởi động, để /v1/stats.enabled=false đúng trạng thái thật (không giả lập ở client).
+HOME_STATS_OFF="$(mktemp -d /tmp/vflow-snapshot-statsoff.XXXXXX)"
+ENGINE_PIDS=()
 
 cleanup() {
-  if [ -n "$ENGINE_PID" ] && kill -0 "$ENGINE_PID" 2>/dev/null; then
-    kill "$ENGINE_PID" 2>/dev/null || true
-    wait "$ENGINE_PID" 2>/dev/null || true
-  fi
-  rm -rf "$HOME_FULL" "$HOME_EMPTY"
+  for pid in "${ENGINE_PIDS[@]:-}"; do
+    [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && kill "$pid" 2>/dev/null && wait "$pid" 2>/dev/null
+  done
+  rm -rf "$HOME_FULL" "$HOME_EMPTY" "$HOME_STATS_OFF"
 }
 trap cleanup EXIT
 
 echo "==> Chuẩn bị dữ liệu mẫu (KHÔNG có tên riêng/khoá thật) ở ${HOME_FULL}"
 "$NODE_BIN" "$CLIENT_DIR/scripts/snapshot-seed.mjs" "$HOME_FULL" "$REPO_DIR"
+echo "==> Chuẩn bị dữ liệu mẫu (thống kê TẮT) ở ${HOME_STATS_OFF}"
+"$NODE_BIN" "$CLIENT_DIR/scripts/snapshot-seed.mjs" "$HOME_STATS_OFF" "$REPO_DIR"
+"$NODE_BIN" -e "require('fs').writeFileSync('$HOME_STATS_OFF/config.json', JSON.stringify({stats_enabled:false}, null, 2));"
 
-PORT=27611
-if [ -n "$NODE_BIN" ]; then
-  echo "==> Khởi động engine thật (node bin/vflow.js serve, cổng $PORT, chỉ 127.0.0.1)…"
-  VFLOW_HOME="$HOME_FULL" VFLOW_PORT="$PORT" "$NODE_BIN" "$REPO_DIR/bin/vflow.js" serve --port "$PORT" \
-    >"$HOME_FULL/engine.log" 2>&1 &
-  ENGINE_PID=$!
+start_engine() {
+  local home="$1" port="$2"
+  VFLOW_HOME="$home" VFLOW_PORT="$port" "$NODE_BIN" "$REPO_DIR/bin/vflow.js" serve --port "$port" \
+    >"$home/engine.log" 2>&1 &
+  ENGINE_PIDS+=("$!")
   for _ in $(seq 1 40); do
-    if curl -fsS "http://127.0.0.1:$PORT/healthz" >/dev/null 2>&1; then break; fi
+    if curl -fsS "http://127.0.0.1:$port/healthz" >/dev/null 2>&1; then break; fi
     sleep 0.25
   done
-  if ! curl -fsS "http://127.0.0.1:$PORT/healthz" >/dev/null 2>&1; then
-    echo "CẢNH BÁO: engine không trả /healthz kịp — ảnh Từ điển/Snippets sẽ hiện \"đang chờ engine\" (vẫn trung thực, không phải lỗi script)." >&2
+  if ! curl -fsS "http://127.0.0.1:$port/healthz" >/dev/null 2>&1; then
+    echo "CẢNH BÁO: engine ($home, cổng $port) không trả /healthz kịp — ảnh liên quan sẽ hiện \"đang chờ engine\" (vẫn trung thực, không phải lỗi script)." >&2
   fi
-  # ClientConfig cần client.json trỏ đúng cổng đã chạy thật (file do snapshot-seed.mjs tạo sẵn với
-  # cổng mặc định 7611 — cập nhật lại cho khớp cổng thật dùng ở đây).
-  "$NODE_BIN" -e "const fs=require('fs');const p='$HOME_FULL/client.json';const c=JSON.parse(fs.readFileSync(p));c.port=$PORT;fs.writeFileSync(p,JSON.stringify(c,null,2));"
+  # ClientConfig cần client.json trỏ đúng cổng đã chạy thật — tạo mới (HOME_EMPTY chưa qua
+  # snapshot-seed.mjs nên chưa có tệp này) hoặc cập nhật lại cổng (snapshot-seed.mjs tạo sẵn với
+  # cổng mặc định 7611). KHÔNG BAO GIỜ để trống ⇒ rơi về cổng 7611 thật (xem quy tắc cứng).
+  "$NODE_BIN" -e "
+    const fs=require('fs');const p='$home/client.json';
+    const c = fs.existsSync(p) ? JSON.parse(fs.readFileSync(p)) : { repo: '$REPO_DIR' };
+    c.port=$port;
+    fs.writeFileSync(p,JSON.stringify(c,null,2));
+  "
+}
+
+PORT=27611
+PORT_EMPTY=27612
+PORT_STATS_OFF=27613
+if [ -n "$NODE_BIN" ]; then
+  echo "==> Khởi động engine thật (node bin/vflow.js serve, chỉ 127.0.0.1)…"
+  start_engine "$HOME_FULL" "$PORT"
+  # HOME_EMPTY: không dữ liệu (lịch sử/từ điển/snippets rỗng, thống kê 0 từ) — cũng cần engine THẬT
+  # để tab Thống kê/Từ điển/Snippets hiện đúng trạng thái "rỗng" chứ không phải "đang chờ engine".
+  start_engine "$HOME_EMPTY" "$PORT_EMPTY"
+  start_engine "$HOME_STATS_OFF" "$PORT_STATS_OFF"
 else
-  echo "CẢNH BÁO: không thấy node — bỏ qua engine thật, Từ điển/Snippets sẽ hiện trạng thái lỗi/chờ (trung thực)." >&2
+  echo "CẢNH BÁO: không thấy node — bỏ qua engine thật, Từ điển/Snippets/Thống kê sẽ hiện trạng thái lỗi/chờ (trung thực)." >&2
 fi
 
 capture() {
@@ -100,13 +122,19 @@ echo "==> Chụp (ngoài màn hình — xem client/README.md)…"
 for appearance in light dark; do
   capture "$HOME_FULL"  granted tongquan            "$appearance" "overview_permissions-ok_$appearance"
   capture "$HOME_EMPTY" denied  tongquan            "$appearance" "overview_permissions-missing_$appearance"
+  capture "$HOME_FULL"      granted thongke         "$appearance" "stats_with-data_$appearance"
+  capture "$HOME_EMPTY"     granted thongke         "$appearance" "stats_empty_$appearance"
+  capture "$HOME_STATS_OFF" granted thongke         "$appearance" "stats_disabled_$appearance"
   capture "$HOME_FULL"  granted lichsu              "$appearance" "history_with-data_$appearance"
   capture "$HOME_EMPTY" granted lichsu              "$appearance" "history_empty_$appearance"
-  capture "$HOME_FULL"  granted tudien              "$appearance" "dictionary_$appearance"
+  capture "$HOME_FULL"  granted tudien              "$appearance" "dictionary_with-suggestions_$appearance"
   capture "$HOME_FULL"  granted snippet             "$appearance" "snippets_$appearance"
   capture "$HOME_FULL"  granted "tudien:them-loi"   "$appearance" "dictionary_add-invalid_$appearance"
   capture "$HOME_FULL"  granted "caidat:general"        "$appearance" "settings_general_$appearance"
+  capture "$HOME_FULL"  granted "caidat:voice"           "$appearance" "settings_voice_$appearance"
+  capture "$HOME_FULL"  granted "caidat:apps"            "$appearance" "settings_apps_$appearance"
   capture "$HOME_FULL"  granted "caidat:cloud"           "$appearance" "settings_cloud_$appearance"
+  capture "$HOME_FULL"  granted "caidat:data"            "$appearance" "settings_data_$appearance"
   capture "$HOME_FULL"  granted "caidat:historyPrivacy"  "$appearance" "settings_historyPrivacy_$appearance"
   capture "$HOME_FULL"  granted "caidat:advanced"        "$appearance" "settings_advanced_$appearance"
   capture "$HOME_EMPTY" denied  welcome             "$appearance" "welcome_$appearance"

@@ -92,7 +92,7 @@ final class StatusWindowController: NSObject, NSWindowDelegate {
         // chưa kịp chạy nếu chụp NGAY (khác Tổng quan, đồng bộ). Đợi một nhịp cho kịp (đọc file cục
         // bộ/gọi engine thật qua loopback) rồi mới chụp — KHÔNG đụng `--render-wait-ms` (đợi TRƯỚC
         // khi mở cửa sổ, phục vụ việc khác).
-        if tab == .history || tab == .dictionary || tab == .snippets {
+        if tab == .stats || tab == .history || tab == .dictionary || tab == .snippets {
             try? await Task.sleep(for: .milliseconds(500))
         }
         // GIỚI HẠN ĐÃ BIẾT (U3): đã đo — dù dữ liệu tải đúng (tiêu đề "Lịch sử (N)"/"Từ điển (N)"
@@ -213,7 +213,8 @@ struct MainWindowView: View {
 
     @ViewBuilder private var tabContent: some View {
         switch viewModel.selectedTab {
-        case .overview: OverviewView(model: model, controller: controller)
+        case .overview: OverviewView(model: model, controller: controller, onOpenStats: { viewModel.selectedTab = .stats })
+        case .stats: StatsView(model: model, controller: controller)
         case .history: HistoryView(controller: controller)
         case .dictionary: DictionaryView(model: model, controller: controller, debugOpenEditor: viewModel.debugOpenDictionaryEditor)
         case .snippets: SnippetsView(model: model, controller: controller)

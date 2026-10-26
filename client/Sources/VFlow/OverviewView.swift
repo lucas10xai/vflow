@@ -8,6 +8,9 @@ import VFlowCore
 struct OverviewView: View {
     let model: StatusModel
     let controller: AppController
+    /// Mở tab Thống kê khi bấm thẻ "Hôm nay" — `nil` chỉ khi hiện trong ngữ cảnh không có thanh bên
+    /// (không có trường hợp này trong app thật, nhưng tránh áp đặt phụ thuộc không cần cho preview/test).
+    var onOpenStats: (() -> Void)?
     @State private var lastErrorDismissed = false
 
     var body: some View {
@@ -26,7 +29,7 @@ struct OverviewView: View {
             ShortcutsCard()
             ModeCard(mode: model.mode) { controller.mode = $0 }
             PermissionsCard(permissions: model.permissions)
-            TodayCard(controller: controller, historyEnabled: controller.historyEnabled)
+            TodayCard(controller: controller, historyEnabled: controller.historyEnabled, onOpenStats: onOpenStats)
             SystemDisclosure(model: model, controller: controller)
         }
         .onChange(of: model.lastError) { _, _ in lastErrorDismissed = false }
@@ -376,16 +379,36 @@ private struct PermissionsCard: View {
 private struct TodayCard: View {
     let controller: AppController
     let historyEnabled: Bool
+    var onOpenStats: (() -> Void)?
     @State private var summary: TodaySummary = .disabled
 
     var body: some View {
+        Group {
+            if let onOpenStats {
+                Button(action: onOpenStats) { cardBody }
+                    .buttonStyle(.plain)
+                    .help("Mở tab Thống kê")
+            } else {
+                cardBody
+            }
+        }
+        .onAppear(perform: reload)
+        .onChange(of: historyEnabled) { _, _ in reload() }
+    }
+
+    private var cardBody: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
-            SectionTitle(text: "Hôm nay")
+            HStack {
+                SectionTitle(text: "Hôm nay")
+                if onOpenStats != nil {
+                    Spacer()
+                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+                }
+            }
             content
         }
         .cardBackground()
-        .onAppear(perform: reload)
-        .onChange(of: historyEnabled) { _, _ in reload() }
+        .contentShape(Rectangle())
     }
 
     @ViewBuilder private var content: some View {

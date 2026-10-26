@@ -10,11 +10,11 @@ Engine là tiến trình Node chạy cục bộ. Client (Swift, CLI, test) chỉ
 
 ## GET /healthz (không cần token)
 ```json
-{ "ok": true, "version": "0.1.0",
+{ "ok": true, "version": "0.1.0", "max_audio_seconds": 1200,
   "models": [ { "id": "zipformer-vi-30m", "kind": "local", "loaded": true },
               { "id": "phowhisper-large", "kind": "remote", "loaded": false, "reason": "tunnel_down" } ] }
 ```
-`loaded:false` luôn kèm `reason` (không bao giờ im lặng).
+`loaded:false` luôn kèm `reason` (không bao giờ im lặng). `max_audio_seconds` là giới hạn thật của `/v1/transcribe` (mục "Ghi âm dài").
 
 ## POST /v1/transcribe
 Body: PCM thô `Content-Type: audio/L16; rate=16000; channels=1` (int16 little-endian) **hoặc** `audio/wav` (PCM 16-bit, mọi tần số; engine tự đổi về 16 kHz mono).
@@ -70,7 +70,7 @@ Client ghi âm lệnh, gọi `POST /v1/transcribe` (`mode=normal`) để lấy c
 ```json
 { "cloud_llm": true, "llm_model": "ag/gemini-3.8-flash" | null, "llm_timeout_ms": 3500, "actions_enabled": true,
   "stats_enabled": true, "app_rules": { "com.apple.Terminal": "dev" }, "voice_punctuation": true, "tone": "neutral",
-  "whisper_mode": false, "learn_from_edits": true, "live_preview": false, "silence_stop_seconds": 0 }
+  "whisper_mode": false, "learn_from_edits": true, "live_preview": true, "silence_stop_seconds": 0 }
 ```
 (không bao giờ trả khoá). `PUT` nhận tập con các trường (kiểm kiểu/giá trị), ghi vào `~/.vflow/config.json`, có hiệu lực ngay không cần khởi động lại:
 - `llm_timeout_ms`: số nguyên 1.000–30.000, **mặc định mới 3.500** (item 7 — 8.000 cũ quá lâu để chờ; người dùng đã tự đặt giá trị khác thì giữ nguyên, mặc định chỉ áp khi khoá vắng mặt trong tệp).
@@ -78,7 +78,7 @@ Client ghi âm lệnh, gọi `POST /v1/transcribe` (`mode=normal`) để lấy c
 - `app_rules` (item 4): object `{ "<bundleId>": "normal"|"clean"|"dev"|"tidy"|"email" }`, tối đa 100 mục, bundle id dạng reverse-DNS (`^[A-Za-z][A-Za-z0-9]*(\.[A-Za-z0-9][A-Za-z0-9_-]*)+$`). `auto` tra bảng này TRƯỚC luật cứng `auto.apps` (cấu hình). Luật trỏ `tidy`/`email` chỉ có hiệu lực khi `cloud_llm` bật (xem mục Chế độ).
 - `voice_punctuation`, `whisper_mode`, `learn_from_edits`, `live_preview`: boolean.
 - `tone`: `"neutral"|"formal"|"casual"`.
-- `silence_stop_seconds`: số nguyên 0–60 (0 = tắt); `live_preview`/`silence_stop_seconds` chỉ lưu cho client (engine không tự dùng).
+- `silence_stop_seconds`: số nguyên 0–60 (0 = tắt); `live_preview`/`silence_stop_seconds` chỉ lưu cho client (engine không tự dùng). `live_preview` mặc định **`true`** (đổi từ `false`: đo thật p95 `/v1/partial` ở 10 s audio = 111 ms, dưới ngưỡng 500 ms).
 - `stats_enabled`: boolean (xem mục Thống kê).
 
 `cloud_llm=false` ⇒ `tidy`, `email` và `/v1/command` không gọi LLM: `tidy`/`email` trả `rewrite.error="cloud_disabled"` và dùng văn bản đã qua từ điển (+ dấu câu bằng giọng); `/v1/command` trả `cloud_disabled`. Chế độ `normal`, `clean`, `dev` không bao giờ gọi LLM.

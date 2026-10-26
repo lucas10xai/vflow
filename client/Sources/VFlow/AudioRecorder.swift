@@ -68,6 +68,13 @@ final class AudioRecorder: @unchecked Sendable {
         self.engine = engine
     }
 
+    /// Chụp nhanh PCM 16 kHz LE đã ghi ĐƯỢC TỚI LÚC NÀY mà KHÔNG dừng ghi — dùng cho "Xem chữ chạy
+    /// trực tiếp" (`POST /v1/partial`, gọi mỗi ~1 giây trong lúc vẫn đang ghi). An toàn gọi nhiều
+    /// lần; không xoá/làm mất mẫu nào (khác `stop()`).
+    func snapshotPCM() -> Data {
+        queue.sync { AudioMath.littleEndianData(samples) }
+    }
+
     /// Dừng và trả PCM 16 kHz LE.
     @MainActor
     func stop() -> Data {

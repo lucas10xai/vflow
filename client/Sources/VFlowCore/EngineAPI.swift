@@ -119,6 +119,11 @@ public struct TranscribeResult: Equatable, Sendable {
     public var audioMs: Int?
     /// `post.actions` — hiện chỉ có `"enter"` (xem `EnterAction`).
     public var actions: [String] = []
+    /// `post.degraded`/`post.degraded_reason` (contract mục "Chế độ", item 7): `true` kèm một trong
+    /// `"llm_timeout"|"llm_error"|"guard"|"cloud_disabled"` khi kết quả là bản dự phòng cục bộ thay
+    /// cho đám mây đã định — xem `DegradedText`.
+    public var degraded: Bool = false
+    public var degradedReason: String?
 }
 
 public struct ModelStatus: Equatable, Sendable {
@@ -201,7 +206,9 @@ public enum EngineAPI {
             totalMs: timings?["total"] as? Int,
             textRaw: obj["text_raw"] as? String ?? "",
             audioMs: obj["audio_ms"] as? Int,
-            actions: (post?["actions"] as? [String]) ?? []))
+            actions: (post?["actions"] as? [String]) ?? [],
+            degraded: post?["degraded"] as? Bool ?? false,
+            degradedReason: post?["degraded_reason"] as? String))
     }
 
     // MARK: từ điển + gợi ý sửa
@@ -297,16 +304,39 @@ public enum EngineAPI {
     public static func parseSettings(status: Int, data: Data) -> Result<AppSettings, ClientError> {
         guard status == 200 else { return .failure(errorFrom(status: status, data: data)) }
         guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let cloudLlm = obj["cloud_llm"] as? Bool,
-              let llmTimeoutMs = obj["llm_timeout_ms"] as? Int,
-              let actionsEnabled = obj["actions_enabled"] as? Bool else {
+              let settings = appSettings(from: obj) else {
             return .failure(.badResponse(status: status, detail: "thiếu trường cài đặt"))
         }
+        return .success(settings)
+    }
+
+    /// Dùng chung cho `GET /v1/settings`, `GET /v1/diagnostics.settings`, `GET /v1/export.settings` —
+    /// MỘT nơi quyết định mặc định khi khoá vắng mặt (engine cũ). `nil` nếu thiếu 3 trường bắt buộc
+    /// (cloud_llm/llm_timeout_ms/actions_enabled — luôn có mặt theo hợp đồng).
+    static func appSettings(from obj: [String: Any]) -> AppSettings? {
+        guard let cloudLlm = obj["cloud_llm"] as? Bool,
+              let llmTimeoutMs = obj["llm_timeout_ms"] as? Int,
+              let actionsEnabled = obj["actions_enabled"] as? Bool else { return nil }
         let llmModel = obj["llm_model"] as? String
-        // Khoá chưa tồn tại (engine cũ chưa có `silence_stop_seconds`) ⇒ coi là 0 (tắt), KHÔNG lỗi.
+        // Khoá chưa tồn tại (engine cũ chưa có các trường item 2–7) ⇒ dùng mặc định hiện hành
+        // (KHÔNG lỗi — engine cũ vẫn phải dùng được, xem contract/engine-api.md mục Cài đặt).
         let silenceStopSeconds = obj["silence_stop_seconds"] as? Int ?? 0
-        return .success(AppSettings(cloudLlm: cloudLlm, llmModel: llmModel, llmTimeoutMs: llmTimeoutMs,
-                                    actionsEnabled: actionsEnabled, silenceStopSeconds: silenceStopSeconds))
+        let statsEnabled = obj["stats_enabled"] as? Bool ?? true
+        let rawAppRules = obj["app_rules"] as? [String: String] ?? [:]
+        let appRules = rawAppRules.compactMap { key, value -> AppRule? in
+            guard let mode = AppRuleMode(rawValue: value) else { return nil }
+            return AppRule(bundleId: key, mode: mode)
+        }.sorted { $0.bundleId < $1.bundleId }
+        let voicePunctuation = obj["voice_punctuation"] as? Bool ?? true
+        let tone = Tone(rawValue: obj["tone"] as? String ?? "") ?? .neutral
+        let whisperMode = obj["whisper_mode"] as? Bool ?? false
+        let learnFromEdits = obj["learn_from_edits"] as? Bool ?? true
+        let livePreview = obj["live_preview"] as? Bool ?? true
+        return AppSettings(cloudLlm: cloudLlm, llmModel: llmModel, llmTimeoutMs: llmTimeoutMs,
+                           actionsEnabled: actionsEnabled, silenceStopSeconds: silenceStopSeconds,
+                           statsEnabled: statsEnabled, appRules: appRules, voicePunctuation: voicePunctuation,
+                           tone: tone, whisperMode: whisperMode, learnFromEdits: learnFromEdits,
+                           livePreview: livePreview)
     }
 
     // MARK: Command Mode

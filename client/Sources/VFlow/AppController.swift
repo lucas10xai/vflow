@@ -36,6 +36,10 @@ final class AppController: NSObject {
     private var warnedMissingMicUIDs: Set<String> = []
     /// VAD đang chạy CHỈ khi ghi khoá (hands-free) và `silence_stop_seconds` > 0 (xem contract mục 7b).
     private var vad: VoiceActivityDetector?
+    /// "Xem chữ chạy trực tiếp" (`POST /v1/partial`) — chỉ tồn tại trong lúc đang ghi dictation
+    /// (không phải Command Mode); `nil` khi không áp dụng (xem contract mục cùng tên, bất biến 17).
+    private var livePreview: LivePreviewCoordinator?
+    private var livePreviewTimer: Timer?
     private var lastVadTickAt: TimeInterval?
     /// Giây đã báo đếm ngược gần nhất (tránh hiện lại cùng một số).
     private var lastAnnouncedVadCountdown: Int?
@@ -300,6 +304,7 @@ final class AppController: NSObject {
     func shutdown() async {
         hotkeys.stop()
         recorder.cancel()
+        stopLivePreview()
         inflight?.cancel()
         await supervisor?.stop()
     }
@@ -509,6 +514,7 @@ final class AppController: NSObject {
             commandSelectionTask?.cancel()
             commandSelectionTask = nil
             recorder.cancel()
+            stopLivePreview()
             overlay.show(.notice(OverlayText.cancelled))
             refreshUI()
         case .busyTimedOut:
@@ -523,6 +529,7 @@ final class AppController: NSObject {
         commandSelectionTask?.cancel()
         commandSelectionTask = nil
         recorder.cancel()
+        stopLivePreview()
         setError(ErrorText.message(error), showOverlay: true)
         updateTicking()
     }
@@ -564,7 +571,46 @@ final class AppController: NSObject {
         lastAnnouncedVadCountdown = nil
         overlay.setLevel(0)
         overlay.show(machine.isLocked ? .listeningLocked(level: 0) : .listening(level: 0))
+        startLivePreviewIfEnabled()
         refreshUI()
+    }
+
+    /// `live_preview` bật + model trong máy đã sẵn sàng ⇒ gửi `/v1/partial` mỗi ~1 giây trong lúc
+    /// ghi (xem contract mục "Xem chữ chạy trực tiếp"); KHÔNG áp dụng cho Command Mode.
+    private func startLivePreviewIfEnabled() {
+        guard cachedSettings.livePreview, localModelLoaded else { return }
+        let coordinator = LivePreviewCoordinator()
+        livePreview = coordinator
+        overlay.setLivePreviewText(nil)
+        livePreviewTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { _ = Task { await self?.tickLivePreview(coordinator) } }
+        }
+    }
+
+    private func stopLivePreview() {
+        livePreviewTimer?.invalidate()
+        livePreviewTimer = nil
+        livePreview?.cancelForNewRecording()
+        livePreview = nil
+        overlay.setLivePreviewText(nil)
+    }
+
+    private var localModelLoaded: Bool {
+        guard case .running(_, let h) = engineState else { return false }
+        return h.models.contains { $0.kind == "local" && $0.loaded }
+    }
+
+    private func tickLivePreview(_ coordinator: LivePreviewCoordinator) async {
+        guard machine.isRecording, livePreview === coordinator else { return }
+        let pcm = recorder.snapshotPCM()
+        guard !pcm.isEmpty, case .success(let port) = resolvedPort(), case .success(let token) = readToken() else { return }
+        let session = self.session
+        let result = await LivePreviewTick.attempt(coordinator, pcm: pcm) { pcm in
+            await Self.requestPartial(session: session, port: port, token: token, pcm: pcm)
+        }
+        guard let result, machine.isRecording, livePreview === coordinator else { return }
+        if case .success(let p) = result { overlay.setLivePreviewText(p.text) }
+        // Lỗi/bận: giữ nguyên chữ mờ đang hiện (không xoá vì một lượt lỗi), không báo lỗi chính.
     }
 
     private func beginCommandRecording() {
@@ -652,6 +698,7 @@ final class AppController: NSObject {
 
     private func finishRecording() {
         let pcm = recorder.stop()
+        stopLivePreview()
         let m = mode
         retry.store(pcm: pcm, mode: m.rawValue, app: targetApp, at: Self.now)
         send(pcm: pcm, mode: m, app: targetApp)
@@ -838,6 +885,9 @@ final class AppController: NSObject {
         if case .error(let m) = overlayState { lastError = m } else { lastError = nil }
         if let text = plan.insert { lastSpokenTextMemory = text }
         recordHistoryIfNeeded(result: result, insertedText: plan.insert)
+        // Engine tự cộng thống kê cho MỌI dictation thành công, bất kể công tắc "Lưu lịch sử" của
+        // client (xem contract/engine-api.md, mục Thống kê) — báo tab Thống kê làm mới theo đó.
+        if plan.insert != nil { NotificationCenter.default.post(name: .vflowStatsMayHaveChanged, object: nil) }
         overlay.show(overlayState)
         machine.finished(optionHeld: hotkeys.leftOptionHeldNow())
         updateTicking()
@@ -895,7 +945,8 @@ final class AppController: NSObject {
     private func recordHistoryIfNeeded(result: Result<TranscribeResult, ClientError>, insertedText: String?) {
         guard case .success(let r) = result, HistoryGate.shouldRecord(enabled: historyEnabled, insertedText: insertedText) else { return }
         let entry = HistoryEntry(at: Date(), appBundleId: targetApp, mode: r.mode, model: r.model,
-                                 textRaw: r.textRaw, text: r.text, audioMs: r.audioMs, totalMs: r.totalMs)
+                                 textRaw: r.textRaw, text: r.text, audioMs: r.audioMs, totalMs: r.totalMs,
+                                 degradedReason: r.degraded ? r.degradedReason : nil)
         do { try historyStore.append(entry) } catch {
             if lastError == nil { lastError = "Không ghi được lịch sử: \(error)" }
         }
@@ -1106,4 +1157,160 @@ final class AppController: NSObject {
         }
         refreshUI()
     }
+
+    // MARK: thống kê (GET/DELETE /v1/stats) — V2
+
+    func fetchStats(weeks: Int = 16) async -> Result<StatsSummary, ClientError> {
+        switch resolvedPort() {
+        case .failure(let e): return .failure(e)
+        case .success(let port):
+            switch readToken() {
+            case .failure(let e): return .failure(e)
+            case .success(let token): return await Self.requestStats(session: session, port: port, token: token, weeks: weeks)
+            }
+        }
+    }
+
+    func deleteStats() async -> Result<Void, ClientError> {
+        switch resolvedPort() {
+        case .failure(let e): return .failure(e)
+        case .success(let port):
+            switch readToken() {
+            case .failure(let e): return .failure(e)
+            case .success(let token): return await Self.requestStatsDelete(session: session, port: port, token: token)
+            }
+        }
+    }
+
+    nonisolated static func requestStats(session: URLSession, port: Int, token: String, weeks: Int) async -> Result<StatsSummary, ClientError> {
+        do {
+            let (data, resp) = try await session.data(for: EngineAPI.statsRequest(port: port, token: token, weeks: weeks))
+            return EngineAPI.parseStats(status: (resp as? HTTPURLResponse)?.statusCode ?? 0, data: data)
+        } catch {
+            return .failure(.network(error.localizedDescription))
+        }
+    }
+
+    nonisolated static func requestStatsDelete(session: URLSession, port: Int, token: String) async -> Result<Void, ClientError> {
+        do {
+            let (data, resp) = try await session.data(for: EngineAPI.statsDeleteRequest(port: port, token: token))
+            return EngineAPI.parseOk(status: (resp as? HTTPURLResponse)?.statusCode ?? 0, data: data)
+        } catch {
+            return .failure(.network(error.localizedDescription))
+        }
+    }
+
+    // MARK: gợi ý từ điển (GET /v1/dictionary/suggestions, POST .../dismiss) — V2
+
+    func fetchDictionarySuggestions() async -> Result<[DictionarySuggestion], ClientError> {
+        switch resolvedPort() {
+        case .failure(let e): return .failure(e)
+        case .success(let port):
+            switch readToken() {
+            case .failure(let e): return .failure(e)
+            case .success(let token): return await Self.requestDictionarySuggestions(session: session, port: port, token: token)
+            }
+        }
+    }
+
+    func dismissDictionarySuggestion(term: String) async -> Result<Void, ClientError> {
+        switch resolvedPort() {
+        case .failure(let e): return .failure(e)
+        case .success(let port):
+            switch readToken() {
+            case .failure(let e): return .failure(e)
+            case .success(let token): return await Self.requestDismissSuggestion(session: session, port: port, token: token, term: term)
+            }
+        }
+    }
+
+    nonisolated static func requestDictionarySuggestions(session: URLSession, port: Int, token: String) async -> Result<[DictionarySuggestion], ClientError> {
+        do {
+            let (data, resp) = try await session.data(for: EngineAPI.dictionarySuggestionsRequest(port: port, token: token))
+            return EngineAPI.parseDictionarySuggestions(status: (resp as? HTTPURLResponse)?.statusCode ?? 0, data: data)
+        } catch {
+            return .failure(.network(error.localizedDescription))
+        }
+    }
+
+    nonisolated static func requestDismissSuggestion(session: URLSession, port: Int, token: String, term: String) async -> Result<Void, ClientError> {
+        do {
+            let (data, resp) = try await session.data(for: EngineAPI.dictionarySuggestionDismissRequest(port: port, token: token, term: term))
+            return EngineAPI.parseOk(status: (resp as? HTTPURLResponse)?.statusCode ?? 0, data: data)
+        } catch {
+            return .failure(.network(error.localizedDescription))
+        }
+    }
+
+    // MARK: chẩn đoán (GET /v1/diagnostics) — V2
+
+    func fetchDiagnostics() async -> Result<DiagnosticsInfo, ClientError> {
+        switch resolvedPort() {
+        case .failure(let e): return .failure(e)
+        case .success(let port):
+            switch readToken() {
+            case .failure(let e): return .failure(e)
+            case .success(let token):
+                do {
+                    let (data, resp) = try await session.data(for: EngineAPI.diagnosticsRequest(port: port, token: token))
+                    return EngineAPI.parseDiagnostics(status: (resp as? HTTPURLResponse)?.statusCode ?? 0, data: data)
+                } catch {
+                    return .failure(.network(error.localizedDescription))
+                }
+            }
+        }
+    }
+
+    // MARK: xuất/nhập (GET /v1/export, POST /v1/import) — V2
+
+    func fetchExport(includeHistory: Bool) async -> Result<Data, ClientError> {
+        switch resolvedPort() {
+        case .failure(let e): return .failure(e)
+        case .success(let port):
+            switch readToken() {
+            case .failure(let e): return .failure(e)
+            case .success(let token):
+                do {
+                    let (data, resp) = try await session.data(for: EngineAPI.exportRequest(port: port, token: token, includeHistory: includeHistory))
+                    return EngineAPI.validateExportResponse(status: (resp as? HTTPURLResponse)?.statusCode ?? 0, data: data)
+                } catch {
+                    return .failure(.network(error.localizedDescription))
+                }
+            }
+        }
+    }
+
+    func sendImport(mode: ImportMode, data: Data) async -> Result<ImportApplied, ClientError> {
+        switch resolvedPort() {
+        case .failure(let e): return .failure(e)
+        case .success(let port):
+            switch readToken() {
+            case .failure(let e): return .failure(e)
+            case .success(let token):
+                do {
+                    let (respData, resp) = try await session.data(for: EngineAPI.importRequest(port: port, token: token, mode: mode, data: data))
+                    return EngineAPI.parseImportResult(status: (resp as? HTTPURLResponse)?.statusCode ?? 0, data: respData)
+                } catch {
+                    return .failure(.network(error.localizedDescription))
+                }
+            }
+        }
+    }
+
+    // MARK: xem chữ chạy trực tiếp (POST /v1/partial) — V2
+
+    nonisolated static func requestPartial(session: URLSession, port: Int, token: String, pcm: Data) async -> Result<PartialResult, ClientError> {
+        do {
+            let (data, resp) = try await session.data(for: EngineAPI.partialRequest(port: port, token: token, pcm: pcm))
+            return EngineAPI.parsePartial(status: (resp as? HTTPURLResponse)?.statusCode ?? 0, data: data)
+        } catch {
+            return .failure(.network(error.localizedDescription))
+        }
+    }
+}
+
+/// Phát khi có gì đó khiến thẻ Thống kê có thể đã đổi (dictation vừa xong) — tab Thống kê làm mới
+/// theo sự kiện này + `.onAppear` + cửa sổ lấy lại focus, KHÔNG poll liên tục (xem `StatsView`).
+extension Notification.Name {
+    static let vflowStatsMayHaveChanged = Notification.Name("org.aios.vflow.statsMayHaveChanged")
 }

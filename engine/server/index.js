@@ -177,7 +177,7 @@ const NOOP_SETTINGS = {
   get: () => ({
     cloud_llm: true, llm_model: null, llm_timeout_ms: 3500, actions_enabled: true,
     stats_enabled: true, app_rules: {}, voice_punctuation: true, tone: 'neutral',
-    whisper_mode: false, learn_from_edits: true, live_preview: false, silence_stop_seconds: 0,
+    whisper_mode: false, learn_from_edits: true, live_preview: true, silence_stop_seconds: 0,
   }),
   update: () => { throw new HttpError('internal', 'Chưa cấu hình settings cho engine này.'); },
 };
@@ -256,7 +256,7 @@ export function createServer({
 
       if (url.pathname === '/healthz') {
         if (req.method !== 'GET') throw new HttpError('bad_request', 'Chỉ hỗ trợ GET.', 405);
-        sendJson(res, 200, { ok: true, version: VERSION, models: await stt.status() });
+        sendJson(res, 200, { ok: true, version: VERSION, models: await stt.status(), max_audio_seconds: maxAudioSeconds });
         entry.status = 200;
         return;
       }

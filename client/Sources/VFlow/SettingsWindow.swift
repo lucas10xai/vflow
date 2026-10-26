@@ -67,9 +67,18 @@ struct SettingsRootView: View {
             GeneralSettingsTab(model: viewModel.model, controller: viewModel.controller)
                 .tabItem { Label(SettingsCategory.general.title, systemImage: SettingsCategory.general.symbol) }
                 .tag(SettingsCategory.general)
+            VoiceSettingsTab(model: viewModel.model, controller: viewModel.controller)
+                .tabItem { Label(SettingsCategory.voice.title, systemImage: SettingsCategory.voice.symbol) }
+                .tag(SettingsCategory.voice)
+            AppsSettingsTab(model: viewModel.model, controller: viewModel.controller)
+                .tabItem { Label(SettingsCategory.apps.title, systemImage: SettingsCategory.apps.symbol) }
+                .tag(SettingsCategory.apps)
             CloudSettingsSection(model: viewModel.model, controller: viewModel.controller)
                 .tabItem { Label(SettingsCategory.cloud.title, systemImage: SettingsCategory.cloud.symbol) }
                 .tag(SettingsCategory.cloud)
+            DataSettingsTab(model: viewModel.model, controller: viewModel.controller)
+                .tabItem { Label(SettingsCategory.data.title, systemImage: SettingsCategory.data.symbol) }
+                .tag(SettingsCategory.data)
             HotkeysSettingsTab(controller: viewModel.controller)
                 .tabItem { Label(SettingsCategory.hotkeys.title, systemImage: SettingsCategory.hotkeys.symbol) }
                 .tag(SettingsCategory.hotkeys)

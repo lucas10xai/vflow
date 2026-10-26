@@ -6,32 +6,55 @@ import VFlowCore
 final class OverlayModel: ObservableObject {
     @Published var state: OverlayState = .transcribing
     @Published var level: Float = 0
+    /// "Xem chữ chạy trực tiếp" (`POST /v1/partial`) — chữ mờ TẠM, KHÔNG BAO GIỜ chèn vào ô đích;
+    /// `nil` khi tắt/không áp dụng (xem `AppController`, `VFlowCore.LivePreviewCoordinator`).
+    @Published var livePreviewText: String?
 }
 
 struct OverlayView: View {
     @ObservedObject var model: OverlayModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    private var showsLivePreview: Bool {
+        guard let t = model.livePreviewText, !t.isEmpty else { return false }
+        switch model.state {
+        case .listening, .listeningLocked: return true
+        default: return false
+        }
+    }
+
     var body: some View {
         let p = OverlayText.present(model.state)
-        HStack(spacing: 8) {
-            if let mark = BrandIcon.headerMark(pointSize: 16) {
-                Image(nsImage: mark).resizable().frame(width: 16, height: 16).accessibilityHidden(true)
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 8) {
+                if let mark = BrandIcon.headerMark(pointSize: 16) {
+                    Image(nsImage: mark).resizable().frame(width: 16, height: 16).accessibilityHidden(true)
+                }
+                if p.showsSpinner {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Image(systemName: p.symbol)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(p.isError ? Color.red : (p.showsLevel ? Color.orange : Color.primary))
+                }
+                Text(p.text)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                if p.showsLevel {
+                    LevelMeter(level: model.level, animated: !reduceMotion)
+                }
             }
-            if p.showsSpinner {
-                ProgressView().controlSize(.small)
-            } else {
-                Image(systemName: p.symbol)
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(p.isError ? Color.red : (p.showsLevel ? Color.orange : Color.primary))
-            }
-            Text(p.text)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(.primary)
-                .lineLimit(2)
-                .fixedSize(horizontal: false, vertical: true)
-            if p.showsLevel {
-                LevelMeter(level: model.level, animated: !reduceMotion)
+            if showsLivePreview, let text = model.livePreviewText {
+                Text(LivePreviewDisplay.capToTail(text))
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .truncationMode(.head)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: 320, alignment: .leading)
+                    .accessibilityHidden(true) // chữ tạm — VoiceOver không cần đọc liên tục khi đang gõ
             }
         }
         .padding(.horizontal, 14)
@@ -43,6 +66,7 @@ struct OverlayView: View {
         .accessibilityLabel(p.accessibilityLabel)
         .fixedSize()
         .animation(.spring(response: 0.3, dampingFraction: 0.8), value: model.state)
+        .animation(.easeOut(duration: 0.15), value: model.livePreviewText)
     }
 }
 
@@ -129,6 +153,9 @@ final class OverlayController {
     }
 
     func setLevel(_ level: Float) { model.level = level }
+
+    /// "Xem chữ chạy trực tiếp" — xem `OverlayModel.livePreviewText`.
+    func setLivePreviewText(_ text: String?) { model.livePreviewText = text }
 
     /// `--render-offscreen`: chụp nội dung HUD mà KHÔNG BAO GIỜ hiện lên màn hình.
     func captureOffscreen(to path: String) {

@@ -35,6 +35,13 @@ test('chưa có history/stats ⇒ rỗng, backfilled:true ngay (không có gì �
   assert.equal(raw.backfilled, true);
 });
 
+test('summary(): luôn trả week_start:"monday" (contract/engine-api.md mục Thống kê)', (t) => {
+  const dir = tmp(t);
+  const store = createStatsStore({ path: join(dir, 'stats.json'), historyPath: join(dir, 'history.jsonl') });
+  assert.equal(store.summary({ weeks: 1 }).week_start, 'monday');
+  assert.equal(store.summary({ weeks: 16 }).week_start, 'monday');
+});
+
 test('record(): cộng words/audio_ms/count đúng ngày hôm nay, theo app; không chứa văn bản', (t) => {
   const dir = tmp(t);
   const path = join(dir, 'stats.json');

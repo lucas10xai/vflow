@@ -18,7 +18,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   tone: 'neutral',
   whisper_mode: false,
   learn_from_edits: true,
-  live_preview: false,
+  live_preview: true,
   silence_stop_seconds: 0,
 });
 

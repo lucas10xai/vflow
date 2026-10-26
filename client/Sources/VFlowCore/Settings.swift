@@ -1,7 +1,66 @@
 import Foundation
 
+/// `tone` (contract mục "Giọng điệu và nói nhỏ"): CHỈ áp dụng cho `tidy`/`email` và CẦN `cloud_llm`
+/// bật — không đổi guard, không đổi nghĩa/thêm thông tin.
+public enum Tone: String, CaseIterable, Sendable {
+    case neutral, formal, casual
+
+    public var title: String {
+        switch self {
+        case .neutral: "Trung lập"
+        case .formal: "Trang trọng"
+        case .casual: "Thân mật"
+        }
+    }
+}
+
+/// Luật `app_rules` (contract mục "Cài đặt người dùng"): bundle id → chế độ, KHÔNG gồm `auto`
+/// (tránh đệ quy) — bảng được engine tra TRƯỚC `auto.apps` (cấu hình cứng) khi người dùng chọn `auto`.
+public enum AppRuleMode: String, CaseIterable, Sendable {
+    case normal, clean, dev, tidy, email
+
+    public var dictationMode: DictationMode { DictationMode(rawValue: rawValue) ?? .normal }
+
+    /// `true` ⇒ luật này gửi CHỮ qua 9Router (Gọn/Thư) — hiện cảnh báo khi `cloud_llm` đang tắt.
+    public var sendsTextToCloud: Bool { dictationMode.sendsTextToCloud }
+}
+
+/// Một luật trong `app_rules`: ứng dụng (bundle id) → chế độ ghi đè `auto`.
+public struct AppRule: Equatable, Sendable, Identifiable {
+    public var bundleId: String
+    public var mode: AppRuleMode
+    public var id: String { bundleId }
+
+    public init(bundleId: String, mode: AppRuleMode) {
+        self.bundleId = bundleId
+        self.mode = mode
+    }
+}
+
+/// Kiểm hợp lệ `app_rules` phía client, khớp luật engine (`engine/post/settings.js`): bundle id
+/// dạng reverse-DNS, tối đa 100 mục, chế độ nằm trong `AppRuleMode` (không có `auto`).
+public enum AppRuleValidation {
+    public static let bundleIdPattern = #"^[A-Za-z][A-Za-z0-9]*(\.[A-Za-z0-9][A-Za-z0-9_-]*)+$"#
+    public static let maxRules = 100
+
+    public static func isValidBundleId(_ s: String) -> Bool {
+        s.range(of: bundleIdPattern, options: .regularExpression) != nil
+    }
+
+    /// `nil` ⇒ hợp lệ; thêm/sửa `bundleId` (không phải `excludingBundleId`, dùng khi sửa một luật) dẫn
+    /// tới vượt `maxRules` hoặc bundle id sai dạng thì báo lỗi tiếng Việt, không gửi lên engine.
+    public static func error(bundleId: String, currentCount: Int, excludingBundleId: String? = nil) -> String? {
+        let trimmed = bundleId.trimmingCharacters(in: .whitespaces)
+        if trimmed.isEmpty { return "Chưa chọn ứng dụng" }
+        guard isValidBundleId(trimmed) else { return "Bundle id không hợp lệ: \"\(trimmed)\"" }
+        let isNew = excludingBundleId != trimmed
+        if isNew, currentCount >= maxRules { return "Tối đa \(maxRules) luật ứng dụng" }
+        return nil
+    }
+}
+
 /// Cài đặt người dùng (`GET/PUT /v1/settings`, contract/engine-api.md mục "Cài đặt người dùng").
-/// Không bao giờ chứa khoá 9Router — chỉ bốn trường này.
+/// Không bao giờ chứa khoá 9Router — chỉ các trường theo đúng hợp đồng.
 public struct AppSettings: Equatable, Sendable {
     public var cloudLlm: Bool
     /// `nil` = chưa đặt model — Gọn/Thư/Command Mode sẽ không chạy được.
@@ -11,13 +70,31 @@ public struct AppSettings: Equatable, Sendable {
     /// Tự dừng ghi khi im lặng ở chế độ hands-free (0 = tắt, 1–60 giây); khoá chưa tồn tại ở engine
     /// cũ ⇒ coi là 0 (xem `EngineAPI.parseSettings`).
     public var silenceStopSeconds: Int
+    public var statsEnabled: Bool
+    public var appRules: [AppRule]
+    public var voicePunctuation: Bool
+    public var tone: Tone
+    public var whisperMode: Bool
+    public var learnFromEdits: Bool
+    /// Xem chữ chạy trực tiếp (`POST /v1/partial`) — mặc định MỚI `true` (đo thật p95 111 ms, xem
+    /// contract/engine-api.md).
+    public var livePreview: Bool
 
-    public init(cloudLlm: Bool, llmModel: String?, llmTimeoutMs: Int, actionsEnabled: Bool, silenceStopSeconds: Int = 0) {
+    public init(cloudLlm: Bool, llmModel: String?, llmTimeoutMs: Int, actionsEnabled: Bool, silenceStopSeconds: Int = 0,
+                statsEnabled: Bool = true, appRules: [AppRule] = [], voicePunctuation: Bool = true, tone: Tone = .neutral,
+                whisperMode: Bool = false, learnFromEdits: Bool = true, livePreview: Bool = true) {
         self.cloudLlm = cloudLlm
         self.llmModel = llmModel
         self.llmTimeoutMs = llmTimeoutMs
         self.actionsEnabled = actionsEnabled
         self.silenceStopSeconds = silenceStopSeconds
+        self.statsEnabled = statsEnabled
+        self.appRules = appRules
+        self.voicePunctuation = voicePunctuation
+        self.tone = tone
+        self.whisperMode = whisperMode
+        self.learnFromEdits = learnFromEdits
+        self.livePreview = livePreview
     }
 }
 
@@ -28,14 +105,30 @@ public struct SettingsPatch: Sendable {
     public var llmTimeoutMs: Int?
     public var actionsEnabled: Bool?
     public var silenceStopSeconds: Int?
+    public var statsEnabled: Bool?
+    public var appRules: [AppRule]?
+    public var voicePunctuation: Bool?
+    public var tone: Tone?
+    public var whisperMode: Bool?
+    public var learnFromEdits: Bool?
+    public var livePreview: Bool?
 
     public init(cloudLlm: Bool? = nil, llmModel: String?? = nil, llmTimeoutMs: Int? = nil, actionsEnabled: Bool? = nil,
-                silenceStopSeconds: Int? = nil) {
+                silenceStopSeconds: Int? = nil, statsEnabled: Bool? = nil, appRules: [AppRule]? = nil,
+                voicePunctuation: Bool? = nil, tone: Tone? = nil, whisperMode: Bool? = nil, learnFromEdits: Bool? = nil,
+                livePreview: Bool? = nil) {
         self.cloudLlm = cloudLlm
         self.llmModel = llmModel
         self.llmTimeoutMs = llmTimeoutMs
         self.actionsEnabled = actionsEnabled
         self.silenceStopSeconds = silenceStopSeconds
+        self.statsEnabled = statsEnabled
+        self.appRules = appRules
+        self.voicePunctuation = voicePunctuation
+        self.tone = tone
+        self.whisperMode = whisperMode
+        self.learnFromEdits = learnFromEdits
+        self.livePreview = livePreview
     }
 
     public var jsonObject: [String: Any] {
@@ -45,6 +138,13 @@ public struct SettingsPatch: Sendable {
         if let v = llmTimeoutMs { obj["llm_timeout_ms"] = v }
         if let v = actionsEnabled { obj["actions_enabled"] = v }
         if let v = silenceStopSeconds { obj["silence_stop_seconds"] = v }
+        if let v = statsEnabled { obj["stats_enabled"] = v }
+        if let v = appRules { obj["app_rules"] = Dictionary(uniqueKeysWithValues: v.map { ($0.bundleId, $0.mode.rawValue) }) }
+        if let v = voicePunctuation { obj["voice_punctuation"] = v }
+        if let v = tone { obj["tone"] = v.rawValue }
+        if let v = whisperMode { obj["whisper_mode"] = v }
+        if let v = learnFromEdits { obj["learn_from_edits"] = v }
+        if let v = livePreview { obj["live_preview"] = v }
         return obj
     }
 }

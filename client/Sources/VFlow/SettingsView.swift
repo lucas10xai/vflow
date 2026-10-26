@@ -4,13 +4,16 @@ import VFlowCore
 /// Bốn mục của cửa sổ Cài đặt (`SettingsWindow.swift`) — xem mô tả từng mục ở từng `*SettingsTab`
 /// bên dưới. Giữ TOÀN BỘ hành vi/kết nối engine cũ (U1: chỉ sắp xếp lại vào cửa sổ chuẩn macOS).
 enum SettingsCategory: String, CaseIterable, Identifiable {
-    case general, cloud, hotkeys, historyPrivacy, advanced
+    case general, voice, apps, cloud, data, hotkeys, historyPrivacy, advanced
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .general: "Chung"
+        case .voice: "Giọng nói"
+        case .apps: "Ứng dụng"
         case .cloud: "Đám mây"
+        case .data: "Dữ liệu"
         case .hotkeys: "Phím tắt"
         case .historyPrivacy: "Lịch sử & riêng tư"
         case .advanced: "Nâng cao"
@@ -20,7 +23,10 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
     var symbol: String {
         switch self {
         case .general: "gearshape"
+        case .voice: "waveform"
+        case .apps: "app.badge"
         case .cloud: "cloud"
+        case .data: "tray.full"
         case .hotkeys: "command"
         case .historyPrivacy: "lock.shield"
         case .advanced: "wrench.and.screwdriver"
@@ -74,7 +80,6 @@ struct GeneralSettingsTab: View {
             }
             Section("Micro") {
                 MicrophonePickerSection(controller: controller)
-                SilenceStopSection(model: model, controller: controller)
             }
             Section {
                 Button("Thoát vflow") { NSApp.terminate(nil) }
@@ -168,7 +173,7 @@ private struct MicrophonePickerSection: View {
 
 /// Tự dừng khi im lặng ở chế độ hands-free (Cài đặt › Chung) — `silence_stop_seconds` qua
 /// `GET/PUT /v1/settings` hiện có (0 = tắt), xem `VFlowCore.VoiceActivityDetector`.
-private struct SilenceStopSection: View {
+struct SilenceStopSection: View {
     let model: StatusModel
     let controller: AppController
     @State private var loaded = false

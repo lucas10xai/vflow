@@ -40,6 +40,9 @@ struct DictionaryView: View {
     @State private var editorSpokenText = ""
     @State private var saveError: String?
     @State private var confirmDelete: DictionaryEntry?
+    /// "Gợi ý từ lần anh sửa" (V2, `GET /v1/dictionary/suggestions`) — chỉ hiện khi có gợi ý.
+    @State private var suggestions: [DictionarySuggestion] = []
+    @State private var suggestionError: String?
 
     /// CHỈ dùng cho `--snapshot` (U3, mục "sheet Thêm mục có lỗi hợp lệ") — mở sẵn sheet Thêm mục
     /// với trạng thái cho trước (vd. có thuật ngữ nhưng CHƯA có cách nói ⇒ lỗi hợp lệ thật, không
@@ -69,6 +72,9 @@ struct DictionaryView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             header
+            if !suggestions.isEmpty {
+                SuggestionsSection(suggestions: suggestions, onAdd: beginAddFromSuggestion, onDismiss: { s in Task { await dismiss(s) } })
+            }
             body_
         }
         // id = model.engineReady: engine CHƯA sẵn sàng (đang khởi động/khởi động lại) thì không
@@ -160,6 +166,10 @@ struct DictionaryView: View {
             loadError = e
         }
         loaded = true
+        switch await controller.fetchDictionarySuggestions() {
+        case .success(let s): suggestions = s; suggestionError = nil
+        case .failure(let e): suggestionError = ErrorText.message(e) // không chặn phần còn lại của tab
+        }
     }
 
     private func beginAdd() {
@@ -167,6 +177,22 @@ struct DictionaryView: View {
         editorTerm = ""
         editorSpokenText = ""
         showEditor = true
+    }
+
+    /// "Thêm vào từ điển" trên một gợi ý — mở CÙNG sheet Thêm mục, có sẵn dữ liệu để người dùng
+    /// xem/sửa trước khi lưu (không tự lưu thẳng).
+    private func beginAddFromSuggestion(_ s: DictionarySuggestion) {
+        editorOriginalTerm = nil
+        editorTerm = s.term
+        editorSpokenText = s.variants.joined(separator: "\n")
+        showEditor = true
+    }
+
+    private func dismiss(_ s: DictionarySuggestion) async {
+        switch await controller.dismissDictionarySuggestion(term: s.term) {
+        case .success: suggestions.removeAll { $0.term == s.term }
+        case .failure(let e): suggestionError = ErrorText.message(e)
+        }
     }
 
     private func beginEdit(_ entry: DictionaryEntry) {
@@ -194,6 +220,7 @@ struct DictionaryView: View {
         case .success(let next):
             entries = next
             showEditor = false
+            suggestions.removeAll { $0.term == term } // vừa thêm/sửa đúng thuật ngữ này
         case .failure(let e):
             saveError = ErrorText.message(e)
         }
@@ -278,5 +305,46 @@ struct SpokenChips: View {
                     .foregroundStyle(.secondary)
             }
         }
+    }
+}
+
+/// "Gợi ý từ lần anh sửa" (V2, `GET /v1/dictionary/suggestions`) — cặp (từ đúng, cách nghe sai) xuất
+/// hiện ≥ 2 lần qua sửa tay sau dictation (`learn_from_edits` bật), CHƯA có trong từ điển.
+private struct SuggestionsSection: View {
+    let suggestions: [DictionarySuggestion]
+    let onAdd: (DictionarySuggestion) -> Void
+    let onDismiss: (DictionarySuggestion) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            SectionTitle(text: "Gợi ý từ lần anh sửa")
+            ForEach(suggestions) { s in
+                SuggestionRow(suggestion: s, onAdd: { onAdd(s) }, onDismiss: { onDismiss(s) })
+            }
+        }
+        .padding(10)
+        .background(Theme.accent.opacity(0.08), in: RoundedRectangle(cornerRadius: Theme.cardCornerRadius, style: .continuous))
+    }
+}
+
+private struct SuggestionRow: View {
+    let suggestion: DictionarySuggestion
+    let onAdd: () -> Void
+    let onDismiss: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(suggestion.term).font(.system(size: 13, weight: .semibold))
+                SpokenChips(spoken: suggestion.variants)
+                Text("Gặp \(suggestion.count) lần").font(.system(size: 11)).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button("Thêm vào từ điển", action: onAdd).buttonStyle(.bordered).tint(Theme.accent)
+            Button("Bỏ qua", action: onDismiss).buttonStyle(.plain).foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 4)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Gợi ý: \(suggestion.term), gặp \(suggestion.count) lần")
     }
 }

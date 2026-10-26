@@ -2,7 +2,7 @@
 
 Giữ **⌥ Option trái**, nói, nhả phím ⇒ chữ được dán vào ô đang gõ ở mọi ứng dụng (kể cả Terminal). **Đúp ⌥ trái** (hai lần chạm nhanh) ⇒ ghi "khoá" (hands-free, không cần giữ phím) — bấm ⌥ một lần nữa để xong. **Esc** huỷ ngay lập tức ở bất kỳ kiểu ghi nào. Giữ **⌥ trái + ⌃ trái** (⌃ trong 400 ms đầu) ⇒ Command Mode (sửa/soạn văn bản bằng lời, xem mục riêng bên dưới). Client chỉ nói chuyện với engine cục bộ `http://127.0.0.1:7611` theo `contract/engine-api.md`; không mạng ngoài, không analytics, không tự cập nhật, không thư viện bên thứ ba.
 
-Từ M4a, vflow là **app thường**: biểu tượng Dock, ⌘-Tab, menu ứng dụng đầy đủ, và cửa sổ chính **"vflow"** với 4 mục xếp theo 2 nhóm ở thanh bên — **Sử dụng** (Tổng quan, Lịch sử), **Cá nhân hoá** (Từ điển, Snippets); **Cài đặt** (từ U1) là **cửa sổ RIÊNG chuẩn macOS** (⌘,; menu "vflow › Cài đặt…"), không còn là một mục trong thanh bên. Biểu tượng thanh menu vẫn còn nhưng chỉ là phụ (có công tắc ẩn/hiện ở Cài đặt › Chung, mặc định bật) — từ U1, biểu tượng này là ảnh **TEMPLATE đơn sắc** (`isTemplate = true`): macOS tự vẽ **trắng** trên thanh menu tối, **đen** trên thanh menu sáng; trạng thái (nghe/dịch/lỗi/thiếu quyền) phân biệt bằng **hình** huy hiệu góc dưới-phải (chấm đặc/vòng/sao lấp lánh/tam giác cảnh báo — xem mục Logo), không dựa vào màu. **Đóng cửa sổ chính (nút đỏ) KHÔNG thoát app** — ghi âm bằng phím nóng và engine vẫn hoạt động; thoát hẳn bằng **⌘Q** hoặc menu "vflow › Thoát vflow". Lần đầu mở (hoặc khi chưa đủ 3 quyền macOS), một tờ **Chào mừng** tự hiện hướng dẫn cấp quyền từng bước (dấu tích tự cập nhật); mở lại được bất cứ lúc nào từ menu "Trợ giúp › Xem hướng dẫn chào mừng…".
+Từ M4a, vflow là **app thường**: biểu tượng Dock, ⌘-Tab, menu ứng dụng đầy đủ, và cửa sổ chính **"vflow"** với 5 mục xếp theo 2 nhóm ở thanh bên — **Sử dụng** (Tổng quan, **Thống kê** [V2], Lịch sử), **Cá nhân hoá** (Từ điển, Snippets); **Cài đặt** (từ U1, mở rộng ở V2 với các mục Giọng nói/Ứng dụng/Dữ liệu) là **cửa sổ RIÊNG chuẩn macOS** (⌘,; menu "vflow › Cài đặt…"), không còn là một mục trong thanh bên. Biểu tượng thanh menu vẫn còn nhưng chỉ là phụ (có công tắc ẩn/hiện ở Cài đặt › Chung, mặc định bật) — từ U1, biểu tượng này là ảnh **TEMPLATE đơn sắc** (`isTemplate = true`): macOS tự vẽ **trắng** trên thanh menu tối, **đen** trên thanh menu sáng; trạng thái (nghe/dịch/lỗi/thiếu quyền) phân biệt bằng **hình** huy hiệu góc dưới-phải (chấm đặc/vòng/sao lấp lánh/tam giác cảnh báo — xem mục Logo), không dựa vào màu. **Đóng cửa sổ chính (nút đỏ) KHÔNG thoát app** — ghi âm bằng phím nóng và engine vẫn hoạt động; thoát hẳn bằng **⌘Q** hoặc menu "vflow › Thoát vflow". Lần đầu mở (hoặc khi chưa đủ 3 quyền macOS), một tờ **Chào mừng** tự hiện hướng dẫn cấp quyền từng bước (dấu tích tự cập nhật); mở lại được bất cứ lúc nào từ menu "Trợ giúp › Xem hướng dẫn chào mừng…".
 
 Từ M4b, bản dựng mặc định (`build-app.sh`, không có `--no-bundle`) **tự đủ**: Node 22, mã engine, `node_modules` (chỉ darwin-arm64) và model `zipformer-vi-30m` nằm sẵn trong `VFlow.app/Contents/Resources/` — không cần repo hay Node cài trên máy chạy. Xem mục "Đóng gói tự đủ & cài đặt" bên dưới.
 
@@ -19,8 +19,8 @@ cd client && swift test                # test logic thuần (VFlowCore)
 Yêu cầu: macOS 14+, Xcode/Swift 6. Cờ dòng lệnh của nhị phân `VFlow.app/Contents/MacOS/VFlow`:
 - `--demo-overlay ghi|khoa|dich|xong|loi [--demo-seconds N]`: chỉ hiện thanh trạng thái ở một trong 5 trạng thái (để chụp ảnh), không chạy engine/phím nóng.
 - `--no-prompt`: không bật hộp thoại xin quyền (dùng khi chạy thử tự động); vẫn kiểm và báo trạng thái quyền.
-- `--open-tab tongquan|lichsu|tudien|snippet|caidat`: mở cửa sổ chính thẳng vào mục đó; riêng `caidat` mở CỬA SỔ CÀI ĐẶT (không còn là mục trong thanh bên) — dùng để chụp ảnh.
-- `--open-settings-tab general|cloud|hotkeys|historyPrivacy|advanced`: mở cửa sổ Cài đặt thẳng vào mục đó (chụp ảnh).
+- `--open-tab tongquan|thongke|lichsu|tudien|snippet|caidat`: mở cửa sổ chính thẳng vào mục đó (`thongke` = tab Thống kê, V2); riêng `caidat` mở CỬA SỔ CÀI ĐẶT (không còn là mục trong thanh bên) — dùng để chụp ảnh.
+- `--open-settings-tab general|voice|apps|cloud|data|hotkeys|historyPrivacy|advanced`: mở cửa sổ Cài đặt thẳng vào mục đó (chụp ảnh). `voice`/`apps`/`data` là 3 mục mới ở V2 (xem mục "V2" bên dưới).
 - `--appearance light|dark`: ép giao diện sáng/tối (chỉ để chụp ảnh nhất quán, không đổi cài đặt hệ thống).
 - `--no-welcome`: không tự hiện tờ Chào mừng lần đầu dù chưa đủ quyền/chưa từng xem (dùng khi chụp ảnh các cửa sổ khác để tờ Chào mừng không che mất).
 - `--demo-icon [--demo-seconds N]`: cửa sổ RIÊNG hiện biểu tượng thanh menu (template) trên nền tối/sáng ở cả 5 trạng thái huy hiệu, không chạy engine/phím nóng — dùng để chụp ảnh chứng minh trắng/đen tự động mà không chụp thanh menu thật.
@@ -53,22 +53,26 @@ hay "set frontmost"/`activate()` nào.
 3. Gọi `StatusWindowController`/`SettingsWindowController`/`WelcomeWindowController`.`captureOffscreen(...)` → `OffscreenRender.captureRealWindow`: đặt `window.alphaValue = 0` + toạ độ rất xa mọi màn hình thật (`x = -50000`), gọi `layoutSubtreeIfNeeded()` rồi `view.bitmapImageRepForCachingDisplay` + `cacheDisplay(in:to:)` — **không bao giờ** `orderFront`/`orderBack` (đã đo: `orderBack` có thể khiến AppKit tự dịch cửa sổ vào lại vùng màn hình thật khi lần đầu gắn vào screen — KHÔNG DÙNG).
 4. In `VFLOW_OFFSCREEN_CHECK` (đếm cửa sổ on-screen thật qua `CGWindowListCopyWindowInfo` — PHẢI luôn là 0) trước khi thoát.
 
-`<mục>`: `tongquan`, `lichsu`, `tudien`, `tudien:them-loi` (sheet Thêm mục với lỗi hợp lệ sẵn — GIỚI
+`<mục>`: `tongquan`, `thongke` (V2), `lichsu`, `tudien`, `tudien:them-loi` (sheet Thêm mục với lỗi hợp lệ sẵn — GIỚI
 HẠN: ảnh chỉ có cửa sổ chính, sheet không hiện trong ảnh — xem ghi chú ở
 `StatusWindowController.captureDictionaryAddInvalidOffscreen`), `snippet`,
-`caidat[:general|cloud|hotkeys|historyPrivacy|advanced]`, `welcome`. HUD (thanh trạng thái 5 trạng thái) dùng
+`caidat[:general|voice|apps|cloud|data|hotkeys|historyPrivacy|advanced]`, `welcome`. HUD (thanh trạng thái 5 trạng thái) dùng
 `--demo-overlay <ghi|khoa|dich|xong|loi> --render-offscreen --out <path>` (không cần `<mục>`).
 
 ### `client/scripts/snapshot.sh <thư mục đầu ra>`
-Công cụ LÂU DÀI chụp TOÀN BỘ màn hình (sáng + tối): dựng VFlow, tạo hai `VFLOW_HOME` cô lập tạm thời
-(`full`: dữ liệu mẫu — lịch sử nhiều ngày, từ điển, snippets, engine THẬT chạy cục bộ chỉ phục vụ
-`/healthz`+`/v1/dictionary`+`/v1/snippets`, không cần model STT tải sẵn; `empty`: trống, quyền giả lập
-thiếu), gọi `--render-offscreen` cho từng cặp (mục, sáng/tối), rồi dọn sạch — không đụng `~/.vflow`
-thật, không để lại tiến trình/thư mục tạm. Dữ liệu mẫu trong `snapshot-seed.mjs` không chứa tên
-riêng/khoá thật.
+Công cụ LÂU DÀI chụp TOÀN BỘ màn hình (sáng + tối): dựng VFlow, tạo BA `VFLOW_HOME` cô lập tạm thời,
+MỖI cái chạy một engine THẬT riêng (cổng riêng 27611/27612/27613, chỉ 127.0.0.1) —
+(`full`: dữ liệu mẫu đầy đủ, gồm ~16 tuần thống kê đa dạng + vài ứng dụng (Safari/Slack thật, "Zalo"
+minh hoạ, "unknown") + gợi ý từ điển sẵn; `empty`: trống hoàn toàn (0 từ, không dictionary/snippets),
+quyền giả lập thiếu; `statsoff`: GIỐNG `full` nhưng `config.json` đặt sẵn `stats_enabled:false`) —
+gọi `--render-offscreen` cho từng cặp (mục, sáng/tối), rồi dọn sạch TẤT CẢ (3 tiến trình engine, 3
+thư mục tạm) — không đụng `~/.vflow` thật, không để lại tiến trình/thư mục tạm. Dữ liệu mẫu trong
+`snapshot-seed.mjs` không chứa tên riêng/khoá thật ("Zalo" chỉ là bundle id minh hoạ hợp lệ, CHƯA
+xác minh đúng bundle id thật của app đó — không quan trọng cho ảnh chụp vì máy dựng không cài app
+này, client tự rơi về biểu tượng chung, đúng hành vi thật khi gặp app lạ).
 
 ```sh
-client/scripts/snapshot.sh /tmp/vflow-snapshots   # ⇒ ~34 ảnh PNG, xem /tmp/vflow-snapshots/snapshot.log
+client/scripts/snapshot.sh /tmp/vflow-snapshots   # ⇒ 46 ảnh PNG, xem /tmp/vflow-snapshots/snapshot.log
 ```
 
 ### Giới hạn đã biết (nói thẳng, không che giấu)
@@ -118,7 +122,7 @@ client/scripts/uninstall-app.sh    # gỡ /Applications/vflow.app (KHÔNG đụn
 | Target | Nội dung |
 |---|---|
 | `VFlowCore` (thư viện, test được) | `Hotkey.swift` máy trạng thái phím (giữ/đúp-khoá/Command Mode/Esc) + phân loại CGEvent; `Audio.swift` bộ chuyển 16 kHz mono Int16 theo khối (sinc cửa sổ Blackman, chống răng cưa), downmix, LE, mức âm, bộ đệm “thử lại”; `Clipboard.swift` chèn bằng clipboard + khôi phục; `SelectionCapture.swift` lấy đoạn đang chọn (AX/⌘C tổng hợp, có kiểm soát) cho Command Mode; `TextMatch.swift` (`VietnameseMatch`) gấp dấu/chuẩn hoá khớp luật engine (`fold`/`normalizeMatch`); `EngineAPI.swift` yêu cầu/phản hồi/ánh xạ lỗi tiếng Việt (transcribe, healthz, dictionary, corrections, snippets, settings, command); `EngineSupervisor.swift` giám sát engine con; `ClientConfig.swift`; `VFlowHome.swift` tôn trọng `VFLOW_HOME`; `History.swift` (`HistoryStore`, `HistoryEntry`, `HistoryGate`) lưu lịch sử chỉ-văn-bản vào `history.jsonl`; `Dictionary.swift`/`DictionaryOrchestration.swift` và `Snippet.swift`/(`SnippetOrchestration` trong cùng tệp) kiểm hợp lệ + mẫu đọc-sửa-ghi chung cho `/v1/dictionary` và `/v1/snippets`; `Settings.swift` (`AppSettings`, `SettingsPatch`, `SettingsValidation`, `EnterAction`) cho `/v1/settings` và quyết định gửi phím Enter; `Dictation.swift`, `Overlay.swift` (gồm trạng thái ghi khoá/Command Mode) quyết định hiển thị; `StatusModel.swift` mô hình thuần dùng CHUNG cho menu và tab Tổng quan (`StatusModel`, `PermissionKind`/`PermissionItem`, `ConflictDetector`/`ConflictText` dò ứng dụng đọc chính tả khác qua `RunningAppsProvider`, `ShowWindowPreference`); `DesignSystem.swift` (U1, hệ thống thiết kế thuần) — `BrandColor`/`ContrastText` (màu nhấn cam #ED6300 + kiểm tương phản WCAG AA), `ModeCloudLabel` (nhãn "Trong máy"/"Gửi chữ qua 9Router" lấy từ `DictationMode.sendsTextToCloud`), `ModelReasonText` (mã lý do model → chữ thân thiện), `PermissionsProgress` ("n/3"), `WelcomeDecision` (có tự hiện Chào mừng hay không), `HeroStatus`/`HeroStatusDecision` (trạng thái thẻ lớn Tổng quan), `TodaySummary`/`TodayStats` (tổng hợp "Hôm nay" từ lịch sử); `VFlowDefaults.swift` (U2, lớp truy cập UserDefaults duy nhất, cô lập theo `VFLOW_HOME`); `HistoryGrouping.swift` (U2, gom lịch sử theo ngày); `ListSorting.swift` (U2, sắp xếp A–Z/dùng nhiều dùng chung Từ điển/Snippets); `DictionaryFormValidation`/`SnippetFormValidation` (U2, trong `Dictionary.swift`/`Snippet.swift`, kiểm hợp lệ ngay khi gõ); `WaveformMeter` (U2, trong `Overlay.swift`, chiều cao vạch sóng âm theo mức); `HoldModifierKey`/`HotkeyKeyConfig`/`ActiveHotkeyConfig`/`HotkeyConfigValidation`/`HotkeyChord`/`ReinsertChordPreset` (U4, trong `Hotkey.swift`, cấu hình phím "giữ để nói"/Command Mode/"Chèn lại câu vừa rồi" tuỳ chỉnh — `KeyClassifier.classify(config:)` tổng quát hoá, giữ mặc định y hệt bản cứng cũ); `LastSpokenText` (U4, trong `History.swift`, nguồn "câu vừa rồi"); `MenuBarOcclusion.swift` (U4, dò biểu tượng thanh menu bị che bằng toạ độ thuần + `MenuBarOcclusionReminder` nhắc theo ngày); `VoiceActivity.swift` (U4: `VoiceActivityDetector` VAD năng lượng thích nghi, `MicrophoneSelection` chọn/rơi về micro mặc định, `RecordingLimit` giới hạn ghi hands-free). |
-| `VFlow` (AppKit/SwiftUI mỏng) | event tap, AVAudioEngine, NSPasteboard + ⌘V/Return/⌘C tổng hợp (`TextInserter.swift`: `PasteKeystroke`/`ReturnKeystroke`/`CopyKeystroke`/`AXSelection`/`FocusedInputProbe` U4 — dò ô nhập trước khi dán), NSPanel thanh trạng thái, `main.swift` (menu ứng dụng, `--open-tab`, `--open-settings-tab`, `--appearance`, `--no-welcome`, `--demo-icon`, `applicationDockMenu` U4), `StatusWindow.swift` cửa sổ chính "vflow" (`MainWindowView`, sidebar 4 mục xếp 2 nhóm + ⌘1…⌘4 + nút Cài đặt cố định U4), `SettingsWindow.swift` cửa sổ Cài đặt RIÊNG (`SettingsRootView`, 5 mục `SettingsCategory` từ U4, ⌘,), `WelcomeWindow.swift` tờ Chào mừng lần đầu (`WelcomeView`, cờ `hasSeenWelcome`), `Theme.swift` màu nhấn thương hiệu + `cardBackground()` dùng chung, `OverviewView.swift` (bảng điều khiển, U1, + `MenuBarOcclusionCard` U4) /`HistoryView.swift`/`DictionaryView.swift`/`SnippetsView.swift`/`SettingsView.swift` (gồm `ModeSection`, `CloudSettingsSection`, `GeneralSettingsTab` + `MicrophonePickerSection`/`SilenceStopSection` U4, `HotkeysSettingsTab` U4, `HistoryPrivacySettingsTab`, `AdvancedSettingsTab`) nội dung từng mục, `MainTab.swift`, NSStatusItem + menu (`StatusMenu.swift`, có `setVisible`, `itemWindowFrame`/`setStableAutosaveName` U4, `populate(_:model:controller:)` dùng CHUNG với menu Dock, dùng `BrandIcon` cho biểu tượng template + huy hiệu trạng thái), `BrandIcon.swift` nạp logo-mark màu (header) và logo-mark template (thanh menu) từ bundle, `Permissions.swift` (quyền thật, nối `PermissionKind`, có cờ môi trường `VFLOW_DEMO_PERMISSIONS` chỉ-để-chụp-ảnh), `ConflictProvider.swift` (`NSWorkspace` thật), SMAppService, `WindowFramePersistence.swift` (U2, tự lưu/đọc vị trí cửa sổ qua `VFlowDefaults` khi có `VFLOW_HOME`, dùng `setFrameAutosaveName` chuẩn AppKit khi không có), `AudioRecorder.swift` (U4: `availableDevices()`/ghim thiết bị qua CoreAudio, `onLevel` nuôi VAD), `HotkeyMonitor.swift` (U4: `ActiveHotkeyConfig`/`keyConfig` đổi được, `onReinsertChord`). |
+| `VFlow` (AppKit/SwiftUI mỏng) | event tap, AVAudioEngine, NSPasteboard + ⌘V/Return/⌘C tổng hợp (`TextInserter.swift`: `PasteKeystroke`/`ReturnKeystroke`/`CopyKeystroke`/`AXSelection`/`FocusedInputProbe` U4 — dò ô nhập trước khi dán), NSPanel thanh trạng thái, `main.swift` (menu ứng dụng, `--open-tab`, `--open-settings-tab`, `--appearance`, `--no-welcome`, `--demo-icon`, `applicationDockMenu` U4), `StatusWindow.swift` cửa sổ chính "vflow" (`MainWindowView`, sidebar 5 mục xếp 2 nhóm + ⌘1…⌘5 + nút Cài đặt cố định U4; `StatsView.swift` V2 tab Thống kê), `SettingsWindow.swift` cửa sổ Cài đặt RIÊNG (`SettingsRootView`, 8 mục `SettingsCategory` — 5 cũ (U4) + Giọng nói/Ứng dụng/Dữ liệu từ V2 trong `SettingsViewV2.swift`, ⌘,), `WelcomeWindow.swift` tờ Chào mừng lần đầu (`WelcomeView`, cờ `hasSeenWelcome`), `Theme.swift` màu nhấn thương hiệu + `cardBackground()` dùng chung, `OverviewView.swift` (bảng điều khiển, U1, + `MenuBarOcclusionCard` U4) /`HistoryView.swift`/`DictionaryView.swift`/`SnippetsView.swift`/`SettingsView.swift` (gồm `ModeSection`, `CloudSettingsSection`, `GeneralSettingsTab` + `MicrophonePickerSection`/`SilenceStopSection` U4, `HotkeysSettingsTab` U4, `HistoryPrivacySettingsTab`, `AdvancedSettingsTab`) nội dung từng mục, `MainTab.swift`, NSStatusItem + menu (`StatusMenu.swift`, có `setVisible`, `itemWindowFrame`/`setStableAutosaveName` U4, `populate(_:model:controller:)` dùng CHUNG với menu Dock, dùng `BrandIcon` cho biểu tượng template + huy hiệu trạng thái), `BrandIcon.swift` nạp logo-mark màu (header) và logo-mark template (thanh menu) từ bundle, `Permissions.swift` (quyền thật, nối `PermissionKind`, có cờ môi trường `VFLOW_DEMO_PERMISSIONS` chỉ-để-chụp-ảnh), `ConflictProvider.swift` (`NSWorkspace` thật), SMAppService, `WindowFramePersistence.swift` (U2, tự lưu/đọc vị trí cửa sổ qua `VFlowDefaults` khi có `VFLOW_HOME`, dùng `setFrameAutosaveName` chuẩn AppKit khi không có), `AudioRecorder.swift` (U4: `availableDevices()`/ghim thiết bị qua CoreAudio, `onLevel` nuôi VAD), `HotkeyMonitor.swift` (U4: `ActiveHotkeyConfig`/`keyConfig` đổi được, `onReinsertChord`). |
 | `VFlowCoreTests` | swift-testing, chỉ logic thuần, dùng bộ chạy tiến trình/clipboard/đồng hồ giả. |
 
 ## Engine
@@ -189,7 +193,7 @@ Cách điều khiển CHÍNH không phụ thuộc biểu tượng thanh menu: c�
 **Đóng cửa sổ chính (nút đỏ) KHÔNG thoát app** — ghi âm bằng phím nóng vẫn hoạt động, engine con vẫn chạy; cửa sổ tự ghi chú điều này ở chân mỗi tab. Thoát hẳn bằng **⌘Q** hoặc menu "vflow › Thoát vflow" (cũng có ở Cài đặt › Chung). Nếu cửa sổ bị đóng và cần mở lại: bấm Dock, `open client/build/VFlow.app`, hoặc menu thanh trạng thái "Mở cửa sổ vflow".
 
 ## Cửa sổ chính "vflow"
-Một cửa sổ (`.titled`, đổi cỡ được, mặc định ≈960×680, tối thiểu ≈800×560, nhớ kích thước/vị trí — cô lập theo `VFLOW_HOME` từ U2, xem `VFlow.WindowFramePersistence`), thanh công cụ thống nhất (tiêu đề mục đang chọn — MỘT nơi duy nhất, nội dung không lặp lại tiêu đề), thanh bên có logo+tên "vflow" ở đầu rồi 4 mục xếp 2 nhóm — **Sử dụng** (Tổng quan, Lịch sử), **Cá nhân hoá** (Từ điển, Snippets). **Từ U2**: mục đang chọn ở thanh bên KHÔNG dùng `List(selection:)` nữa (`NavigationSplitView`/`listStyle(.sidebar)` luôn tô màu nhấn HỆ THỐNG, không có API đổi) — tự vẽ (`VFlow.SidebarRow`, nút phẳng + viên thuốc cam thương hiệu khi chọn), vẫn điều khiển được bằng bàn phím (Tab/Space, ⌘1…⌘4)/VoiceOver, huy hiệu cam nhỏ ở "Tổng quan" khi có quyền macOS còn thiếu. Lần đầu mở, một thẻ nhỏ nhắc "Đóng cửa sổ không thoát vflow…" hiện một lần (đóng được, nhớ bằng `hasSeenCloseHint`) thay cho dòng chân trang cố định của U1. Phím tắt ⌘1…⌘4 chuyển mục (theo thứ tự trên); ⌘, mở cửa sổ Cài đặt (riêng, xem mục bên dưới). Màu nhấn cam thương hiệu #ED6300 (`Theme.accent`, `client/Sources/VFlow/Theme.swift`) dùng cho công tắc/mục chọn/nút chính; thẻ (`cardBackground()`) từ U2 dùng `controlBackgroundColor` đặc + viền `separatorColor` + bóng nhẹ (không còn `.regularMaterial` — không đủ phân biệt với nền cửa sổ ở giao diện TỐI, đã kiểm bằng ảnh chụp).
+Một cửa sổ (`.titled`, đổi cỡ được, mặc định ≈960×680, tối thiểu ≈800×560, nhớ kích thước/vị trí — cô lập theo `VFLOW_HOME` từ U2, xem `VFlow.WindowFramePersistence`), thanh công cụ thống nhất (tiêu đề mục đang chọn — MỘT nơi duy nhất, nội dung không lặp lại tiêu đề), thanh bên có logo+tên "vflow" ở đầu rồi 5 mục xếp 2 nhóm — **Sử dụng** (Tổng quan, Thống kê [V2], Lịch sử), **Cá nhân hoá** (Từ điển, Snippets). **Từ U2**: mục đang chọn ở thanh bên KHÔNG dùng `List(selection:)` nữa (`NavigationSplitView`/`listStyle(.sidebar)` luôn tô màu nhấn HỆ THỐNG, không có API đổi) — tự vẽ (`VFlow.SidebarRow`, nút phẳng + viên thuốc cam thương hiệu khi chọn), vẫn điều khiển được bằng bàn phím (Tab/Space, ⌘1…⌘5)/VoiceOver, huy hiệu cam nhỏ ở "Tổng quan" khi có quyền macOS còn thiếu. Lần đầu mở, một thẻ nhỏ nhắc "Đóng cửa sổ không thoát vflow…" hiện một lần (đóng được, nhớ bằng `hasSeenCloseHint`) thay cho dòng chân trang cố định của U1. Phím tắt ⌘1…⌘5 chuyển mục (theo thứ tự trên); ⌘, mở cửa sổ Cài đặt (riêng, xem mục bên dưới). Màu nhấn cam thương hiệu #ED6300 (`Theme.accent`, `client/Sources/VFlow/Theme.swift`) dùng cho công tắc/mục chọn/nút chính; thẻ (`cardBackground()`) từ U2 dùng `controlBackgroundColor` đặc + viền `separatorColor` + bóng nhẹ (không còn `.regularMaterial` — không đủ phân biệt với nền cửa sổ ở giao diện TỐI, đã kiểm bằng ảnh chụp).
 
 **Tổng quan** — bảng điều khiển (U1), lấy từ CÙNG MỘT mô hình thuần `StatusModel` (VFlowCore) với menu thanh trạng thái nên hai nơi không bao giờ nói khác nhau; nội dung và chữ hiển thị quyết định bởi các hàm thuần có test trong `VFlowCore/DesignSystem.swift` (`HeroStatusDecision`, `ModelReasonText`, `PermissionsProgress`, `TodayStats`, `ModeCloudLabel`):
 - **Thẻ trạng thái lớn** đầu trang: "Sẵn sàng. Giữ ⌥ trái để nói", hoặc trạng thái vấn đề (thiếu quyền/đang khởi động engine/lỗi) kèm nút hành động phù hợp ("Cấp quyền…"/"Khởi động lại engine"/"Thử lại lần cuối"); từ U2 có biểu tượng + nền nhấn nhẹ THEO TRẠNG THÁI (cam thương hiệu khi sẵn sàng, cam cảnh báo khi thiếu quyền, đỏ khi lỗi); **cảnh báo xung đột phím** riêng nếu phát hiện ứng dụng đọc chính tả khác đang chạy (danh sách mặc định trong `VFlowCore.ConflictConfig`, đầu tiên là `com.sonpiaz.haynoi`/Haynoi); thẻ lỗi gần nhất có thể đóng.
@@ -276,3 +280,65 @@ codesign -d --entitlements - client/build/VFlow.app   # (vflow không khai entit
 - Chuyển ứng dụng trong lúc “Đang dịch” ⇒ chữ dán vào ứng dụng đang focus lúc có kết quả (bundle id gửi engine là ứng dụng lúc bắt đầu ghi).
 - **Command Mode**: `kAXSelectedTextAttribute` không phải app nào cũng hỗ trợ (đa số terminal, một số editor tuỳ biến) ⇒ tự rơi về ⌘C tổng hợp, mất thêm tới ~250 ms; app hoàn toàn không hỗ trợ cả hai (không đáp ứng ⌘C) ⇒ coi là không có đoạn chọn (`draft`, soạn mới) thay vì lỗi. ⌘C dùng mã phím ảo 8 (vị trí phím C trên ANSI) — bố cục khác ANSI có thể không ra ⌘C đúng.
 - **Đúp ⌥ (ghi khoá)**: nếu bấm ⌥ quá chậm giữa hai lần chạm (> 350 ms) thì KHÔNG tính là đúp — mỗi lần chạm coi như độc lập (bị bỏ qua); phải chạm lại từ đầu.
+
+## V2 — Thống kê, Cài đặt mở rộng, Xem chữ chạy trực tiếp, Gợi ý từ điển
+
+Đợt này phủ các tính năng engine mới thêm ở `contract/engine-api.md` (thống kê, xuất/nhập, chẩn
+đoán, `app_rules`, dấu câu bằng giọng/nói nhỏ/giọng điệu, gợi ý từ điển, xem chữ trực tiếp,
+`post.degraded`). `VFlowCore/EngineAPIv2.swift` + `LivePreview.swift` + `StatsPresentation.swift`
+giữ TOÀN BỘ kiểu/logic thuần mới (có test); lớp AppKit chỉ hiển thị.
+
+**Tab "Thống kê"** (`StatsView.swift`, thứ 2 trong thanh bên, ⌘2): lời chào lớn theo tổng số từ
+toàn thời gian (`VFlowCore.StatsGreeting`, 5 ngưỡng: 0/1–99/100–999/1.000–9.999/≥10.000); 4 thẻ
+(Từ đã nói, WPM trung bình — "—" kèm gợi ý khi chưa đủ 60 giây audio chứ KHÔNG BAO GIỜ số 0 giả,
+Chuỗi ngày, Chuỗi dài nhất); lưới "Hoạt động N tuần" 7×N (tuần bắt đầu Thứ Hai, cột phải nhất là
+tuần hiện tại, 5 mức cường độ theo phân vị — `VFlowCore.ActivityHeatmap`/`ActivityIntensity`, có
+test biên tháng/năm/tuần đầu thiếu ngày/ngày tương lai/mọi ngày bằng nhau); "Từ của bạn đi đâu" —
+top 10 ứng dụng, biểu tượng thật qua `NSWorkspace` (`StatsAppIdentity`, bundle id `"unknown"`/không
+tìm thấy ⇒ biểu tượng chung + "Không rõ"). Trạng thái rỗng (`ContentUnavailableView`), tắt
+(`stats_enabled=false` ⇒ thẻ "Thống kê đang tắt" + nút Bật/Mở Cài đặt), và lỗi engine thật (Thử
+lại) — không bao giờ số giả. Làm mới khi mở tab, khi app lấy lại focus
+(`NSApplication.didBecomeActiveNotification`), và sau mỗi dictation thành công (thông báo
+`Notification.Name.vflowStatsMayHaveChanged`, `AppController` tự phát sau khi chèn chữ — MỘT nguồn
+sự kiện chung, không poll). Thẻ "Hôm nay" ở Tổng quan bấm vào mở thẳng tab này.
+
+**Cài đặt mở rộng** (`SettingsViewV2.swift`, 3 mục mới trong `SettingsCategory`):
+- **Giọng nói**: dấu câu bằng giọng (`voice_punctuation`, kèm ví dụ "xuống dòng"/"dấu phẩy" và lưu ý
+  không nhầm lời nói thường), nói nhỏ (`whisper_mode`), xem chữ chạy trực tiếp (`live_preview`), tự
+  dừng khi im lặng (dời từ "Chung" — vẫn `silence_stop_seconds`), giọng điệu (`tone`: chỉ áp dụng
+  Gọn/Thư, vô hiệu hoá kèm lý do khi `cloud_llm` tắt).
+- **Ứng dụng**: trình sửa `app_rules` — hàng icon+tên+bundle id nhỏ+Picker chế độ; thêm bằng
+  `NSOpenPanel` (chọn `.app`, đọc `Bundle(url:).bundleIdentifier`) hoặc từ danh sách ứng dụng đang
+  chạy (`NSWorkspace.runningApplications`); chế độ Gọn/Thư gắn nhãn "gửi chữ qua 9Router" + cảnh báo
+  khi `cloud_llm` tắt (rơi về Làm sạch); kiểm hợp lệ bundle id phía client TRƯỚC khi gửi
+  (`VFlowCore.AppRuleValidation`, cùng regex với `engine/post/settings.js`).
+- **Dữ liệu**: công tắc thống kê + "Xoá thống kê…" (xác nhận, `DELETE /v1/stats`), học từ lần sửa
+  (`learn_from_edits`), Xuất dữ liệu… (`NSSavePanel`, tệp quyền 0600, công tắc gồm lịch sử — mặc
+  định tắt), Nhập dữ liệu…/Nhập và THAY THẾ (`NSOpenPanel`, hiện `applied`/lỗi cụ thể — engine từ
+  chối CẢ GÓI nếu một phần sai, không nhập nửa vời), Sao chép chẩn đoán (clipboard) / Lưu chẩn
+  đoán… (`GET /v1/diagnostics`, không bao giờ chứa khoá/token).
+
+**Xem chữ chạy trực tiếp**: khi `live_preview` bật, model trong máy đã tải, và đang ghi dictation
+(không phải Command Mode), `AppController` gửi `POST /v1/partial` (PCM đã ghi TỚI LÚC ĐÓ, qua
+`AudioRecorder.snapshotPCM()` — không dừng ghi) mỗi ~1 giây qua
+`VFlowCore.LivePreviewCoordinator`/`LivePreviewTick` (TỐI ĐA một yêu cầu đang bay, bỏ qua lượt khi
+bận/429 `busy`, tạm dừng cho lượt ghi hiện tại sau 3 lỗi liên tiếp, huỷ khi dừng/huỷ ghi — có test
+dùng engine giả, gồm một kiểm tra concurrency thật bằng `Task` chồng lấn). HUD (`OverlayPanel.swift`)
+hiện thêm một dòng chữ mờ tối đa 2 dòng, CHỈ PHẦN CUỐI (`.lineLimit(2).truncationMode(.head)` +
+`VFlowCore.LivePreviewDisplay.capToTail` chặn chuỗi quá dài) — KHÔNG BAO GIỜ chèn vào ô đích, kết
+quả cuối vẫn là bản dịch đầy đủ của `/v1/transcribe` sau khi nhả phím.
+
+**Gợi ý từ điển** (`DictionaryView.swift`): mục "Gợi ý từ lần anh sửa" phía trên danh sách (chỉ hiện
+khi có — `GET /v1/dictionary/suggestions`), mỗi gợi ý có từ đúng/cách nói sai/số lần gặp, nút "Thêm
+vào từ điển" (mở sheet Thêm mục có sẵn dữ liệu, không tự lưu thẳng) và "Bỏ qua"
+(`POST .../dismiss`); cập nhật danh sách ngay sau khi thêm/bỏ qua.
+
+**Kết quả suy giảm** (`post.degraded`/`degraded_reason`): HUD hiện thông điệp ngắn đúng nguyên nhân
+(`VFlowCore.DegradedText` — `llm_timeout`→"9Router chậm…", `llm_error`→"9Router lỗi…",
+`guard`→"Bản viết lại bị chặn vì đổi nghĩa…", `cloud_disabled`→"Đám mây đang tắt…"), chữ đã chèn
+KHÔNG đổi; ghi vào lịch sử qua `HistoryEntry.degradedReason` (trường mới, tuỳ chọn).
+
+**Engine (phạm vi hẹp đã duyệt riêng)**: `GET /healthz` nay có `max_audio_seconds`; mặc định
+`live_preview` đổi `false`→`true` (đo thật p95 `/v1/partial` ở 10 s audio = 111 ms, dưới ngưỡng
+500 ms); `GET /v1/stats` nay có `week_start:"monday"` (contract đã khai từ đầu nhưng
+`engine/post/stats.js` không trả — vá đúng, có test; xem `contract/engine-api.md`).

@@ -165,6 +165,7 @@ test('GET /healthz không cần token; model chưa dùng được luôn có reas
   const remote = r.json.models.find((m) => m.id === 'phowhisper-large');
   assert.equal(remote.reason, 'missing_token');
   for (const m of r.json.models) if (!m.loaded) assert.ok(m.reason, `${m.id} thiếu reason`);
+  assert.equal(r.json.max_audio_seconds, 1200);
 });
 
 test('bất biến 3: thiếu token / sai token / sai kiểu ⇒ 401 unauthorized', async () => {

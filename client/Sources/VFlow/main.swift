@@ -38,7 +38,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         buildMainMenu(controller: c)
         if let i = args.firstIndex(of: "--open-tab") {
             guard args.count > i + 1 else {
-                FileHandle.standardError.write(Data("dùng: --open-tab tongquan|lichsu|tudien|snippet|caidat\n".utf8))
+                FileHandle.standardError.write(Data("dùng: --open-tab tongquan|thongke|lichsu|tudien|snippet|caidat\n".utf8))
                 exit(64)
             }
             let flag = args[i + 1]
@@ -49,7 +49,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             } else if let tab = MainTab(flag: flag) {
                 c.openStatusWindow(tab: tab)
             } else {
-                FileHandle.standardError.write(Data("dùng: --open-tab tongquan|lichsu|tudien|snippet|caidat\n".utf8))
+                FileHandle.standardError.write(Data("dùng: --open-tab tongquan|thongke|lichsu|tudien|snippet|caidat\n".utf8))
                 exit(64)
             }
         }
@@ -63,9 +63,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// `--demo-icon [--demo-seconds N]`: cửa sổ RIÊNG hiện biểu tượng thanh menu TEMPLATE
-    /// (`BrandIcon.statusImage`) trên nền tối và nền sáng, đủ 5 trạng thái huy hiệu — để chụp ảnh
-    /// bằng `screencapture -l <windowNumber>` (chứng minh trắng/đen tự động + phân biệt bằng
-    /// HÌNH) thay vì chụp thanh menu thật (có dữ liệu cá nhân của chủ dự án).
+    /// (`BrandIcon.statusImage`) trên nền tối và nền sáng, đủ 5 trạng thái huy hiệu — chỉ chụp CỬA
+    /// SỔ NÀY theo `windowNumber` (chứng minh trắng/đen tự động + phân biệt bằng HÌNH) thay vì chụp
+    /// thanh menu thật (có dữ liệu cá nhân của chủ dự án); KHÔNG BAO GIỜ chụp toàn màn hình.
     private func runIconDemo(args: [String]) {
         let badges: [(String, MenuBarBadge)] = [
             ("khong", .none), ("nghe", .listening), ("lenh", .command), ("dich", .busy), ("loi", .warning),
@@ -107,9 +107,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         win.makeKeyAndOrderFront(nil)
         NSApp.activate()
         iconDemoWindow = win
-        // In toạ độ vùng cửa sổ theo hệ quy chiếu của `screencapture -R` (gốc trên-trái) để script
-        // gọi chụp ĐÚNG khung cửa sổ này, không cần CGWindowListCopyWindowInfo (cần quyền Ghi màn
-        // hình riêng cho tiến trình gọi, không có sẵn trong môi trường kiểm tự động).
+        // In toạ độ vùng cửa sổ theo hệ quy chiếu gốc-trên-trái (x, y, rộng, cao) để công cụ chụp
+        // CHỈ VÙNG CỬA SỔ NÀY (không toàn màn hình) dùng đúng khung, không cần CGWindowListCopyWindowInfo
+        // (cần quyền Ghi màn hình riêng cho tiến trình gọi, không có sẵn trong môi trường kiểm tự động).
         if let screen = win.screen ?? NSScreen.main {
             let f = win.frame
             let x = Int(f.origin.x.rounded())
@@ -218,7 +218,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { NSApp.terminate(nil) }
     }
 
-    /// `--render-offscreen <tongquan|lichsu|tudien|snippet|caidat[:<mục>]|welcome> --out <path.png>
+    /// `--render-offscreen <tongquan|thongke|lichsu|tudien|snippet|caidat[:<mục>]|welcome> --out <path.png>
     /// [--render-wait-ms N]`: dựng app THẬT (engine/dữ liệu thật qua VFLOW_HOME) nhưng KHÔNG BAO GIỜ
     /// hiện cửa sổ lên màn hình (xem `OffscreenRender`, sự cố U2 — chủ dự án có thể đang
     /// họp/trình chiếu bất cứ lúc nào). Chờ `--render-wait-ms` (mặc định 500ms) cho dữ liệu bất đồng
@@ -251,6 +251,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 let parts = target.split(separator: ":", maxSplits: 1)
                 let cat = parts.count > 1 ? (SettingsCategory(rawValue: String(parts[1])) ?? .general) : .general
                 c.openSettingsWindow(tab: cat)
+                // Các mục đọc `GET /v1/settings` qua `.task(id: model.engineReady)` (Đám mây/Giọng
+                // nói/Ứng dụng/Dữ liệu) chưa kịp xong nếu chụp NGAY — cùng lý do/cách xử lý với
+                // Lịch sử/Từ điển/Snippets (xem `StatusWindowController.captureOffscreen`).
+                try? await Task.sleep(for: .milliseconds(500))
                 c.captureSettingsWindowOffscreen(tab: cat, to: outPath)
             } else if target == "tudien:them-loi" {
                 c.openStatusWindow(tab: .dictionary)
@@ -259,7 +263,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 c.openStatusWindow(tab: tab)
                 await c.captureStatusWindowOffscreen(tab: tab, to: outPath)
             } else {
-                FileHandle.standardError.write(Data("dùng: --render-offscreen tongquan|lichsu|tudien|tudien:them-loi|snippet|caidat[:general|cloud|hotkeys|historyPrivacy|advanced]|welcome --out <path.png>\n".utf8))
+                FileHandle.standardError.write(Data("dùng: --render-offscreen tongquan|thongke|lichsu|tudien|tudien:them-loi|snippet|caidat[:general|cloud|hotkeys|historyPrivacy|advanced]|welcome --out <path.png>\n".utf8))
                 exit(64)
             }
             OffscreenRender.assertNoOnScreenWindow()

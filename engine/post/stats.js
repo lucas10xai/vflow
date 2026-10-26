@@ -272,7 +272,7 @@ export function createStatsStore({ path, historyPath, now = () => new Date(), lo
         .slice(0, 10);
 
       return {
-        since, weeks, today: todayKey,
+        since, weeks, week_start: 'monday', today: todayKey,
         total_words, total_count, total_audio_ms, avg_wpm,
         current_streak, best_streak, days, top_apps,
       };

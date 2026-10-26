@@ -1,5 +1,19 @@
 import Foundation
 
+/// HUD ngắn tiếng Việt cho `post.degraded_reason` (contract mục "Chế độ", item 7) — bản dự phòng
+/// cục bộ đã dùng thay cho đám mây đã định; chữ đã chèn KHÔNG đổi, chỉ báo đúng nguyên nhân.
+public enum DegradedText {
+    public static func message(_ reason: String) -> String {
+        switch reason {
+        case "llm_timeout": return "9Router chậm — đã dùng bản làm sạch trong máy"
+        case "llm_error": return "9Router lỗi — đã dùng bản làm sạch trong máy"
+        case "guard": return "Bản viết lại bị chặn vì đổi nghĩa — đã dùng bản làm sạch trong máy"
+        case "cloud_disabled": return "Đám mây đang tắt — dùng Làm sạch"
+        default: return "Đã dùng bản làm sạch trong máy (\(reason))"
+        }
+    }
+}
+
 /// Quyết định sau khi engine trả kết quả: chèn gì, hiện gì. Thuần để test.
 public enum DictationDecision {
     public struct Plan: Equatable, Sendable {
@@ -17,6 +31,9 @@ public enum DictationDecision {
             let trimmed = r.text.trimmingCharacters(in: .whitespacesAndNewlines)
             if r.silence || trimmed.isEmpty {
                 return Plan(insert: nil, overlay: .notice(OverlayText.heardNothing), clearRetry: true)
+            }
+            if r.degraded, let reason = r.degradedReason {
+                return Plan(insert: r.text, overlay: .notice(DegradedText.message(reason)), clearRetry: true)
             }
             if let code = r.rewriteError {
                 // Hợp đồng: text vẫn dùng được (chưa viết lại) ⇒ vẫn dán, nhưng báo rõ.

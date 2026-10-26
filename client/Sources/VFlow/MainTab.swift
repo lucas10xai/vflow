@@ -5,13 +5,14 @@ import Foundation
 /// `caidat` vẫn được chấp nhận ở `main.swift` nhưng mở cửa sổ Cài đặt thay vì chọn mục thanh bên
 /// (dùng để chụp ảnh từng mục).
 enum MainTab: String, CaseIterable, Identifiable {
-    case overview, history, dictionary, snippets
+    case overview, stats, history, dictionary, snippets
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .overview: "Tổng quan"
+        case .stats: "Thống kê"
         case .history: "Lịch sử"
         case .dictionary: "Từ điển"
         case .snippets: "Snippets"
@@ -21,13 +22,14 @@ enum MainTab: String, CaseIterable, Identifiable {
     var symbol: String {
         switch self {
         case .overview: "gauge.with.dots.needle.50percent"
+        case .stats: "chart.bar.xaxis"
         case .history: "clock.arrow.circlepath"
         case .dictionary: "book.closed"
         case .snippets: "text.badge.plus"
         }
     }
 
-    /// Nhóm thanh bên: "Sử dụng" (Tổng quan, Lịch sử) và "Cá nhân hoá" (Từ điển, Snippets).
+    /// Nhóm thanh bên: "Sử dụng" (Tổng quan, Thống kê, Lịch sử) và "Cá nhân hoá" (Từ điển, Snippets).
     enum Group: String, CaseIterable, Identifiable {
         case usage = "Sử dụng"
         case personalization = "Cá nhân hoá"
@@ -36,24 +38,26 @@ enum MainTab: String, CaseIterable, Identifiable {
 
     var group: Group {
         switch self {
-        case .overview, .history: .usage
+        case .overview, .stats, .history: .usage
         case .dictionary, .snippets: .personalization
         }
     }
 
-    /// Phím tắt chuyển mục (⌘1…⌘4, theo thứ tự `allCases`).
+    /// Phím tắt chuyển mục (⌘1…⌘5, theo thứ tự `allCases`).
     var keyboardShortcutDigit: Character {
         switch self {
         case .overview: "1"
-        case .history: "2"
-        case .dictionary: "3"
-        case .snippets: "4"
+        case .stats: "2"
+        case .history: "3"
+        case .dictionary: "4"
+        case .snippets: "5"
         }
     }
 
     init?(flag: String) {
         switch flag {
         case "tongquan": self = .overview
+        case "thongke": self = .stats
         case "lichsu": self = .history
         case "tudien": self = .dictionary
         case "snippet": self = .snippets

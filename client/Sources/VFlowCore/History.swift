@@ -15,9 +15,12 @@ public struct HistoryEntry: Equatable, Sendable, Identifiable {
     public var text: String
     public var audioMs: Int?
     public var totalMs: Int?
+    /// `post.degraded_reason` lúc ghi (nếu có) — xem `DegradedText`; `nil` = không suy giảm.
+    public var degradedReason: String?
 
     public init(id: String = HistoryEntry.newId(), at: Date, appBundleId: String? = nil, mode: String,
-                model: String, textRaw: String, text: String, audioMs: Int? = nil, totalMs: Int? = nil) {
+                model: String, textRaw: String, text: String, audioMs: Int? = nil, totalMs: Int? = nil,
+                degradedReason: String? = nil) {
         self.id = id
         self.at = at
         self.appBundleId = appBundleId
@@ -27,6 +30,7 @@ public struct HistoryEntry: Equatable, Sendable, Identifiable {
         self.text = text
         self.audioMs = audioMs
         self.totalMs = totalMs
+        self.degradedReason = degradedReason
     }
 
     public static func newId() -> String { "h_" + UUID().uuidString.lowercased() }
@@ -187,6 +191,7 @@ public final class HistoryStore: @unchecked Sendable {
         if let a = e.appBundleId { obj["app"] = a }
         if let a = e.audioMs { obj["audio_ms"] = a }
         if let t = e.totalMs { obj["total_ms"] = t }
+        if let d = e.degradedReason { obj["degraded_reason"] = d }
         guard let data = try? JSONSerialization.data(withJSONObject: obj) else { return "{}" }
         return String(decoding: data, as: UTF8.self)
     }
@@ -204,7 +209,8 @@ public final class HistoryStore: @unchecked Sendable {
               let text = obj["text"] as? String
         else { return nil }
         return HistoryEntry(id: id, at: at, appBundleId: obj["app"] as? String, mode: mode, model: model,
-                            textRaw: textRaw, text: text, audioMs: obj["audio_ms"] as? Int, totalMs: obj["total_ms"] as? Int)
+                            textRaw: textRaw, text: text, audioMs: obj["audio_ms"] as? Int, totalMs: obj["total_ms"] as? Int,
+                            degradedReason: obj["degraded_reason"] as? String)
     }
 }
 
