@@ -1,0 +1,13 @@
+{
+  "name": "vflow",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Đọc chính tả giọng nói tiếng Việt chạy trong máy",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test \"{engine,eval,scripts}/**/*.test.{js,mjs}\""
+  }
+}
