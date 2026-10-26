@@ -38,13 +38,13 @@ final class SettingsWindowController: NSWindowController {
         if let window { WindowRectDebug.printIfRequested(window, label: "settings-\(viewModel.selectedTab.rawValue)") }
     }
 
-    /// `--render-offscreen`: chụp nội dung mà KHÔNG lên màn hình — xem `OffscreenRender`. Dùng
-    /// `SettingsOffscreenPreview` (thanh tab tự vẽ + KHÔNG `Form`) thay `SettingsRootView` thật —
-    /// đã đo: `TabView`/`Form` không chụp được qua `ImageRenderer` khi chưa từng lên màn hình.
+    /// `--render-offscreen`: chụp cửa sổ Cài đặt THẬT (`window`/`SettingsRootView`, đúng `TabView`/
+    /// `Form` sản phẩm) bằng `OffscreenRender.captureRealWindow` — xem `StatusWindow.swift` (U3) để
+    /// biết vì sao `cacheDisplay` đúng ở đây, khác kết luận cũ của `ImageRenderer`.
     func captureOffscreen(tab: SettingsCategory, to path: String) {
         viewModel.selectedTab = tab
-        let preview = SettingsOffscreenPreview(selected: tab, model: viewModel.model, controller: viewModel.controller)
-        OffscreenRender.capture(preview, size: CGSize(width: 560, height: 420), fixedHeight: false, colorScheme: OffscreenRender.colorScheme, to: path)
+        guard let window else { return }
+        OffscreenRender.captureRealWindow(window, colorScheme: OffscreenRender.colorScheme, to: path)
     }
 }
 

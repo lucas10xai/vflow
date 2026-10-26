@@ -238,7 +238,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.prohibited)
         let c = AppController()
         controller = c
-        c.start()
+        // Dựng THẲNG đúng mục cần chụp (không phải Tổng quan rồi mới chuyển) — xem
+        // `AppController.start(initialTab:)` để biết lý do (List không hiện hàng sau khi chuyển mục).
+        let initialTab: MainTab = (target == "tudien:them-loi") ? .dictionary : (MainTab(flag: target) ?? .overview)
+        c.start(initialTab: initialTab)
 
         DispatchQueue.main.asyncAfter(deadline: .now() + waitMs / 1000) { Task { @MainActor in
             if target == "welcome" {
@@ -249,11 +252,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 let cat = parts.count > 1 ? (SettingsCategory(rawValue: String(parts[1])) ?? .general) : .general
                 c.openSettingsWindow(tab: cat)
                 c.captureSettingsWindowOffscreen(tab: cat, to: outPath)
+            } else if target == "tudien:them-loi" {
+                c.openStatusWindow(tab: .dictionary)
+                c.captureDictionaryAddInvalidOffscreen(to: outPath)
             } else if let tab = MainTab(flag: target) {
                 c.openStatusWindow(tab: tab)
                 await c.captureStatusWindowOffscreen(tab: tab, to: outPath)
             } else {
-                FileHandle.standardError.write(Data("dùng: --render-offscreen tongquan|lichsu|tudien|snippet|caidat[:general|cloud|historyPrivacy|advanced]|welcome --out <path.png>\n".utf8))
+                FileHandle.standardError.write(Data("dùng: --render-offscreen tongquan|lichsu|tudien|tudien:them-loi|snippet|caidat[:general|cloud|historyPrivacy|advanced]|welcome --out <path.png>\n".utf8))
                 exit(64)
             }
             OffscreenRender.assertNoOnScreenWindow()

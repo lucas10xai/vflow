@@ -16,19 +16,30 @@ final class WindowFramePersistence: NSObject {
         self.key = "frame.\(name)"
         self.defaults = VFlowDefaults.resolve(environment: environment)
         super.init()
-        if environment["VFLOW_HOME"]?.isEmpty == false {
-            if let saved = defaults.string(forKey: key) {
-                window.setFrame(from: saved)
-            } else {
-                window.center()
-            }
+        let isolated = environment["VFLOW_HOME"]?.isEmpty == false
+        // CẢ HAI nhánh đọc chuỗi mô tả khung đã lưu rồi tự áp dụng qua `setFrame(_:display:)` (thay
+        // vì để `setFrameUsingName` áp thẳng) — để CHUẨN HOÁ (`WindowFrameValidation.normalize`)
+        // trước: khung lưu từ lần trước có thể không còn hợp lệ nếu màn hình đã tháo/đổi độ phân
+        // giải giữa hai lần mở (U3) — xem `WindowFrameValidationTests`.
+        let savedDescriptor = isolated ? defaults.string(forKey: key)
+                                       : UserDefaults.standard.string(forKey: "NSWindow Frame \(name)")
+        if let savedDescriptor, let saved = WindowFrameValidation.parseLeadingRect(savedDescriptor) {
+            let screens = NSScreen.screens.map(\.visibleFrame)
+            let normalized = WindowFrameValidation.normalize(frame: saved, minSize: window.minSize,
+                                                              screens: screens, mainScreen: NSScreen.main?.visibleFrame)
+            window.setFrame(normalized, display: false)
+        } else {
+            window.center()
+        }
+        if isolated {
             NotificationCenter.default.addObserver(self, selector: #selector(saveFrame),
                                                     name: NSWindow.didMoveNotification, object: window)
             NotificationCenter.default.addObserver(self, selector: #selector(saveFrame),
                                                     name: NSWindow.didResizeNotification, object: window)
         } else {
+            // Giữ `setFrameAutosaveName` để AppKit tự LƯU khung mỗi khi kéo/đổi cỡ sau này (hành vi
+            // cũ) — chỉ đường KHÔI PHỤC ở trên đổi, để chuẩn hoá được.
             window.setFrameAutosaveName(name)
-            if window.setFrameUsingName(name) == false { window.center() }
         }
     }
 

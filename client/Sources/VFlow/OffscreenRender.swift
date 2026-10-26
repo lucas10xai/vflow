@@ -12,7 +12,12 @@ import SwiftUI
 /// scroll/animation/layout, trong khi `ImageRenderer` chụp đúng ngay).
 @MainActor
 enum OffscreenRender {
-    static let enabled = CommandLine.arguments.contains("--render-offscreen")
+    /// `var` (không `let`) để test hồi quy bố cục & công cụ `--snapshot` (U3) BẬT ĐƯỢC cờ này
+    /// TRỰC TIẾP (không qua `CommandLine.arguments`, không có trong tiến trình `swift test`) — các
+    /// `*WindowController.show()` đọc giá trị này ở MỌI lần gọi nên đặt `true` trước khi tạo
+    /// `AppController` là đủ để chặn TUYỆT ĐỐI `makeKeyAndOrderFront`/`NSApp.activate()`, kể cả các
+    /// đường mở cửa sổ tự động (`showWindowOnLaunch`, Chào mừng tự mở lần đầu) bên trong `start()`.
+    nonisolated(unsafe) static var enabled = CommandLine.arguments.contains("--render-offscreen")
 
     /// Suy ra sáng/tối từ cờ `--appearance light|dark` (giống `NSApp.appearance`, nhưng
     /// `ImageRenderer` cần truyền tường minh — xem `capture`).
@@ -61,6 +66,41 @@ enum OffscreenRender {
         }
         guard let tiff = nsImage.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff),
               let data = rep.representation(using: .png, properties: [:]) else {
+            FileHandle.standardError.write(Data("VFLOW_OFFSCREEN: không mã hoá được PNG (\(path))\n".utf8))
+            return
+        }
+        do {
+            try data.write(to: URL(fileURLWithPath: path))
+            print("VFLOW_OFFSCREEN_SAVED \(path)")
+        } catch {
+            FileHandle.standardError.write(Data("VFLOW_OFFSCREEN: ghi tệp lỗi (\(path)): \(error)\n".utf8))
+        }
+    }
+
+    /// Chụp NỘI DUNG THẬT của một `NSWindow` sản phẩm (không qua view giả/preview) bằng
+    /// `cacheDisplay` — kỹ thuật duy nhất tái hiện ĐÚNG `NavigationSplitView`/`List`/`ScrollView`/
+    /// `TabView` khi cửa sổ chưa từng lên màn hình (đã đo thật ở U3: `ImageRenderer` cho những
+    /// container đó ra ảnh placeholder/kích thước sai; `cacheDisplay` + `layoutSubtreeIfNeeded` cho
+    /// đúng, với điều kiện cây view ĐÃ nhận đúng khung cuối cùng trước khi gọi — xem
+    /// `VFlowTests/LayoutRegressionTests.swift`). Cửa sổ KHÔNG BAO GIỜ được `orderFront`/
+    /// `makeKeyAndOrderFront`/`NSApp.activate()` — chỉ `alphaValue = 0` + đặt toạ độ rất xa mọi màn
+    /// hình thật, xác nhận lại bằng `assertNoOnScreenWindow()` sau khi chụp.
+    static func captureRealWindow(_ window: NSWindow, colorScheme: ColorScheme?, to path: String) {
+        let appearance = colorScheme == .dark ? NSAppearance(named: .darkAqua) : NSAppearance(named: .aqua)
+        window.appearance = appearance
+        window.alphaValue = 0
+        window.setFrameOrigin(NSPoint(x: -50000, y: -50000))
+        guard let view = window.contentView else {
+            FileHandle.standardError.write(Data("VFLOW_OFFSCREEN: window.contentView nil (\(path))\n".utf8))
+            return
+        }
+        view.layoutSubtreeIfNeeded()
+        guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else {
+            FileHandle.standardError.write(Data("VFLOW_OFFSCREEN: bitmapImageRepForCachingDisplay trả nil (\(path))\n".utf8))
+            return
+        }
+        view.cacheDisplay(in: view.bounds, to: rep)
+        guard let data = rep.representation(using: .png, properties: [:]) else {
             FileHandle.standardError.write(Data("VFLOW_OFFSCREEN: không mã hoá được PNG (\(path))\n".utf8))
             return
         }

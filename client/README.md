@@ -24,12 +24,65 @@ Yêu cầu: macOS 14+, Xcode/Swift 6. Cờ dòng lệnh của nhị phân `VFlow
 - `--appearance light|dark`: ép giao diện sáng/tối (chỉ để chụp ảnh nhất quán, không đổi cài đặt hệ thống).
 - `--no-welcome`: không tự hiện tờ Chào mừng lần đầu dù chưa đủ quyền/chưa từng xem (dùng khi chụp ảnh các cửa sổ khác để tờ Chào mừng không che mất).
 - `--demo-icon [--demo-seconds N]`: cửa sổ RIÊNG hiện biểu tượng thanh menu (template) trên nền tối/sáng ở cả 5 trạng thái huy hiệu, không chạy engine/phím nóng — dùng để chụp ảnh chứng minh trắng/đen tự động mà không chụp thanh menu thật.
+- `--render-offscreen <mục> --out <path.png> [--render-wait-ms N]`: chụp một mục ra PNG mà KHÔNG BAO GIỜ hiện cửa sổ lên màn hình — xem mục "Công cụ chụp ảnh ngoài màn hình" bên dưới (U3).
 
 Biến môi trường `VFLOW_HOME` (mặc định `~/.vflow`, giống engine) đổi nơi client đọc `client.json`/`token` và lưu `history.jsonl` — dùng để thử nghiệm mà không đụng dữ liệu thật, ví dụ: `VFLOW_HOME=/tmp/vflow-test VFlow.app/Contents/MacOS/VFlow`. **Từ U2**: khi có `VFLOW_HOME`, các công tắc UI (chế độ, Lưu lịch sử, Hiện cửa sổ khi mở app, Hiện biểu tượng thanh menu, đã xem Chào mừng…, vị trí/kích thước cửa sổ) cũng được CÔ LẬP — dùng một `UserDefaults(suiteName:)` suy ra từ `VFLOW_HOME` bằng băm ổn định FNV-1a (`VFlowCore.VFlowDefaults`, một lớp truy cập duy nhất thay mọi chỗ gọi `UserDefaults.standard`/`setFrameAutosaveName` trực tiếp — xem `VFlow.WindowFramePersistence`), nên hai `VFLOW_HOME` khác nhau và bản `/Applications/vflow.app` thật KHÔNG còn thấy khoá của nhau. KHÔNG có `VFLOW_HOME` ⇒ `.standard` như cũ (không di cư dữ liệu, app thật không đổi hành vi).
 
 Hai biến môi trường CHỈ dùng để chụp ảnh tự động (không có tác dụng gì khi không đặt, không bao giờ dùng khi chạy thật):
 - `VFLOW_DEMO_PERMISSIONS=granted|missing`: giả lập quyền macOS đủ/thiếu mà không đụng TCC thật.
 - `VFLOW_PRINT_WINDOW_RECT=1`: ghim cửa sổ chính/Cài đặt/Chào mừng vào vị trí cố định và in toạ độ ra stdout (`VFLOW_WINDOW_RECT <nhãn> x y w h`, hệ quy chiếu `screencapture -R`) để chụp đúng khung cửa sổ, không cần quyền Ghi màn hình cho `CGWindowListCopyWindowInfo`.
+
+## Công cụ chụp ảnh ngoài màn hình (`--render-offscreen`, U3)
+
+**Nguyên tắc cứng, không bao giờ phá vỡ:** công cụ này KHÔNG BAO GIỜ được gọi `makeKeyAndOrderFront`/
+`orderFront`/`NSApp.activate()` trên bất kỳ cửa sổ nào — kể cả tạm thời. Sự cố đã từng xảy ra (U2):
+một worker lỡ chụp toàn màn hình lúc chủ dự án đang họp/trình chiếu. Từ đó: **mọi** ảnh chụp để kiểm
+tra/so sánh bố cục phải render cây view THẬT (không viết view giả) vào một `NSWindow` **không bao giờ
+hiện**, dùng `NSView.cacheDisplay(in:to:)` (không phải `screencapture`, không phải chụp màn hình thật
+dưới bất kỳ hình thức nào). Mọi script/đoạn mã mới thêm vào phải grep sạch — không có `screencapture`
+hay "set frontmost"/`activate()` nào.
+
+### Cách hoạt động
+`VFlow.app/Contents/MacOS/VFlow --render-offscreen <mục> --out <path.png> [--appearance light|dark] [--render-wait-ms N] [--no-prompt] [--no-welcome]`:
+1. Đặt `NSApp.setActivationPolicy(.prohibited)` + tắt hộp xin quyền hệ thống (`PermissionKind.promptsEnabled = false`) — tiến trình không có Dock icon, không bật hộp thoại nào.
+2. Dựng app THẬT qua `AppController.start(initialTab:)` (engine/dữ liệu thật qua `VFLOW_HOME`) — KHÔNG qua view/preview giả.
+3. Gọi `StatusWindowController`/`SettingsWindowController`/`WelcomeWindowController`.`captureOffscreen(...)` → `OffscreenRender.captureRealWindow`: đặt `window.alphaValue = 0` + toạ độ rất xa mọi màn hình thật (`x = -50000`), gọi `layoutSubtreeIfNeeded()` rồi `view.bitmapImageRepForCachingDisplay` + `cacheDisplay(in:to:)` — **không bao giờ** `orderFront`/`orderBack` (đã đo: `orderBack` có thể khiến AppKit tự dịch cửa sổ vào lại vùng màn hình thật khi lần đầu gắn vào screen — KHÔNG DÙNG).
+4. In `VFLOW_OFFSCREEN_CHECK` (đếm cửa sổ on-screen thật qua `CGWindowListCopyWindowInfo` — PHẢI luôn là 0) trước khi thoát.
+
+`<mục>`: `tongquan`, `lichsu`, `tudien`, `tudien:them-loi` (sheet Thêm mục với lỗi hợp lệ sẵn — GIỚI
+HẠN: ảnh chỉ có cửa sổ chính, sheet không hiện trong ảnh — xem ghi chú ở
+`StatusWindowController.captureDictionaryAddInvalidOffscreen`), `snippet`,
+`caidat[:general|cloud|historyPrivacy|advanced]`, `welcome`. HUD (thanh trạng thái 5 trạng thái) dùng
+`--demo-overlay <ghi|khoa|dich|xong|loi> --render-offscreen --out <path>` (không cần `<mục>`).
+
+### `client/scripts/snapshot.sh <thư mục đầu ra>`
+Công cụ LÂU DÀI chụp TOÀN BỘ màn hình (sáng + tối): dựng VFlow, tạo hai `VFLOW_HOME` cô lập tạm thời
+(`full`: dữ liệu mẫu — lịch sử nhiều ngày, từ điển, snippets, engine THẬT chạy cục bộ chỉ phục vụ
+`/healthz`+`/v1/dictionary`+`/v1/snippets`, không cần model STT tải sẵn; `empty`: trống, quyền giả lập
+thiếu), gọi `--render-offscreen` cho từng cặp (mục, sáng/tối), rồi dọn sạch — không đụng `~/.vflow`
+thật, không để lại tiến trình/thư mục tạm. Dữ liệu mẫu trong `snapshot-seed.mjs` không chứa tên
+riêng/khoá thật.
+
+```sh
+client/scripts/snapshot.sh /tmp/vflow-snapshots   # ⇒ ~34 ảnh PNG, xem /tmp/vflow-snapshots/snapshot.log
+```
+
+### Giới hạn đã biết (nói thẳng, không che giấu)
+- **Hàng trong `List`** (Lịch sử/Từ điển/Snippets) không luôn vẽ ra trong ảnh dù dữ liệu tải đúng
+  (tiêu đề "Lịch sử (N)"/"Từ điển (N)" hiện đúng số) — đã điều tra kỹ (xem ghi chú tại
+  `StatusWindowController.captureOffscreen`): không phải lỗi thời gian (đã thử đợi tới 5 giây), không
+  phải do chuyển mục (đã thử dựng thẳng vào mục đó), các trường hợp `List` đơn giản/có `Section`/lồng
+  trong `ScrollView` đều chụp đúng khi thử tách riêng — chỉ sai trong cây cửa sổ ĐẦY ĐỦ. Chưa tìm ra
+  biến cụ thể trong thời gian cho phép. KHÔNG liên quan tới lỗi bố cục U3 đã sửa (thanh bên/Tổng quan
+  đã đúng, có test hồi quy).
+- **`.sheet`** (ví dụ Thêm mục từ điển) là một `NSWindow` CON riêng (`NSWindow.attachedSheet`) —
+  `beginSheet` chỉ gắn được khi cửa sổ cha `isVisible`; đã thử `orderBack` để bật `isVisible` mà
+  không đưa cửa sổ lên trước, nhưng đo được AppKit có thể tự dịch cửa sổ cha vào lại vùng màn hình
+  thật — KHÔNG AN TOÀN nên đã bỏ. Ảnh `tudien:them-loi` vì vậy chỉ có cửa sổ chính, không có sheet.
+- Thanh bên dùng vật liệu hệ thống (`NavigationSplitView` sidebar) — đã kiểm bằng ảnh chụp thật qua
+  `--render-offscreen` (không qua `swift test` CLI thuần) ra đúng màu/vật liệu sáng-tối; nếu tự dựng
+  cửa sổ thử trong một tiến trình CLI khác (không qua đường `AppController.start()` đầy đủ) có thể
+  không thấy đúng vật liệu — luôn dùng đường `--render-offscreen`/`snapshot.sh` thật, không tự chế.
 
 ## Đóng gói tự đủ & cài đặt (M4b)
 

@@ -40,9 +40,10 @@ final class WelcomeWindowController: NSWindowController {
         if let window { WindowRectDebug.printIfRequested(window, label: "welcome") }
     }
 
-    /// `--render-offscreen`: chụp nội dung mà KHÔNG lên màn hình — xem `OffscreenRender`.
+    /// `--render-offscreen`: chụp cửa sổ Chào mừng THẬT — xem `OffscreenRender.captureRealWindow`.
     func captureOffscreen(to path: String) {
-        OffscreenRender.capture(WelcomeView(viewModel: viewModel), size: CGSize(width: 520, height: 480), colorScheme: OffscreenRender.colorScheme, to: path)
+        guard let window else { return }
+        OffscreenRender.captureRealWindow(window, colorScheme: OffscreenRender.colorScheme, to: path)
     }
 
     private func startPolling() {

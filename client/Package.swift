@@ -13,6 +13,7 @@ let package = Package(
         // Lớp AppKit/SwiftUI mỏng: phím nóng, micro, dán, thanh trạng thái, menu.
         .executableTarget(name: "VFlow", dependencies: ["VFlowCore"]),
         .testTarget(name: "VFlowCoreTests", dependencies: ["VFlowCore"]),
+        .testTarget(name: "VFlowTests", dependencies: ["VFlow", "VFlowCore"]),
     ],
     swiftLanguageModes: [.v6]
 )

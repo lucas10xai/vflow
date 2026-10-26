@@ -41,6 +41,19 @@ struct DictionaryView: View {
     @State private var saveError: String?
     @State private var confirmDelete: DictionaryEntry?
 
+    /// CHỈ dùng cho `--snapshot` (U3, mục "sheet Thêm mục có lỗi hợp lệ") — mở sẵn sheet Thêm mục
+    /// với trạng thái cho trước (vd. có thuật ngữ nhưng CHƯA có cách nói ⇒ lỗi hợp lệ thật, không
+    /// phải ảnh chụp giả). `nil` ở mọi nơi khác (hành vi cũ không đổi).
+    init(model: StatusModel, controller: AppController, debugOpenEditor: (term: String, spokenText: String)? = nil) {
+        self.model = model
+        self.controller = controller
+        if let d = debugOpenEditor {
+            _showEditor = State(initialValue: true)
+            _editorTerm = State(initialValue: d.term)
+            _editorSpokenText = State(initialValue: d.spokenText)
+        }
+    }
+
     private var visibleEntries: [DictionaryEntry] {
         let filtered = query.isEmpty ? entries : entries.filter {
             $0.term.localizedCaseInsensitiveContains(query) || $0.spoken.contains { $0.localizedCaseInsensitiveContains(query) }

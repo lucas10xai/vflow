@@ -100,10 +100,16 @@ final class AppController: NSObject {
 
     static var now: TimeInterval { ProcessInfo.processInfo.systemUptime }
 
-    func start() {
+    /// `initialTab`: mục thanh bên dựng NGAY TỪ ĐẦU (mặc định Tổng quan) — CHỈ `--render-offscreen`
+    /// (U3) cần đổi, để dựng thẳng đúng mục cần chụp thay vì Tổng quan rồi mới chuyển. Đã THỬ coi
+    /// đây là nguyên nhân khiến hàng trong `List` (Lịch sử/Từ điển/Snippets) không hiện khi chụp
+    /// ngoài màn hình — ĐO LẠI vẫn không hiện ngay cả khi dựng thẳng mục đó (xem ghi chú ở
+    /// `StatusWindowController.captureOffscreen`, giới hạn đã biết, không phải nguyên nhân). Giữ
+    /// tham số này vì vẫn hợp lý về mặt thiết kế (không cần chuyển mục thừa khi đã biết trước).
+    func start(initialTab: MainTab = .overview) {
         menu = StatusMenu(controller: self)
         menu.setVisible(showMenuBarIcon)
-        statusWindow = StatusWindowController(controller: self)
+        statusWindow = StatusWindowController(controller: self, initialTab: initialTab)
         settingsWindow = SettingsWindowController(controller: self)
         welcomeWindow = WelcomeWindowController(controller: self)
         recorder.onLevel = { [weak self] l in self?.overlay.setLevel(l) }
@@ -200,6 +206,12 @@ final class AppController: NSObject {
         await statusWindow.captureOffscreen(tab: tab, to: path)
     }
 
+    /// `--render-offscreen tudien:them-loi`: sheet Thêm mục từ điển với lỗi hợp lệ, không hiện.
+    func captureDictionaryAddInvalidOffscreen(to path: String) {
+        refreshUI()
+        statusWindow.captureDictionaryAddInvalidOffscreen(to: path)
+    }
+
     /// `--render-offscreen`: chụp nội dung cửa sổ Cài đặt mà KHÔNG BAO GIỜ hiện lên màn hình.
     func captureSettingsWindowOffscreen(tab: SettingsCategory, to path: String) {
         refreshUI()
@@ -225,6 +237,10 @@ final class AppController: NSObject {
 
     /// Trợ giúp (menu ứng dụng): repo của engine đang dùng, nếu đã biết (để tìm README cạnh đó).
     func repoPathForHelp() -> String? { supervisor?.spec.repo }
+
+    /// CHỈ dùng cho test hồi quy bố cục & công cụ `--snapshot` (U3) — truy cập cửa sổ chính THẬT
+    /// (cùng `StatusWindowController` sản phẩm dùng) mà không qua `show()`/`openStatusWindow()`.
+    var statusWindowForTesting: StatusWindowController { statusWindow }
 
     private func refreshUI() {
         let model = statusModel

@@ -8,6 +8,8 @@ final class StatusWindowViewModel: ObservableObject {
     @Published var model: StatusModel
     @Published var selectedTab: MainTab
     unowned let controller: AppController
+    /// CHỈ cho `--snapshot` (U3) — xem `DictionaryView.init(debugOpenEditor:)`.
+    @Published var debugOpenDictionaryEditor: (term: String, spokenText: String)?
 
     init(controller: AppController, selectedTab: MainTab) {
         self.controller = controller
@@ -24,7 +26,10 @@ final class StatusWindowViewModel: ObservableObject {
 final class StatusWindowController: NSObject, NSWindowDelegate {
     private unowned let controller: AppController
     private let viewModel: StatusWindowViewModel
-    private let window: NSWindow
+    /// `internal` (không `private`) để test hồi quy bố cục & công cụ `--snapshot` (U3) truy cập
+    /// được cửa sổ THẬT — KHÔNG được gọi `makeKeyAndOrderFront`/`orderFront`/`NSApp.activate()` trên
+    /// giá trị này từ nơi khác (xem `OffscreenRender`).
+    let window: NSWindow
     private var permissionTimer: Timer?
     private var framePersistence: WindowFramePersistence?
 
@@ -48,6 +53,24 @@ final class StatusWindowController: NSObject, NSWindowDelegate {
     /// Luôn cùng dữ liệu với menu (xem `AppController.refreshUI`).
     func update(_ model: StatusModel) { viewModel.model = model }
 
+    /// Chọn mục thanh bên KHÔNG hiện cửa sổ — dùng cho test hồi quy bố cục & `--snapshot` (U3), nơi
+    /// `show(tab:)` không phù hợp vì nó `startPermissionPolling()`/ghi `VFLOW_PRINT_WINDOW_RECT`.
+    func selectTabForTesting(_ tab: MainTab) { viewModel.selectedTab = tab }
+
+    /// `--render-offscreen tudien:them-loi`: mở sẵn sheet Thêm mục từ điển với lỗi hợp lệ (có thuật
+    /// ngữ, CHƯA có cách nói) — xem `DictionaryView.init(debugOpenEditor:)`. GIỚI HẠN ĐÃ BIẾT: `.sheet`
+    /// của SwiftUI là một `NSWindow` CON riêng (`window.attachedSheet`), và `NSWindow.beginSheet` chỉ
+    /// gắn được khi cửa sổ cha `isVisible` — đã thử `orderBack` (bật `isVisible` không đưa lên
+    /// trước) để ép gắn sheet, nhưng đo được AppKit tự dịch cửa sổ cha VÀO LẠI vùng màn hình thật khi
+    /// đó (`CGWindowListCopyWindowInfo` báo on-screen) — KHÔNG AN TOÀN, nên bỏ kỹ thuật đó. Ảnh chụp
+    /// ở đây vì vậy là CỬA SỔ CHÍNH (có lỗi hợp lệ đã bật ở `DictionaryView`, nhưng sheet không hiện
+    /// trong ảnh) — nói thẳng giới hạn này trong báo cáo, không giả vờ đã chụp được sheet.
+    func captureDictionaryAddInvalidOffscreen(to path: String) {
+        viewModel.selectedTab = .dictionary
+        viewModel.debugOpenDictionaryEditor = (term: "deploy", spokenText: "")
+        OffscreenRender.captureRealWindow(window, colorScheme: OffscreenRender.colorScheme, to: path)
+    }
+
     func show(tab: MainTab? = nil) {
         if let tab { viewModel.selectedTab = tab }
         guard !OffscreenRender.enabled else { return }
@@ -56,21 +79,33 @@ final class StatusWindowController: NSObject, NSWindowDelegate {
         WindowRectDebug.printIfRequested(window, label: "main-\(viewModel.selectedTab.rawValue)", forceHeight: 680)
     }
 
-    /// `--render-offscreen`: chụp nội dung mà KHÔNG lên màn hình — xem `OffscreenRender`. Dựng lại
-    /// nội dung TRỰC TIẾP bằng `MainWindowOffscreenPreview` (HStack thanh bên + nội dung, KHÔNG qua
-    /// `NavigationSplitView`/`List`/`ScrollView` thật) — đã đo thật: `ImageRenderer` không chụp đúng
-    /// các container đó khi cửa sổ chưa từng lên màn hình (ra ảnh hỏng/placeholder). Với Từ
-    /// điển/Snippets, tải dữ liệu TRƯỚC (qua `await`, không qua `.task` nội bộ của view — vốn
-    /// không kịp hoàn tất trước khi `ImageRenderer` chụp). KHÔNG gồm thanh tiêu đề/toolbar (chrome
-    /// AppKit, xem `OffscreenRender.capture`).
+    /// `--render-offscreen`: chụp cửa sổ chính THẬT (`window`/`MainWindowView`, đúng
+    /// `NavigationSplitView`/`List`/`ScrollView` sản phẩm — KHÔNG phải bản giả) bằng
+    /// `OffscreenRender.captureRealWindow` (xem đó để biết lý do `cacheDisplay` đúng ở đây, khác kết
+    /// luận cũ của `ImageRenderer`). Với Từ điển/Snippets: dữ liệu đến từ ENGINE THẬT qua
+    /// `.task(id: model.engineReady)` bên trong `DictionaryView`/`SnippetsView` — script `--snapshot`
+    /// phải tự chạy engine thật trỏ vào `VFLOW_HOME` cô lập có hạt giống dữ liệu TRƯỚC khi gọi cờ
+    /// này (xem `client/scripts/snapshot.sh`); nếu engine chưa sẵn sàng, ảnh THÀNH THẬT hiện "Đang
+    /// chờ engine khởi động…" (đúng trạng thái, không phải lỗi).
     func captureOffscreen(tab: MainTab, to path: String) async {
         viewModel.selectedTab = tab
-        var dictionaryEntries: [DictionaryEntry]?
-        var snippetEntries: [SnippetEntry]?
-        if tab == .dictionary, case .success(let e) = await controller.fetchDictionary() { dictionaryEntries = e }
-        if tab == .snippets, case .success(let e) = await controller.fetchSnippets() { snippetEntries = e }
-        let preview = MainWindowOffscreenPreview(viewModel: viewModel, dictionaryEntries: dictionaryEntries, snippetEntries: snippetEntries)
-        OffscreenRender.capture(preview, size: CGSize(width: 960, height: 680), fixedHeight: false, colorScheme: OffscreenRender.colorScheme, to: path)
+        // Lịch sử/Từ điển/Snippets tải dữ liệu qua `.onAppear`/`.task(id:)` SAU khi mục được chọn —
+        // chưa kịp chạy nếu chụp NGAY (khác Tổng quan, đồng bộ). Đợi một nhịp cho kịp (đọc file cục
+        // bộ/gọi engine thật qua loopback) rồi mới chụp — KHÔNG đụng `--render-wait-ms` (đợi TRƯỚC
+        // khi mở cửa sổ, phục vụ việc khác).
+        if tab == .history || tab == .dictionary || tab == .snippets {
+            try? await Task.sleep(for: .milliseconds(500))
+        }
+        // GIỚI HẠN ĐÃ BIẾT (U3): đã đo — dù dữ liệu tải đúng (tiêu đề "Lịch sử (N)"/"Từ điển (N)"
+        // hiện đúng số), các HÀNG bên trong `List` không luôn vẽ ra khi cửa sổ chưa từng lên màn
+        // hình, kể cả đợi tới 5 GIÂY hay dựng cửa sổ THẲNG vào mục đó (không qua chuyển mục) — không
+        // phải lỗi thời gian. Đã thử cô lập nguyên nhân (List đơn giản, List+Section+selection,
+        // List trong ScrollView lồng, chuyển mục rồi mới hiện List) — mọi trường hợp ĐƠN LẺ đều
+        // chụp đúng; chỉ KHÔNG đúng khi là CHÍNH `HistoryView`/`DictionaryView`/`SnippetsView` thật
+        // trong cây cửa sổ đầy đủ (NavigationSplitView + GeometryReader + toolbar `.searchable`...).
+        // Không tìm được biến cụ thể gây khác biệt trong thời gian cho phép — nói thẳng trong báo
+        // cáo thay vì đoán, không phải lỗi hồi quy của U3 (bố cục Tổng quan/thanh bên đã đúng).
+        OffscreenRender.captureRealWindow(window, colorScheme: OffscreenRender.colorScheme, to: path)
     }
 
     /// ID cửa sổ thật trên màn hình, dùng để `screencapture -l <id>` từng tab riêng (không chụp
@@ -106,16 +141,37 @@ struct MainWindowView: View {
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
-            sidebar
+            // `GeometryReader` + `.frame(width:height:)` tường minh: KHÔNG để `NavigationSplitView`
+            // tự suy chiều cao cột (xem phần "Nguyên nhân gốc" ở `detail` bên dưới — thanh bên dùng
+            // chung cơ chế cột của `NavigationSplitView` nên cùng rủi ro).
+            GeometryReader { proxy in
+                sidebar
+                    .frame(width: proxy.size.width, height: proxy.size.height)
+            }
+            .navigationSplitViewColumnWidth(min: 170, ideal: 190, max: 240)
         } detail: {
-            VStack(spacing: 0) {
-                CloseHintBanner()
-                ScrollView {
-                    tabContent
-                        .padding(Theme.Spacing.xl)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+            // NGUYÊN NHÂN GỐC (U3): khi cửa sổ được đặt khung (`setFrame`/`setFrameUsingName` —
+            // xem `WindowFramePersistence`) TRƯỚC KHI từng hiện lên màn hình, `NavigationSplitView`
+            // không luôn truyền đúng chiều cao cột THẬT của cửa sổ xuống cho `ScrollView` bên trong;
+            // `NSScrollView` (lớp AppKit đứng sau `ScrollView`) khi đó tự đo ra MỘT chiều cao "lý
+            // tưởng" cố định không đổi theo kích thước cửa sổ thật — nội dung bị cắt ở ĐẦU (phần
+            // thừa phía trên bị đẩy ra ngoài vùng nhìn thấy) và còn khoảng trống thừa ở CUỐI. Đã đo
+          // bằng cách tái hiện cửa sổ thật ngoài màn hình (xem `VFlowTests/LayoutRegressionTests.swift`)
+            // và kiểm trực tiếp `NSScrollView.frame`: SAI (không đổi dù cửa sổ cao 680 hay 1048pt)
+            // trước khi sửa, ĐÚNG sau khi sửa. `layoutSubtreeIfNeeded`/`window.layoutIfNeeded`/
+            // `displayIfNeeded` KHÔNG tự sửa được — phải ép kích thước tường minh bằng
+            // `GeometryReader` thay vì để `NavigationSplitView` tự suy.
+            GeometryReader { proxy in
+                VStack(spacing: 0) {
+                    CloseHintBanner()
+                    ScrollView {
+                        tabContent
+                            .padding(Theme.Spacing.xl)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .defaultScrollAnchor(.top)
                 }
-                .defaultScrollAnchor(.top)
+                .frame(width: proxy.size.width, height: proxy.size.height)
             }
         }
         .frame(minWidth: 800, minHeight: 560)
@@ -134,7 +190,6 @@ struct MainWindowView: View {
         SidebarContent(selectedTab: viewModel.selectedTab, missingPermissionsCount: model.missingPermissions.count) { tab in
             viewModel.selectedTab = tab
         }
-        .navigationSplitViewColumnWidth(min: 170, ideal: 190, max: 240)
     }
 
     /// ⌘1…⌘4 chuyển mục thanh bên (nút ẩn, chỉ mang phím tắt — `MainTab.keyboardShortcutDigit`).
@@ -152,14 +207,13 @@ struct MainWindowView: View {
         switch viewModel.selectedTab {
         case .overview: OverviewView(model: model, controller: controller)
         case .history: HistoryView(controller: controller)
-        case .dictionary: DictionaryView(model: model, controller: controller)
+        case .dictionary: DictionaryView(model: model, controller: controller, debugOpenEditor: viewModel.debugOpenDictionaryEditor)
         case .snippets: SnippetsView(model: model, controller: controller)
         }
     }
 }
 
-/// Nội dung thanh bên (logo+tên, 2 nhóm mục) — tách khỏi `MainWindowView` để dùng lại được cho
-/// `MainWindowOffscreenPreview` (chụp ảnh offscreen, không qua `NavigationSplitView` thật).
+/// Nội dung thanh bên (logo+tên, 2 nhóm mục) — tách khỏi `MainWindowView` để đọc/kiểm tách bạch.
 private struct SidebarContent: View {
     let selectedTab: MainTab
     let missingPermissionsCount: Int
@@ -203,46 +257,6 @@ private struct SidebarContent: View {
     private func badge(_ tab: MainTab) -> Int {
         guard tab == .overview else { return 0 }
         return missingPermissionsCount
-    }
-}
-
-/// `--render-offscreen`: tương tự `MainWindowOffscreenPreview` nhưng dùng cho Lịch sử/Từ
-/// điển/Snippets (những mục có `List`/`.task` bất đồng bộ — xem `ListOffscreenPreviews.swift`).
-/// `dictionaryEntries`/`snippetEntries`: đã tải TRƯỚC qua `await` (xem
-/// `StatusWindowController.captureOffscreen`), `nil` khi không áp dụng cho `tab` hiện tại.
-private struct MainWindowOffscreenPreview: View {
-    @ObservedObject var viewModel: StatusWindowViewModel
-    var dictionaryEntries: [DictionaryEntry]?
-    var snippetEntries: [SnippetEntry]?
-
-    var body: some View {
-        HStack(spacing: 0) {
-            SidebarContent(selectedTab: viewModel.selectedTab, missingPermissionsCount: viewModel.model.missingPermissions.count) { _ in }
-                .frame(width: 190)
-                .background(.ultraThinMaterial)
-            Divider()
-            // KHÔNG bọc `ScrollView` ở đây (khác cửa sổ thật) — đã đo: `ImageRenderer` không chụp
-            // được nội dung bên trong `ScrollView`/`List` khi cửa sổ chưa từng lên màn hình (ra ảnh
-            // "cấm" thay vì nội dung thật); để nội dung tự giãn hết chiều cao thật thay vì cuộn.
-            VStack(alignment: .leading, spacing: 0) {
-                CloseHintBanner()
-                offscreenTabContent
-                    .padding(Theme.Spacing.xl)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .background(Color(nsColor: .windowBackgroundColor))
-        }
-        .tint(Theme.accent)
-        .defaultAppStorage(viewModel.controller.appStorageDefaults)
-    }
-
-    @ViewBuilder private var offscreenTabContent: some View {
-        switch viewModel.selectedTab {
-        case .overview: OverviewView(model: viewModel.model, controller: viewModel.controller)
-        case .history: HistoryOffscreenPreview(controller: viewModel.controller, query: "")
-        case .dictionary: DictionaryOffscreenPreview(entries: dictionaryEntries ?? [])
-        case .snippets: SnippetsOffscreenPreview(entries: snippetEntries ?? [])
-        }
     }
 }
 
