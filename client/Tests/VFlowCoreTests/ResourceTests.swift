@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Testing
 
@@ -68,5 +69,65 @@ private let clientDir: URL = {
             }
             #expect(data.count > 10_000, "\(name) có vẻ bị nén/ghi đè nhỏ bất thường")
         }
+    }
+
+    /// Giải .icns ra ảnh 1024px (icon_512x512@2x) rồi đọc trực tiếp pixel: góc canvas phải trong
+    /// suốt (biểu tượng lấp đầy ô bo góc, không full-bleed vuông), vùng giữa (lệch khỏi chữ V) phải
+    /// là màu cam (không phải trắng/xám/trong suốt), và phải có điểm đen ở vị trí chữ V — bắt lỗi
+    /// nếu make-icon.swift sinh ra icon rỗng, lộn màu, hoặc không có chữ V/nền cam thật.
+    private static func load1024Pixels() -> (pixels: [UInt8], width: Int)? {
+        let icnsPath = clientDir.appendingPathComponent("Resources/AppIcon.icns").path
+        guard FileManager.default.fileExists(atPath: icnsPath) else { return nil }
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("vflow-icon-pixels-\(UUID().uuidString)")
+        let iconset = tmp.appendingPathComponent("AppIcon.iconset")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/iconutil")
+        p.arguments = ["-c", "iconset", icnsPath, "-o", iconset.path]
+        try? p.run()
+        p.waitUntilExit()
+        guard p.terminationStatus == 0 else { return nil }
+        let pngPath = iconset.appendingPathComponent("icon_512x512@2x.png").path
+        guard let img = NSImage(contentsOfFile: pngPath),
+              let cg = img.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
+        let w = cg.width, h = cg.height
+        var pixels = [UInt8](repeating: 0, count: w * h * 4)
+        guard let ctx = CGContext(data: &pixels, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+                                   space: CGColorSpaceCreateDeviceRGB(),
+                                   bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: w, height: h))
+        return (pixels, w)
+    }
+
+    @Test func appIconCornersAreTransparent() throws {
+        guard let (pixels, w) = Self.load1024Pixels() else {
+            Issue.record("không giải được AppIcon.icns — chạy client/scripts/make-icon.sh trước"); return
+        }
+        for (x, y) in [(8, 8), (w - 8, 8), (8, w - 8), (w - 8, w - 8)] {
+            let a = pixels[(y * w + x) * 4 + 3]
+            #expect(a < 30, "góc (\(x),\(y)) không trong suốt (alpha=\(a)) — biểu tượng có vẻ full-bleed vuông thay vì ô bo góc")
+        }
+    }
+
+    @Test func appIconCenterAreaIsOrange() throws {
+        guard let (pixels, w) = Self.load1024Pixels() else {
+            Issue.record("không giải được AppIcon.icns — chạy client/scripts/make-icon.sh trước"); return
+        }
+        // (512,400): bên trong nền cam, phía trên đỉnh chữ V — xem ghi chú đo đạc trong báo cáo C4.
+        let i = (400 * w + 512) * 4
+        let r = pixels[i], g = pixels[i + 1], b = pixels[i + 2], a = pixels[i + 3]
+        #expect(a == 255, "điểm nền không đặc (alpha=\(a))")
+        #expect(r > 180 && g > 50 && g < 160 && b < 40, "điểm nền không phải màu cam (r=\(r) g=\(g) b=\(b))")
+    }
+
+    @Test func appIconHasBlackGlyphPoint() throws {
+        guard let (pixels, w) = Self.load1024Pixels() else {
+            Issue.record("không giải được AppIcon.icns — chạy client/scripts/make-icon.sh trước"); return
+        }
+        // (512,600): đỉnh chữ V — xem ghi chú đo đạc trong báo cáo C4.
+        let i = (600 * w + 512) * 4
+        let r = pixels[i], g = pixels[i + 1], b = pixels[i + 2], a = pixels[i + 3]
+        #expect(a == 255, "điểm chữ V không đặc (alpha=\(a))")
+        #expect(r < 40 && g < 40 && b < 40, "điểm chữ V không phải màu đen (r=\(r) g=\(g) b=\(b))")
     }
 }

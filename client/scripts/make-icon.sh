@@ -18,19 +18,20 @@ RES="$CLIENT_DIR/Resources"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-# ── 1. AppIcon.icns: thu nhỏ logo-main vào vùng an toàn ≈824/1024 (CoreGraphics), rồi sips -z từng
-#       kích thước chuẩn của .iconset, rồi iconutil -c icns ───────────────────────────────────────
-echo "• thu nhỏ logo-main.png vào vùng an toàn 824/1024 (CoreGraphics)…"
-PADDED="$TMP/padded-1024.png"
-swift "$SCRIPTS_DIR/pad-icon.swift" "$LOGO_MAIN" "$PADDED" 1024 0.8046875
+# ── 1. AppIcon.icns: dựng ô bo góc (squircle) nền cam lấy mẫu từ logo-main.png + chữ V/vạch sóng
+#       đen tách bằng mặt nạ alpha (CoreGraphics, make-icon.swift) ra appicon-1024.png, rồi sips -z
+#       từng kích thước chuẩn của .iconset, rồi iconutil -c icns ──────────────────────────────────
+echo "• dựng biểu tượng squircle 1024×1024 từ logo-main.png (CoreGraphics)…"
+APPICON_1024="$BRANDING/appicon-1024.png"
+swift "$SCRIPTS_DIR/make-icon.swift" "$LOGO_MAIN" "$APPICON_1024"
 
 echo "• sinh .iconset (sips)…"
 ICONSET="$TMP/AppIcon.iconset"
 mkdir -p "$ICONSET"
 for s in 16 32 128 256 512; do
-  sips -z "$s" "$s" "$PADDED" --out "$ICONSET/icon_${s}x${s}.png" >/dev/null
+  sips -z "$s" "$s" "$APPICON_1024" --out "$ICONSET/icon_${s}x${s}.png" >/dev/null
   d=$((s * 2))
-  sips -z "$d" "$d" "$PADDED" --out "$ICONSET/icon_${s}x${s}@2x.png" >/dev/null
+  sips -z "$d" "$d" "$APPICON_1024" --out "$ICONSET/icon_${s}x${s}@2x.png" >/dev/null
 done
 
 echo "• iconutil -c icns…"
