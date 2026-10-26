@@ -9,6 +9,7 @@ import VFlowCore
 final class SettingsWindowController: NSWindowController {
     private unowned let controller: AppController
     private let viewModel: SettingsWindowViewModel
+    private var framePersistence: WindowFramePersistence?
 
     init(controller: AppController) {
         self.controller = controller
@@ -21,9 +22,8 @@ final class SettingsWindowController: NSWindowController {
         window.title = "Cài đặt vflow"
         window.contentView = hosting
         window.isReleasedWhenClosed = false
-        window.setFrameAutosaveName("org.aios.vflow.settingsWindow")
-        if window.setFrameUsingName("org.aios.vflow.settingsWindow") == false { window.center() }
         super.init(window: window)
+        framePersistence = WindowFramePersistence(window: window, name: "org.aios.vflow.settingsWindow")
     }
 
     required init?(coder: NSCoder) { fatalError("không dùng") }
@@ -32,9 +32,19 @@ final class SettingsWindowController: NSWindowController {
 
     func show(tab: SettingsCategory? = nil) {
         if let tab { viewModel.selectedTab = tab }
+        guard !OffscreenRender.enabled else { return }
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate()
         if let window { WindowRectDebug.printIfRequested(window, label: "settings-\(viewModel.selectedTab.rawValue)") }
+    }
+
+    /// `--render-offscreen`: chụp nội dung mà KHÔNG lên màn hình — xem `OffscreenRender`. Dùng
+    /// `SettingsOffscreenPreview` (thanh tab tự vẽ + KHÔNG `Form`) thay `SettingsRootView` thật —
+    /// đã đo: `TabView`/`Form` không chụp được qua `ImageRenderer` khi chưa từng lên màn hình.
+    func captureOffscreen(tab: SettingsCategory, to path: String) {
+        viewModel.selectedTab = tab
+        let preview = SettingsOffscreenPreview(selected: tab, model: viewModel.model, controller: viewModel.controller)
+        OffscreenRender.capture(preview, size: CGSize(width: 560, height: 420), fixedHeight: false, colorScheme: OffscreenRender.colorScheme, to: path)
     }
 }
 
@@ -69,5 +79,6 @@ struct SettingsRootView: View {
                 .tag(SettingsCategory.advanced)
         }
         .frame(minWidth: 520, idealWidth: 560, minHeight: 380, idealHeight: 420)
+        .defaultAppStorage(viewModel.controller.appStorageDefaults)
     }
 }

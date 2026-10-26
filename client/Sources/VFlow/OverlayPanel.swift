@@ -18,12 +18,16 @@ struct OverlayView: View {
             if let mark = BrandIcon.headerMark(pointSize: 16) {
                 Image(nsImage: mark).resizable().frame(width: 16, height: 16).accessibilityHidden(true)
             }
-            Image(systemName: p.symbol)
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(p.isError ? Color.red : (p.showsLevel ? Color.orange : Color.white))
+            if p.showsSpinner {
+                ProgressView().controlSize(.small)
+            } else {
+                Image(systemName: p.symbol)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(p.isError ? Color.red : (p.showsLevel ? Color.orange : Color.primary))
+            }
             Text(p.text)
                 .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(.white)
+                .foregroundStyle(.primary)
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
             if p.showsLevel {
@@ -33,29 +37,33 @@ struct OverlayView: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
         .frame(maxWidth: 460)
-        .background(Capsule().fill(Color.black.opacity(0.82)))
-        .overlay(Capsule().strokeBorder(Color.white.opacity(0.15), lineWidth: 1))
+        .background(Capsule().fill(.regularMaterial))
+        .overlay(Capsule().strokeBorder(Color.primary.opacity(0.12), lineWidth: 1))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(p.accessibilityLabel)
         .fixedSize()
+        .animation(.spring(response: 0.3, dampingFraction: 0.8), value: model.state)
     }
 }
 
-/// Thanh mức âm 5 vạch; Reduce Motion ⇒ không hoạt ảnh.
+/// Thanh sóng âm 6 vạch (xem `VFlowCore.WaveformMeter`) — vạch giữa cao nhất, lệch dần hai bên;
+/// mượt theo mức âm khi hoạt ảnh được phép, TĨNH (không hoạt ảnh nhưng vẫn đổi theo mức) khi Reduce
+/// Motion bật.
 struct LevelMeter: View {
     let level: Float
     let animated: Bool
+    private let maxHeight: CGFloat = 16
 
     var body: some View {
         HStack(alignment: .center, spacing: 2) {
-            ForEach(0..<5, id: \.self) { i in
-                let threshold = Float(i) / 5
+            ForEach(0..<WaveformMeter.defaultBarCount, id: \.self) { i in
+                let heightRatio = WaveformMeter.barHeight(level: level, barIndex: i, barCount: WaveformMeter.defaultBarCount)
                 RoundedRectangle(cornerRadius: 1)
-                    .fill(level > threshold ? Color.orange : Color.white.opacity(0.25))
-                    .frame(width: 3, height: 6 + CGFloat(i) * 2.5)
+                    .fill(Color.orange)
+                    .frame(width: 3, height: maxHeight * heightRatio)
             }
         }
-        .frame(height: 18)
+        .frame(height: maxHeight)
         .animation(animated ? .easeOut(duration: 0.08) : nil, value: level)
         .accessibilityHidden(true)
     }
@@ -105,8 +113,10 @@ final class OverlayController {
                            display: true)
         }
         panel.setAccessibilityLabel(p.accessibilityLabel)
-        panel.orderFrontRegardless()
-        announce(state, label: p.accessibilityLabel)
+        if !OffscreenRender.enabled {
+            panel.orderFrontRegardless()
+            announce(state, label: p.accessibilityLabel)
+        }
         hideTimer?.invalidate()
         hideTimer = nil
         if let after = p.autoHide, !sticky {
@@ -119,6 +129,13 @@ final class OverlayController {
     }
 
     func setLevel(_ level: Float) { model.level = level }
+
+    /// `--render-offscreen`: chụp nội dung HUD mà KHÔNG BAO GIỜ hiện lên màn hình.
+    func captureOffscreen(to path: String) {
+        hosting.layoutSubtreeIfNeeded()
+        let size = hosting.fittingSize
+        OffscreenRender.capture(OverlayView(model: model), size: size, colorScheme: OffscreenRender.colorScheme, to: path)
+    }
 
     func hide() {
         hideTimer?.invalidate()

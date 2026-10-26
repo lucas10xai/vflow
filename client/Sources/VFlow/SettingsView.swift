@@ -195,15 +195,27 @@ struct CloudSettingsSection: View {
         Section("9Router") {
             Toggle("Cho phép gửi chữ qua 9Router", isOn: $cloudLlm)
                 .onChange(of: cloudLlm) { _, v in Task { await save(.init(cloudLlm: v)) } }
-            TextField("Model (vd. ag/gemini-3.8-flash)", text: $llmModelText)
-                .onSubmit { Task { await save(.init(llmModel: .some(llmModelText.isEmpty ? nil : llmModelText))) } }
-            if llmModelText.isEmpty {
-                Text("Chưa đặt model: Gọn/Thư/Command Mode sẽ không chạy được.")
-                    .font(.footnote).foregroundStyle(Color.orange)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Model").font(.caption).foregroundStyle(.secondary)
+                HStack(spacing: Theme.Spacing.sm) {
+                    TextField("vd. ag/gemini-3.8-flash", text: $llmModelText)
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit { Task { await save(.init(llmModel: .some(llmModelText.isEmpty ? nil : llmModelText))) } }
+                    Button("Lưu") { Task { await save(.init(llmModel: .some(llmModelText.isEmpty ? nil : llmModelText))) } }
+                }
+                if llmModelText.isEmpty {
+                    Text("Chưa đặt model: Gọn/Thư/Command Mode sẽ không chạy được.")
+                        .font(.footnote).foregroundStyle(Color.orange)
+                } else {
+                    Text("Đang dùng: \(llmModelText)").font(.footnote).foregroundStyle(.secondary)
+                }
             }
-            Button("Lưu model") { Task { await save(.init(llmModel: .some(llmModelText.isEmpty ? nil : llmModelText))) } }
-            Stepper(value: $timeoutSeconds, in: 1...30) { Text("Thời gian chờ: \(timeoutSeconds) giây") }
-                .onChange(of: timeoutSeconds) { _, v in Task { await save(.init(llmTimeoutMs: v * 1000)) } }
+            .padding(.vertical, 2)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Thời gian chờ").font(.caption).foregroundStyle(.secondary)
+                Stepper(value: $timeoutSeconds, in: 1...30) { Text("\(timeoutSeconds) giây") }
+                    .onChange(of: timeoutSeconds) { _, v in Task { await save(.init(llmTimeoutMs: v * 1000)) } }
+            }
         }
         Section("Hành động bằng giọng") {
             Toggle("Nhấn Enter bằng giọng", isOn: $actionsEnabled)

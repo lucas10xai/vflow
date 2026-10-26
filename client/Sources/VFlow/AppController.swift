@@ -37,6 +37,11 @@ final class AppController: NSObject {
     /// `<VFLOW_HOME>` thật (mặc định `~/.vflow`) — token, lịch sử… Tôn trọng biến môi trường để
     /// thử nghiệm không đụng dữ liệu thật (xem `VFlowHome`).
     private let vflowHome = VFlowHome.resolve()
+    /// UserDefaults DUY NHẤT của app — `.standard` nếu không có `VFLOW_HOME` (hành vi cũ, app
+    /// thật), suite riêng cô lập nếu có (xem `VFlowCore.VFlowDefaults`). TẤT CẢ truy cập
+    /// UserDefaults trong lớp AppKit đi qua đây, không gọi `UserDefaults.standard` trực tiếp nơi
+    /// khác.
+    private let defaults = VFlowDefaults.resolve()
     private lazy var historyStore = HistoryStore(path: vflowHome + "/history.jsonl")
     private let conflictDetector = ConflictDetector()
     private let runningApps: RunningAppsProvider = WorkspaceRunningApps()
@@ -45,14 +50,14 @@ final class AppController: NSObject {
     var dataHomePath: String { vflowHome }
 
     var historyEnabled: Bool {
-        get { (UserDefaults.standard.object(forKey: "historyEnabled") as? Bool) ?? true }
-        set { UserDefaults.standard.set(newValue, forKey: "historyEnabled") }
+        get { (defaults.object(forKey: "historyEnabled") as? Bool) ?? true }
+        set { defaults.set(newValue, forKey: "historyEnabled") }
     }
 
     /// Công tắc "Hiện biểu tượng trên thanh menu" (mặc định bật).
     var showMenuBarIcon: Bool {
-        get { (UserDefaults.standard.object(forKey: "showMenuBarIcon") as? Bool) ?? true }
-        set { UserDefaults.standard.set(newValue, forKey: "showMenuBarIcon"); menu?.setVisible(newValue) }
+        get { (defaults.object(forKey: "showMenuBarIcon") as? Bool) ?? true }
+        set { defaults.set(newValue, forKey: "showMenuBarIcon"); menu?.setVisible(newValue) }
     }
 
     private(set) var engineState: EngineState = .stopped
@@ -62,14 +67,14 @@ final class AppController: NSObject {
     private(set) var modelBootstrapStatus: String?
 
     var mode: DictationMode {
-        get { DictationMode(rawValue: UserDefaults.standard.string(forKey: "mode") ?? "") ?? .auto }
-        set { UserDefaults.standard.set(newValue.rawValue, forKey: "mode") }
+        get { DictationMode(rawValue: defaults.string(forKey: "mode") ?? "") ?? .auto }
+        set { defaults.set(newValue.rawValue, forKey: "mode") }
     }
 
     /// Công tắc "Hiện cửa sổ này khi mở app" (mặc định bật).
     var showWindowOnLaunch: Bool {
-        get { ShowWindowPreference.resolve(stored: UserDefaults.standard.object(forKey: "showWindowOnLaunch") as? Bool) }
-        set { UserDefaults.standard.set(newValue, forKey: "showWindowOnLaunch") }
+        get { ShowWindowPreference.resolve(stored: defaults.object(forKey: "showWindowOnLaunch") as? Bool) }
+        set { defaults.set(newValue, forKey: "showWindowOnLaunch") }
     }
 
     /// Mô hình thuần dùng chung cho menu và cửa sổ trạng thái — một nguồn duy nhất.
@@ -140,9 +145,13 @@ final class AppController: NSObject {
     /// Cờ "đã từng xem Chào mừng" (UserDefaults, tách biệt khỏi "đã cấp đủ quyền" — xem
     /// `VFlowCore.WelcomeDecision`).
     var hasSeenWelcome: Bool {
-        get { (UserDefaults.standard.object(forKey: "hasSeenWelcome") as? Bool) ?? false }
-        set { UserDefaults.standard.set(newValue, forKey: "hasSeenWelcome") }
+        get { (defaults.object(forKey: "hasSeenWelcome") as? Bool) ?? false }
+        set { defaults.set(newValue, forKey: "hasSeenWelcome") }
     }
+
+    /// UserDefaults dùng cho cả lớp SwiftUI (`@AppStorage`) — xem `defaultAppStorage(_:)` ở
+    /// `MainWindowView`/`SettingsRootView`/`WelcomeView`, cùng nguồn với `defaults` ở trên.
+    var appStorageDefaults: UserDefaults { defaults }
 
     func openWelcome() {
         refreshUI()
@@ -182,7 +191,25 @@ final class AppController: NSObject {
     func openStatusWindow(tab: MainTab? = nil) {
         refreshUI()
         statusWindow.show(tab: tab)
-        NSApp.activate()
+        if !OffscreenRender.enabled { NSApp.activate() }
+    }
+
+    /// `--render-offscreen`: chụp nội dung cửa sổ chính mà KHÔNG BAO GIỜ hiện lên màn hình.
+    func captureStatusWindowOffscreen(tab: MainTab, to path: String) async {
+        refreshUI()
+        await statusWindow.captureOffscreen(tab: tab, to: path)
+    }
+
+    /// `--render-offscreen`: chụp nội dung cửa sổ Cài đặt mà KHÔNG BAO GIỜ hiện lên màn hình.
+    func captureSettingsWindowOffscreen(tab: SettingsCategory, to path: String) {
+        refreshUI()
+        settingsWindow.captureOffscreen(tab: tab, to: path)
+    }
+
+    /// `--render-offscreen`: chụp nội dung tờ Chào mừng mà KHÔNG BAO GIỜ hiện lên màn hình.
+    func captureWelcomeOffscreen(to path: String) {
+        refreshUI()
+        welcomeWindow.captureOffscreen(to: path)
     }
 
     /// Cửa sổ Cài đặt CHUẨN macOS, tách khỏi cửa sổ chính (⌘,; menu "vflow › Cài đặt…"); `tab`

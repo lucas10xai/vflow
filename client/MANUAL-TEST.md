@@ -138,6 +138,28 @@ D6b. Làm engine bỏ cuộc hẳn: `pkill -9 -f "vflow.js serve"` liên tục (
 45. Tab Snippets › thêm trigger trùng (sau khi bỏ dấu/hoa thường/dấu câu) với một trigger có sẵn.
     **Dự kiến:** báo lỗi tiếng Việt rõ ràng ("trùng với một mục khác…"), không lưu, không đè mục cũ.
 
+## I. U2: Tổng quan/khung chính, Lịch sử/Từ điển/Snippets, HUD, cô lập UserDefaults
+50. `VFLOW_HOME=/tmp/vflow-u2-test1 ./client/build/VFlow.app/Contents/MacOS/VFlow --open-tab tongquan` (thư mục trống, lần đầu).
+    **Dự kiến:** cửa sổ mặc định ≈960×680 (không còn 880×1100 cao nghệu); MỘT tiêu đề duy nhất "Tổng quan" (thanh công cụ, không lặp trong nội dung); mục chọn thanh bên ("Tổng quan") có viên thuốc CAM thương hiệu, không phải xanh hệ thống; thẻ có nền nâng rõ, viền mờ, bóng nhẹ — đổi System Settings › Giao diện sang TỐI, thẻ vẫn tách rõ khỏi nền (không còn gần như biến mất như U1); 6 chế độ xếp LƯỚI 2 cột; KHÔNG còn dòng chân trang cố định — thay bằng một thẻ nhỏ "Đóng cửa sổ không thoát vflow…" đóng được (bấm x), mở lại app (cùng VFLOW_HOME) thì thẻ đó KHÔNG hiện lại.
+51. Dọn `defaults` thật trước: `defaults export org.aios.vflow /tmp/before.plist`. Mở app với `VFLOW_HOME` CÔ LẬP, đổi mấy công tắc (chế độ, Lưu lịch sử, Hiện cửa sổ khi mở app), kéo/đổi cỡ cửa sổ, thoát app. So `defaults export org.aios.vflow /tmp/after.plist` với before.
+    **Dự kiến:** KHÔNG có khoá nào đổi (mode/hasSeenWelcome/NSWindow Frame org.aios.vflow.*/showWindowOnLaunch/showMenuBarIcon/historyEnabled) — mọi thứ đã ghi vào một suite RIÊNG (tên dẫn từ `VFLOW_HOME`), không phải domain `org.aios.vflow` thật. Mở lại app KHÔNG có `VFLOW_HOME` (app thật) ⇒ vẫn dùng đúng các khoá cũ trong `org.aios.vflow` như trước U2, không bị "mất" cài đặt.
+52. Tab Lịch sử: đọc chính tả vài câu trong các ngày khác nhau (đổi giờ hệ thống tạm thời hoặc chờ qua ngày — hoặc kiểm bằng `swift test --filter HistoryGroupingTests`), gõ vào ô tìm kiếm Ở THANH CÔNG CỤ (không phải trong nội dung).
+    **Dự kiến:** các mục gom theo "Hôm nay"/"Hôm qua"/ngày cụ thể, mỗi dòng có biểu tượng ứng dụng đích thật (vd. biểu tượng Terminal) — ứng dụng không rõ/đã gỡ thì dùng biểu tượng chung, không vỡ layout. Chuột phải một mục ⇒ Sao chép/Sửa…/Thêm vào từ điển…/Xoá; chọn một mục rồi ⌘C ⇒ clipboard có đúng văn bản. Xoá hết lịch sử (hoặc `VFLOW_HOME` trống) ⇒ "Chưa có câu nào" kèm gợi ý giữ ⌥; tắt "Lưu lịch sử" + lịch sử trống ⇒ thông điệp "Lịch sử đang tắt" riêng.
+53. Tab Lịch sử, chuột phải một mục › "Thêm vào từ điển…".
+    **Dự kiến:** sheet thêm từ điển mở, "Cách nói" đã tiền điền bằng câu vừa chọn; gõ Thuật ngữ rồi Lưu ⇒ mục mới xuất hiện ở tab Từ điển.
+54. Tab Từ điển/Snippets: bấm "+", gõ thuật ngữ/trigger TRÙNG một mục có sẵn.
+    **Dự kiến:** thông điệp lỗi đỏ hiện NGAY KHI GÕ (không cần bấm Lưu), nút Lưu bị mờ/vô hiệu; xoá chữ trùng ⇒ lỗi biến mất, Lưu lại sáng. Thử gõ cách nói/nội dung RỖNG, hoặc thuật ngữ quá dài (>100 ký tự) ⇒ cũng báo lỗi tương ứng ngay khi gõ. Đổi sắp xếp A–Z ↔ Dùng nhiều ⇒ danh sách đổi thứ tự ngay. Xoá hết mục ⇒ trạng thái rỗng có ví dụ cụ thể ("Thêm 'deploy'…" / "link lịch hẹn → https://…").
+55. HUD: `--demo-overlay ghi --demo-seconds 8` rồi `--demo-overlay khoa`, `--demo-overlay dich`, `--demo-overlay xong`, `--demo-overlay loi`.
+    **Dự kiến:** viên thuốc `.regularMaterial` bo tròn; "ghi"/"khoa" có sóng âm 7 vạch ĐỘNG (vạch giữa cao nhất); "khoa" có chữ "bấm ⌥ để xong, Esc để huỷ"; "dich" có vòng xoay (không phải icon tĩnh); "xong" tự ẩn sau ~1s; "loi" tự ẩn sau vài giây, không che phím (ở đáy màn hình). Bật Giảm chuyển động rồi lặp lại "ghi" ⇒ sóng âm vẫn đổi theo mức nhưng KHÔNG hoạt ảnh mượt (nhảy tức thì).
+56. Cài đặt (⌘,): nhìn thanh công cụ 4 tab.
+    **Dự kiến:** mỗi tab có biểu tượng SF Symbol rõ ràng (Chung/Đám mây/Lịch sử & riêng tư/Nâng cao), không chỉ chữ.
+57. Menu thanh trạng thái (bấm biểu tượng thanh menu).
+    **Dự kiến:** dòng trạng thái + biểu tượng ở đầu menu; các mục nhóm có tiêu đề nhỏ ("Cần xử lý" nếu có, "Chế độ", "Khác"); chế độ đang chọn có dấu tích; nhiều mục có icon SF Symbols. Biểu tượng thanh menu TỰ THÂN vẫn trắng/đen như cũ.
+58. `client/scripts/install-app.sh` khi vflow thật ĐANG CHẠY (bản ký ổn định).
+    **Dự kiến:** thoát được trong khoảng ~1-2s (không phải chờ hết 15s rồi báo lỗi như trước khi sửa) — script tiếp tục cài đè bình thường.
+59. `node --test client/scripts/install-app.test.js`.
+    **Dự kiến:** PASS cả hai kịch bản (thoát được ⇒ cài; cứng đầu ⇒ dừng mã khác 0, không chép đè).
+
 ## H. Chữ ký ổn định (chạy MỘT LẦN, cần chủ dự án tự duyệt)
 46. `client/scripts/make-signing-identity.sh --dry-run` trước để xem các lệnh sẽ chạy (không đổi gì).
     **Dự kiến:** in ra 4 lệnh (`openssl req`, `openssl pkcs12`, `security import`, `security set-key-partition-list`), không hỏi mật khẩu, không tạo gì trong keychain.

@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import VFlowCore
 
@@ -42,13 +43,20 @@ extension Color {
     }
 }
 
-/// Thẻ nền `.regularMaterial` bo góc nhẹ, dùng chung cho các khối ở Tổng quan — khớp chuẩn macOS
-/// 14+ (vật liệu hệ thống thay vì màu nền tự vẽ), tôn trọng sáng/tối tự động.
+/// Thẻ nền "nâng" khỏi nền cửa sổ — `.regularMaterial` không đủ phân biệt với nền cửa sổ ở giao
+/// diện TỐI (đã kiểm bằng ảnh chụp: thẻ gần như biến mất) vì cả hai cùng là vật liệu mờ theo cùng
+/// một nền. Dùng `controlBackgroundColor` (màu đặc, macOS dùng cho panel/thẻ nâng, tự đổi
+/// sáng/tối) + viền 1px `separatorColor` mờ + bóng rất nhẹ — tách rõ khỏi nền ở CẢ hai giao diện.
 struct CardBackground: ViewModifier {
     func body(content: Content) -> some View {
         content
             .padding(Theme.Spacing.lg)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: Theme.cardCornerRadius, style: .continuous))
+            .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: Theme.cardCornerRadius, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.cardCornerRadius, style: .continuous)
+                    .strokeBorder(Color(nsColor: .separatorColor).opacity(0.6), lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.1), radius: 3, x: 0, y: 1)
     }
 }
 

@@ -28,6 +28,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             runDemo(args.count > i + 1 ? args[i + 1] : "", args: args)
             return
         }
+        if let i = args.firstIndex(of: "--render-offscreen"), args.count > i + 1 {
+            runOffscreenRender(target: args[i + 1], args: args)
+            return
+        }
         let c = AppController()
         controller = c
         c.start()
@@ -177,28 +181,94 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// (bản đóng gói sau này, hoặc chạy ở nơi khác) ⇒ mở cửa sổ chính (đã có hướng dẫn cấp quyền).
     @objc private func openHelp() { controller?.openHelpDocument() }
 
-    /// `--demo-overlay <ghi|dich|xong|loi> [--demo-seconds N]`: chỉ hiện thanh trạng thái để chụp ảnh.
+    /// `--demo-overlay <ghi|khoa|dich|xong|loi> [--demo-seconds N]`: chỉ hiện thanh trạng thái để
+    /// chụp ảnh — đủ 5 trạng thái của HUD (xem U2 mục D).
     private func runDemo(_ which: String, args: [String]) {
         let state: OverlayState
         switch which {
         case "ghi": state = .listening(level: 0.7)
+        case "khoa": state = .listeningLocked(level: 0.5)
         case "dich": state = .transcribing
         case "xong": state = .done
         case "loi":
             state = .error(ErrorText.message(.engine(status: 503, code: "model_unavailable",
                                                      message: "Model chưa tải được (lý do: tunnel_down)")))
         default:
-            FileHandle.standardError.write(Data("dùng: --demo-overlay ghi|dich|xong|loi [--demo-seconds N]\n".utf8))
+            FileHandle.standardError.write(Data("dùng: --demo-overlay ghi|khoa|dich|xong|loi [--demo-seconds N]\n".utf8))
             exit(64)
         }
         let o = OverlayController()
         o.sticky = true
         demo = o
         o.show(state)
-        if case .listening = state { o.setLevel(0.7) }
+        switch state {
+        case .listening, .listeningLocked, .listeningCommand: o.setLevel(0.7)
+        default: break
+        }
+        // `--render-offscreen` (U2, sau sự cố chụp màn hình thật): chụp HUD bằng `cacheDisplay`
+        // (KHÔNG BAO GIỜ orderFront) rồi thoát ngay, không chờ `--demo-seconds`.
+        if OffscreenRender.enabled, let oi = args.firstIndex(of: "--out"), args.count > oi + 1 {
+            o.captureOffscreen(to: args[oi + 1])
+            OffscreenRender.assertNoOnScreenWindow()
+            NSApp.terminate(nil)
+            return
+        }
         var seconds = 20.0
         if let j = args.firstIndex(of: "--demo-seconds"), args.count > j + 1, let s = Double(args[j + 1]) { seconds = s }
         DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { NSApp.terminate(nil) }
+    }
+
+    /// `--render-offscreen <tongquan|lichsu|tudien|snippet|caidat[:<mục>]|welcome> --out <path.png>
+    /// [--render-wait-ms N]`: dựng app THẬT (engine/dữ liệu thật qua VFLOW_HOME) nhưng KHÔNG BAO GIỜ
+    /// hiện cửa sổ lên màn hình (xem `OffscreenRender`, sự cố U2 — chủ dự án có thể đang
+    /// họp/trình chiếu bất cứ lúc nào). Chờ `--render-wait-ms` (mặc định 500ms) cho dữ liệu bất đồng
+    /// bộ (`.task(id:)` ở Từ điển/Snippets) kịp tải trước khi chụp.
+    private func runOffscreenRender(target: String, args: [String]) {
+        guard let oi = args.firstIndex(of: "--out"), args.count > oi + 1 else {
+            FileHandle.standardError.write(Data("dùng: --render-offscreen <target> --out <path.png>\n".utf8))
+            exit(64)
+        }
+        let outPath = args[oi + 1]
+        var waitMs = 500.0
+        if let wi = args.firstIndex(of: "--render-wait-ms"), args.count > wi + 1, let w = Double(args[wi + 1]) { waitMs = w }
+
+        // Luôn tắt hộp thoại xin quyền (hệ thống, không phải cửa sổ của ta — nhưng vẫn "lên màn
+        // hình") bất kể có truyền --no-prompt hay không, để chế độ này KHÔNG BAO GIỜ hiện gì cả.
+        PermissionKind.promptsEnabled = false
+        NSApp.setActivationPolicy(.prohibited)
+        let c = AppController()
+        controller = c
+        c.start()
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + waitMs / 1000) { Task { @MainActor in
+            if target == "welcome" {
+                c.openWelcome()
+                c.captureWelcomeOffscreen(to: outPath)
+            } else if target.hasPrefix("caidat") {
+                let parts = target.split(separator: ":", maxSplits: 1)
+                let cat = parts.count > 1 ? (SettingsCategory(rawValue: String(parts[1])) ?? .general) : .general
+                c.openSettingsWindow(tab: cat)
+                c.captureSettingsWindowOffscreen(tab: cat, to: outPath)
+            } else if let tab = MainTab(flag: target) {
+                c.openStatusWindow(tab: tab)
+                await c.captureStatusWindowOffscreen(tab: tab, to: outPath)
+            } else {
+                FileHandle.standardError.write(Data("dùng: --render-offscreen tongquan|lichsu|tudien|snippet|caidat[:general|cloud|historyPrivacy|advanced]|welcome --out <path.png>\n".utf8))
+                exit(64)
+            }
+            OffscreenRender.assertNoOnScreenWindow()
+            // `shutdown()` chờ engine CON (nếu `start()` vừa spawn một cái) thoát hẳn — có thể lâu
+            // hơn dự kiến nếu đang giữa chừng khởi động; giới hạn 4s rồi thoát THẲNG bằng `exit(0)`
+            // (không qua `NSApp.terminate`, vốn có thể treo vô thời hạn) để script gọi không bị kẹt —
+            // script bên ngoài vẫn tự dọn tiến trình mồ côi còn sót (xem báo cáo cuối).
+            await withTaskGroup(of: Void.self) { group in
+                group.addTask { await c.shutdown() }
+                group.addTask { try? await Task.sleep(for: .seconds(4)) }
+                await group.next()
+                group.cancelAll()
+            }
+            exit(0)
+        } }
     }
 
     /// `open VFlow.app` lần nữa khi app đang chạy ⇒ không mở tiến trình thứ hai, chỉ đưa cửa sổ

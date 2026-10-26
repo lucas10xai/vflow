@@ -25,11 +25,6 @@ struct OverviewView: View {
             PermissionsCard(permissions: model.permissions)
             TodayCard(controller: controller, historyEnabled: controller.historyEnabled)
             SystemDisclosure(model: model, controller: controller)
-
-            Text("Đóng cửa sổ không thoát vflow; thoát bằng ⌘Q.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .help("Biểu tượng thanh menu chỉ là phụ — mở lại cửa sổ này từ Dock, ⌘-Tab, hoặc menu thanh trạng thái.")
         }
         .onChange(of: model.lastError) { _, _ in lastErrorDismissed = false }
     }
@@ -43,11 +38,33 @@ private struct HeroCard: View {
 
     private var status: HeroStatus { HeroStatusDecision.decide(model) }
 
+    /// Màu nhấn theo trạng thái — sẵn sàng (cam thương hiệu), thiếu quyền (cam cảnh báo), lỗi (đỏ),
+    /// đang khởi động (trung tính) — một nguồn duy nhất cho cả biểu tượng và nền nhấn nhẹ.
+    private var tint: Color {
+        switch status {
+        case .ready: Theme.accent
+        case .startingEngine: .secondary
+        case .missingPermissions: .orange
+        case .problem: .red
+        }
+    }
+
+    private var symbol: String {
+        switch status {
+        case .ready: "checkmark.circle.fill"
+        case .startingEngine: "hourglass"
+        case .missingPermissions: "exclamationmark.shield.fill"
+        case .problem: "exclamationmark.triangle.fill"
+        }
+    }
+
     var body: some View {
         HStack(alignment: .center, spacing: Theme.Spacing.lg) {
-            if let mark = BrandIcon.headerMark(pointSize: 40) {
-                Image(nsImage: mark).resizable().frame(width: 40, height: 40).accessibilityHidden(true)
+            ZStack {
+                Circle().fill(tint.opacity(0.16)).frame(width: 44, height: 44)
+                Image(systemName: symbol).font(.system(size: 20, weight: .semibold)).foregroundStyle(tint)
             }
+            .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                 Text(headline)
                     .font(.title2.weight(.semibold))
@@ -64,9 +81,14 @@ private struct HeroCard: View {
                     .tint(Theme.accent)
             }
         }
+        .padding(Theme.Spacing.lg)
+        .background(tint.opacity(0.08), in: RoundedRectangle(cornerRadius: Theme.cardCornerRadius, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.cardCornerRadius, style: .continuous)
+                .strokeBorder(tint.opacity(0.3), lineWidth: 1)
+        )
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(headline)\(subtitle.map { ". \($0)" } ?? "")")
-        .cardBackground()
     }
 
     private var headline: String {
@@ -192,10 +214,12 @@ private struct ModeCard: View {
     let mode: DictationMode
     let onChange: @MainActor (DictationMode) -> Void
 
+    private let columns = [GridItem(.flexible(), spacing: Theme.Spacing.sm), GridItem(.flexible(), spacing: Theme.Spacing.sm)]
+
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
             SectionTitle(text: "Chế độ")
-            VStack(spacing: Theme.Spacing.xs) {
+            LazyVGrid(columns: columns, spacing: Theme.Spacing.sm) {
                 ForEach(DictationMode.allCases, id: \.self) { m in
                     ModeRow(mode: m, selected: m == mode) { onChange(m) }
                 }
@@ -205,6 +229,8 @@ private struct ModeCard: View {
     }
 }
 
+/// Thẻ chọn chế độ dạng LƯỚI 2 cột (gọn hơn danh sách dọc 6 dòng) — biểu tượng + tên + nhãn
+/// Trong máy/Gửi chữ + mô tả ngắn, viền cam rõ khi đang chọn.
 private struct ModeRow: View {
     let mode: DictationMode
     let selected: Bool
@@ -223,24 +249,29 @@ private struct ModeRow: View {
 
     var body: some View {
         Button(action: onSelect) {
-            HStack(alignment: .top, spacing: Theme.Spacing.sm) {
-                Image(systemName: symbol)
-                    .font(.title3)
-                    .frame(width: 24)
-                    .foregroundStyle(selected ? Theme.accent : .secondary)
-                VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: Theme.Spacing.xs) {
+                    Image(systemName: symbol)
+                        .font(.body)
+                        .foregroundStyle(selected ? Theme.accent : .secondary)
                     Text(mode.title).font(.callout.weight(.medium))
-                    Text(mode.subtitle).font(.caption).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer()
+                    if selected {
+                        Image(systemName: "checkmark.circle.fill").foregroundStyle(Theme.accent).font(.callout)
+                    }
                 }
-                Spacer()
+                Text(mode.subtitle).font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .lineLimit(2)
                 CloudBadge(cloud: mode.sendsTextToCloud)
-                if selected {
-                    Image(systemName: "checkmark.circle.fill").foregroundStyle(Theme.accent)
-                }
             }
             .padding(Theme.Spacing.sm)
-            .background(selected ? Theme.accent.opacity(0.12) : Color.clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(selected ? Theme.accent.opacity(0.14) : Color.clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(selected ? Theme.accent : Color(nsColor: .separatorColor).opacity(0.5), lineWidth: selected ? 1.5 : 1)
+            )
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

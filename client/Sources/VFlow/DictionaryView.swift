@@ -1,21 +1,57 @@
 import SwiftUI
 import VFlowCore
 
+/// Sắp xếp danh sách (dùng chung Từ điển/Snippets): A–Z theo tên chính, hoặc "dùng nhiều" (số lần
+/// dùng giảm dần, hoà thì theo A–Z để ổn định thứ tự).
+enum ListSort: String, CaseIterable, Identifiable {
+    case alphabetical, mostUsed
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .alphabetical: "A–Z"
+        case .mostUsed: "Dùng nhiều"
+        }
+    }
+
+    var order: ListSortOrder {
+        switch self {
+        case .alphabetical: .alphabetical
+        case .mostUsed: .mostUsed
+        }
+    }
+}
+
 /// Tab "Từ điển": `GET/PUT /v1/dictionary` kiểu đọc-sửa-ghi (đọc lại ngay trước khi ghi, xem
-/// `DictionaryOrchestration`). Kiểm hợp lệ phía client giống luật engine trước khi gửi; lỗi
-/// `bad_request` của engine hiện nguyên văn (đã là tiếng Việt theo contract), không nuốt.
+/// `DictionaryOrchestration`). Kiểm hợp lệ phía client giống luật engine TRONG LÚC GÕ (tái dùng
+/// CHÍNH `DictionaryValidation.validate` áp lên danh sách sẽ có sau khi lưu, không viết lại luật
+/// riêng) trước khi gửi; lỗi `bad_request` của engine hiện nguyên văn (đã là tiếng Việt theo
+/// contract), không nuốt.
 struct DictionaryView: View {
     let model: StatusModel
     let controller: AppController
     @State private var entries: [DictionaryEntry] = []
     @State private var loadError: ClientError?
     @State private var loaded = false
+    @State private var query = ""
+    @State private var sort: ListSort = .alphabetical
     @State private var showEditor = false
     @State private var editorOriginalTerm: String?
     @State private var editorTerm = ""
     @State private var editorSpokenText = ""
-    @State private var editorError: String?
+    @State private var saveError: String?
     @State private var confirmDelete: DictionaryEntry?
+
+    private var visibleEntries: [DictionaryEntry] {
+        let filtered = query.isEmpty ? entries : entries.filter {
+            $0.term.localizedCaseInsensitiveContains(query) || $0.spoken.contains { $0.localizedCaseInsensitiveContains(query) }
+        }
+        return ListSorting.sorted(filtered, order: sort.order, name: { $0.term }, uses: { $0.uses })
+    }
+
+    private var liveValidationError: String? {
+        let lines = editorSpokenText.split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
+        return DictionaryFormValidation.error(term: editorTerm, spokenLines: lines, existing: entries, originalTerm: editorOriginalTerm)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -29,6 +65,7 @@ struct DictionaryView: View {
             guard model.engineReady else { return }
             await load()
         }
+        .searchable(text: $query, placement: .toolbar, prompt: "Tìm thuật ngữ hoặc cách nói…")
         .sheet(isPresented: $showEditor) { editorSheet }
         .confirmationDialog(
             "Xoá mục \"\(confirmDelete?.term ?? "")\"?",
@@ -44,8 +81,16 @@ struct DictionaryView: View {
         HStack {
             SectionTitle(text: "Từ điển (\(entries.count))")
             Spacer()
-            Button("Làm mới") { Task { await load() } }.disabled(!model.engineReady)
-            Button("Thêm mục…") { beginAdd() }.disabled(!model.engineReady)
+            Picker("Sắp xếp", selection: $sort) {
+                ForEach(ListSort.allCases) { s in Text(s.title).tag(s) }
+            }
+            .pickerStyle(.menu)
+            .labelsHidden()
+            .frame(width: 130)
+            Button { Task { await load() } } label: { Image(systemName: "arrow.clockwise") }
+                .help("Làm mới").disabled(!model.engineReady)
+            Button { beginAdd() } label: { Image(systemName: "plus") }
+                .help("Thêm mục…").disabled(!model.engineReady)
         }
     }
 
@@ -75,21 +120,28 @@ struct DictionaryView: View {
         } else if !loaded {
             Text("Đang tải…").font(.system(size: 13)).foregroundStyle(.secondary)
         } else if entries.isEmpty {
-            Text("Từ điển trống.").font(.system(size: 13)).foregroundStyle(.secondary)
+            ContentUnavailableView("Từ điển trống", systemImage: "book.closed",
+                                   description: Text("Thêm \"deploy\" với cách nói \"đi plôi\" để vflow luôn gõ đúng thuật ngữ bạn hay dùng."))
+        } else if visibleEntries.isEmpty {
+            ContentUnavailableView.search(text: query)
         } else {
-            VStack(alignment: .leading, spacing: 0) {
-                ForEach(entries, id: \.term) { entry in
+            List {
+                ForEach(visibleEntries, id: \.term) { entry in
                     DictionaryRow(entry: entry, onEdit: { beginEdit(entry) }, onDelete: { confirmDelete = entry })
-                    Divider()
+                        .contextMenu {
+                            Button("Sửa…") { beginEdit(entry) }
+                            Button("Xoá", role: .destructive) { confirmDelete = entry }
+                        }
                 }
             }
+            .listStyle(.inset)
         }
     }
 
     private func load() async {
         switch await controller.fetchDictionary() {
         case .success(let e):
-            entries = e.sorted { $0.term.localizedStandardCompare($1.term) == .orderedAscending }
+            entries = e
             loadError = nil
         case .failure(let e):
             loadError = e
@@ -101,7 +153,6 @@ struct DictionaryView: View {
         editorOriginalTerm = nil
         editorTerm = ""
         editorSpokenText = ""
-        editorError = nil
         showEditor = true
     }
 
@@ -109,7 +160,6 @@ struct DictionaryView: View {
         editorOriginalTerm = entry.term
         editorTerm = entry.term
         editorSpokenText = entry.spoken.joined(separator: "\n")
-        editorError = nil
         showEditor = true
     }
 
@@ -124,69 +174,96 @@ struct DictionaryView: View {
         let spoken = editorSpokenText.split(separator: "\n", omittingEmptySubsequences: true)
             .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
         let term = editorTerm.trimmingCharacters(in: .whitespaces)
-        if term.isEmpty { editorError = "Tên thuật ngữ không được để trống."; return }
-        if spoken.isEmpty { editorError = "Cần ít nhất một cách nói."; return }
         let entry = DictionaryEntry(term: term, spoken: spoken)
         let change: DictionaryChange = editorOriginalTerm.map { .update(originalTerm: $0, entry: entry) } ?? .add(entry)
         let result = await controller.applyDictionaryChange(change)
         switch result {
         case .success(let next):
-            entries = next.sorted { $0.term.localizedStandardCompare($1.term) == .orderedAscending }
+            entries = next
             showEditor = false
         case .failure(let e):
-            editorError = ErrorText.message(e)
+            saveError = ErrorText.message(e)
         }
     }
 
     @ViewBuilder private var editorSheet: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 0) {
             Text(editorOriginalTerm == nil ? "Thêm mục từ điển" : "Sửa mục từ điển")
                 .font(.system(size: 15, weight: .semibold))
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Thuật ngữ").font(.system(size: 12)).foregroundStyle(.secondary)
-                TextField("vd. deploy", text: $editorTerm).textFieldStyle(.roundedBorder)
-                    .accessibilityLabel("Tên thuật ngữ")
+                .padding([.top, .horizontal], 20)
+                .padding(.bottom, 8)
+            Form {
+                Section {
+                    TextField("Thuật ngữ (vd. deploy)", text: $editorTerm)
+                        .accessibilityLabel("Tên thuật ngữ")
+                } header: { Text("Thuật ngữ") }
+                Section {
+                    TextEditor(text: $editorSpokenText)
+                        .font(.system(size: 13))
+                        .frame(minHeight: 100)
+                        .accessibilityLabel("Danh sách cách nói, mỗi dòng một cách")
+                } header: { Text("Cách nói (mỗi dòng một cách, 1–\(DictionaryValidation.maxSpoken))") }
+                if let liveValidationError {
+                    Section {
+                        Label(liveValidationError, systemImage: "exclamationmark.triangle.fill")
+                            .font(.system(size: 12)).foregroundStyle(Color.red)
+                    }
+                }
+                if let saveError {
+                    Section { Text(saveError).font(.system(size: 13)).foregroundStyle(Color.red) }
+                }
             }
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Cách nói (mỗi dòng một cách, 1–\(DictionaryValidation.maxSpoken))").font(.system(size: 12)).foregroundStyle(.secondary)
-                TextEditor(text: $editorSpokenText)
-                    .font(.system(size: 13))
-                    .frame(minWidth: 380, minHeight: 100)
-                    .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.secondary.opacity(0.3)))
-                    .accessibilityLabel("Danh sách cách nói, mỗi dòng một cách")
-            }
-            if let e = editorError {
-                Text(e).font(.system(size: 13)).foregroundStyle(Color.red)
-            }
+            .formStyle(.grouped)
             HStack {
                 Button("Huỷ") { showEditor = false }
                 Spacer()
-                Button("Lưu") { Task { await saveEditor() } }.keyboardShortcut(.defaultAction)
+                Button("Lưu") { Task { await saveEditor() } }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(liveValidationError != nil || editorTerm.trimmingCharacters(in: .whitespaces).isEmpty)
             }
+            .padding([.horizontal, .bottom], 20)
+            .padding(.top, 8)
         }
-        .padding(20)
-        .frame(minWidth: 440)
+        .frame(minWidth: 460, minHeight: 320)
+        .onAppear { saveError = nil }
     }
 }
 
-private struct DictionaryRow: View {
+struct DictionaryRow: View {
     let entry: DictionaryEntry
     let onEdit: () -> Void
     let onDelete: () -> Void
 
     var body: some View {
         HStack(alignment: .top) {
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text(entry.term).font(.system(size: 13, weight: .semibold))
-                Text(entry.spoken.joined(separator: " · ")).font(.system(size: 12)).foregroundStyle(.secondary)
+                SpokenChips(spoken: entry.spoken)
                 Text("Dùng \(entry.uses) lần" + (entry.lastUsed.map { " · lần cuối \($0)" } ?? ""))
                     .font(.system(size: 11)).foregroundStyle(.secondary)
             }
             Spacer()
-            Button("Sửa…", action: onEdit)
-            Button(action: onDelete) { Image(systemName: "trash") }.accessibilityLabel("Xoá \(entry.term)")
+            Button("Sửa…", action: onEdit).buttonStyle(.plain).foregroundStyle(Theme.accent)
+            Button(action: onDelete) { Image(systemName: "trash") }
+                .buttonStyle(.plain).accessibilityLabel("Xoá \(entry.term)")
         }
         .padding(.vertical, 6)
         .accessibilityElement(children: .combine)
+    }
+}
+
+/// Chip cho từng "cách nói" — gọn hơn chuỗi nối bằng " · " khi có nhiều biến thể.
+struct SpokenChips: View {
+    let spoken: [String]
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(spoken, id: \.self) { s in
+                Text(s)
+                    .font(.system(size: 11))
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(.quaternary, in: Capsule())
+                    .foregroundStyle(.secondary)
+            }
+        }
     }
 }

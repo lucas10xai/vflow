@@ -2,12 +2,15 @@
 # Dựng bản đầy đủ (build-app.sh, có đóng gói engine) rồi cài vào /Applications/vflow.app.
 # Dùng: client/scripts/install-app.sh
 #
-# - Thoát NHẸ NHÀNG (AppleScript quit, chờ tối đa 15s, KHÔNG kill -9) CHỈ các tiến trình vflow có
-#   đường dẫn thực thi nằm trong client/build/VFlow.app hoặc /Applications/vflow.app — không đụng
-#   Haynoi hay app nào khác. Sau khi yêu cầu thoát, CHỜ rồi KIỂM LẠI bằng pgrep rằng cả tiến trình
-#   vflow VÀ engine con của nó đã thoát hẳn; còn sống ⇒ DỪNG (mã khác 0), KHÔNG chép đè, KHÔNG kill -9
-#   (trước đây script chỉ in cảnh báo rồi vẫn tiếp tục chép đè — đã đo thấy "báo OK" dù tiến trình cũ
-#   vẫn sống, sửa ở đây).
+# - Thoát NHẸ NHÀNG (AppleScript `tell application id "org.aios.vflow" to quit`, chờ tối đa 15s,
+#   KHÔNG kill -9) CHỈ khi có tiến trình vflow có đường dẫn thực thi nằm trong client/build/VFlow.app
+#   hoặc /Applications/vflow.app — không đụng Haynoi hay app nào khác. Trước đây gửi quit qua
+#   `System Events … quit (first process whose unix id is N)`: đã đo thật KHÔNG làm vflow thoát (script
+#   chờ hết 15s rồi từ chối cài đè đúng thiết kế, nhưng vô dụng vì tiến trình chưa hề thoát) — gửi theo
+#   BUNDLE ID mới thoát được (~1s). Sau khi yêu cầu thoát, CHỜ rồi KIỂM LẠI bằng pgrep rằng cả tiến
+#   trình vflow VÀ engine con của nó đã thoát hẳn; còn sống ⇒ DỪNG (mã khác 0), KHÔNG chép đè, KHÔNG
+#   kill -9 (trước đây script chỉ in cảnh báo rồi vẫn tiếp tục chép đè — đã đo thấy "báo OK" dù tiến
+#   trình cũ vẫn sống, sửa ở đây).
 # - Sao chép bằng `ditto`; nếu đã có bản cũ ở /Applications/vflow.app thì giữ CHỈ MỘT bản sao lưu gần
 #   nhất ngoài /Applications (~/.vflow/backup/, xoá các bản `vflow.app.bak.*` cũ hơn do chính script
 #   này tạo).
@@ -78,16 +81,15 @@ quit_running_instances() {
     done < <(pgrep -P "$pid" -f 'vflow\.js serve' 2>/dev/null || true)
   done
 
-  for pid in "${to_quit[@]}"; do
-    local exe
-    exe="$(ps -p "$pid" -o comm= 2>/dev/null || echo "?")"
-    echo "  thoát nhẹ nhàng: $exe (pid $pid)…"
-    osascript -e "tell application \"System Events\"" \
-              -e "  if exists (first process whose unix id is $pid) then" \
-              -e "    quit (first process whose unix id is $pid)" \
-              -e "  end if" \
-              -e "end tell" >/dev/null 2>&1 || true
-  done
+  # Thoát bằng BUNDLE ID ("tell application id org.aios.vflow to quit"), KHÔNG dùng System Events
+  # theo unix id: đã đo thật — `System Events … quit (first process whose unix id is N)` KHÔNG làm
+  # vflow thoát (chờ hết ${QUIT_TIMEOUT_SECONDS}s rồi script từ chối cài đè, đúng thiết kế nhưng vô
+  # dụng vì tiến trình chưa hề thoát), còn `tell application id "org.aios.vflow" to quit` thoát được
+  # sau ~1s. Bundle id CỐ ĐỊNH "org.aios.vflow" cho cả bản dựng từ client/build và bản đã cài ở
+  # /Applications (xem build-app.sh, CFBundleIdentifier) — gọi MỘT LẦN là đủ, quit theo id tự tác
+  # động lên mọi tiến trình cùng bundle id, không cần lặp theo từng pid.
+  echo "  thoát nhẹ nhàng (bundle id org.aios.vflow)…"
+  osascript -e 'tell application id "org.aios.vflow" to quit' >/dev/null 2>&1 || true
 
   echo "  chờ tối đa ${QUIT_TIMEOUT_SECONDS}s để thoát hẳn (tiến trình vflow + engine con)…"
   local waited=0

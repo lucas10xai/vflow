@@ -260,4 +260,32 @@ private func err(_ code: String, _ msg: String) -> Data { json(#"{"error":{"code
             #expect(!OverlayText.present(s).symbol.isEmpty)
         }
     }
+
+    /// HUD (U2 mục D): CHỈ "đang dịch" hiện vòng xoay; mọi trạng thái khác hiện biểu tượng SF
+    /// Symbol tĩnh (hai thứ không bao giờ cùng hiện).
+    @Test func onlyTranscribingShowsSpinner() {
+        let states: [OverlayState] = [.listening(level: 0), .listeningLocked(level: 0), .listeningCommand(level: 0),
+                                      .transcribing, .done, .notice("x"), .error("x")]
+        for s in states {
+            let p = OverlayText.present(s)
+            #expect(p.showsSpinner == (s == .transcribing), "trạng thái \(s) có showsSpinner sai")
+        }
+    }
+
+    /// Sóng âm CHỈ hiện ở ba trạng thái đang nghe (giữ phím, đã khoá, lệnh) — không hiện khi đang
+    /// dịch/xong/thông báo/lỗi (những lúc đó không còn mức âm thật để hiện).
+    @Test func levelMeterOnlyShowsWhileListening() {
+        let listening: [OverlayState] = [.listening(level: 0), .listeningLocked(level: 0), .listeningCommand(level: 0)]
+        let notListening: [OverlayState] = [.transcribing, .done, .notice("x"), .error("x")]
+        for s in listening { #expect(OverlayText.present(s).showsLevel, "\(s) phải hiện sóng âm") }
+        for s in notListening { #expect(!OverlayText.present(s).showsLevel, "\(s) không được hiện sóng âm") }
+    }
+
+    /// "Đã khoá" (hands-free) phải nhắc rõ cách thoát bằng chữ (bấm ⌥ để xong, Esc để huỷ) — không
+    /// chỉ dựa vào hình, vì bấm ⌥ lần nữa khi KHÔNG khoá sẽ huỷ ghi, hành vi khác hẳn.
+    @Test func lockedStateTellsHowToFinishOrCancelInWords() {
+        let p = OverlayText.present(.listeningLocked(level: 0))
+        #expect(p.text.contains("⌥"))
+        #expect(p.text.lowercased().contains("esc"))
+    }
 }

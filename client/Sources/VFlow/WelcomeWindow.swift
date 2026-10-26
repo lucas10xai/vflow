@@ -32,11 +32,17 @@ final class WelcomeWindowController: NSWindowController {
     func update(_ model: StatusModel) { viewModel.model = model }
 
     func show() {
+        guard !OffscreenRender.enabled else { return }
         window?.center()
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate()
         startPolling()
         if let window { WindowRectDebug.printIfRequested(window, label: "welcome") }
+    }
+
+    /// `--render-offscreen`: chụp nội dung mà KHÔNG lên màn hình — xem `OffscreenRender`.
+    func captureOffscreen(to path: String) {
+        OffscreenRender.capture(WelcomeView(viewModel: viewModel), size: CGSize(width: 520, height: 480), colorScheme: OffscreenRender.colorScheme, to: path)
     }
 
     private func startPolling() {

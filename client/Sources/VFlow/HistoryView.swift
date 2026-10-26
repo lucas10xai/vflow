@@ -2,8 +2,10 @@ import AppKit
 import SwiftUI
 import VFlowCore
 
-/// Tab "Lịch sử": các câu đã đọc chính tả (mới nhất trên cùng), chỉ văn bản — không có âm thanh.
-/// Tìm kiếm, Sao chép, "Sửa…" (⇒ gợi ý thêm từ điển), xoá một mục, xoá toàn bộ (có xác nhận).
+/// Tab "Lịch sử": các câu đã đọc chính tả, gom theo ngày (Hôm nay/Hôm qua/ngày — xem
+/// `VFlowCore.HistoryGrouping`), chỉ văn bản — không có âm thanh. Tìm kiếm (thanh công cụ), menu
+/// chuột phải (Sao chép, Sửa…, Thêm vào từ điển, Xoá), ⌘C cho mục đang chọn, trạng thái rỗng bằng
+/// `ContentUnavailableView`. Giữ NGUYÊN luồng Sửa → gợi ý từ điển, chỉ lưu văn bản.
 struct HistoryView: View {
     let controller: AppController
     @State private var entries: [HistoryEntry] = []
@@ -17,22 +19,29 @@ struct HistoryView: View {
     @State private var suggestionsLoaded = false
     @State private var correctionError: String?
     @State private var acceptedTerms: Set<String> = []
+    @State private var selection: String?
+    @State private var addDictionaryFor: HistoryEntry?
+
+    private var groups: [HistoryGrouping.DayGroup] {
+        HistoryGrouping.grouped(entries: entries, now: Date())
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             header
-            TextField("Tìm trong lịch sử…", text: $query)
-                .textFieldStyle(.roundedBorder)
-                .frame(maxWidth: 360)
-                .onChange(of: query) { _, _ in load() }
             status
             list
         }
         .onAppear { load() }
+        .onChange(of: query) { _, _ in load() }
+        .searchable(text: $query, placement: .toolbar, prompt: "Tìm trong lịch sử…")
         .sheet(item: $editingEntry, onDismiss: {
             suggestions = []; suggestionsLoaded = false; correctionError = nil; acceptedTerms = []
         }) { entry in
             editSheet(for: entry)
+        }
+        .sheet(item: $addDictionaryFor) { entry in
+            AddToDictionarySheet(controller: controller, prefill: entry.text) { addDictionaryFor = nil }
         }
         .alert("Xoá toàn bộ lịch sử?", isPresented: $confirmClearAll) {
             Button("Xoá", role: .destructive) { clearAll() }
@@ -58,21 +67,58 @@ struct HistoryView: View {
             Text("Bỏ qua \(corruptCount) dòng lịch sử hỏng.")
                 .font(.system(size: 12)).foregroundStyle(.orange)
         }
+        if !controller.historyEnabled {
+            Label("Lịch sử đang tắt — các câu đọc chính tả mới sẽ KHÔNG được lưu.", systemImage: "clock.badge.xmark")
+                .font(.system(size: 12)).foregroundStyle(.secondary)
+        }
     }
 
     @ViewBuilder private var list: some View {
         if entries.isEmpty && loadError == nil {
-            Text(query.isEmpty ? "Chưa có câu nào trong lịch sử." : "Không tìm thấy câu phù hợp.")
-                .font(.system(size: 13)).foregroundStyle(.secondary)
+            if !controller.historyEnabled && query.isEmpty {
+                ContentUnavailableView("Lịch sử đang tắt", systemImage: "clock.badge.xmark",
+                                       description: Text("Bật \"Lưu lịch sử\" ở Cài đặt › Lịch sử & riêng tư để xem lại các câu đã đọc chính tả."))
+            } else if query.isEmpty {
+                ContentUnavailableView("Chưa có câu nào", systemImage: "text.bubble",
+                                       description: Text("Giữ ⌥ (Option) trái ở bất kỳ đâu, nói, rồi nhả phím — câu sẽ xuất hiện ở đây."))
+            } else {
+                ContentUnavailableView.search(text: query)
+            }
         } else {
-            VStack(alignment: .leading, spacing: 0) {
-                ForEach(entries) { entry in
-                    HistoryRow(entry: entry, onCopy: { copy(entry.text) },
-                              onEdit: { beginEdit(entry) }, onDelete: { delete(entry) })
-                    Divider()
+            List(selection: $selection) {
+                ForEach(groups, id: \.label) { group in
+                    Section(group.label) {
+                        ForEach(group.entries) { entry in
+                            HistoryRow(entry: entry, onCopy: { copy(entry.text) }, onEdit: { beginEdit(entry) },
+                                      onAddToDictionary: { addDictionaryFor = entry }, onDelete: { delete(entry) })
+                                .tag(entry.id)
+                                .contextMenu {
+                                    Button("Sao chép") { copy(entry.text) }
+                                    Button("Sửa…") { beginEdit(entry) }
+                                    Button("Thêm vào từ điển…") { addDictionaryFor = entry }
+                                    Divider()
+                                    Button("Xoá", role: .destructive) { delete(entry) }
+                                }
+                        }
+                    }
                 }
             }
+            .listStyle(.inset)
+            .background(copyShortcut)
         }
+    }
+
+    /// ⌘C cho mục đang chọn — nút ẩn mang phím tắt (giống mẫu ⌘1…⌘4 ở `MainWindowView`), vì
+    /// `List` không tự cho ⌘C sao chép NỘI DUNG câu (chỉ sao chép được hàng UI nếu có).
+    private var copyShortcut: some View {
+        Button("") {
+            guard let id = selection, let e = entries.first(where: { $0.id == id }) else { return }
+            copy(e.text)
+        }
+        .keyboardShortcut("c", modifiers: .command)
+        .buttonStyle(.plain)
+        .frame(width: 0, height: 0)
+        .accessibilityHidden(true)
     }
 
     private func load() {
@@ -179,37 +225,141 @@ struct HistoryView: View {
     }
 }
 
-private struct HistoryRow: View {
+struct HistoryRow: View {
     let entry: HistoryEntry
     let onCopy: () -> Void
     let onEdit: () -> Void
+    let onAddToDictionary: () -> Void
     let onDelete: () -> Void
 
     private static let timeFormatter: DateFormatter = {
         let f = DateFormatter()
-        f.dateStyle = .short
-        f.timeStyle = .medium
+        f.dateStyle = .none
+        f.timeStyle = .short
         f.locale = Locale(identifier: "vi_VN")
         return f
     }()
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 8) {
-                Text(Self.timeFormatter.string(from: entry.at)).font(.system(size: 12)).foregroundStyle(.secondary)
-                Text(entry.appBundleId ?? "?").font(.system(size: 12)).foregroundStyle(.secondary)
-                Text(entry.mode).font(.system(size: 12)).foregroundStyle(.secondary)
-                Text(entry.model).font(.system(size: 12)).foregroundStyle(.secondary)
-                Spacer()
-                Button(action: onCopy) { Image(systemName: "doc.on.doc") }
-                    .accessibilityLabel("Sao chép")
-                Button("Sửa…", action: onEdit)
-                Button(action: onDelete) { Image(systemName: "trash") }
-                    .accessibilityLabel("Xoá mục này")
+        HStack(alignment: .top, spacing: 10) {
+            AppIconView(bundleId: entry.appBundleId).frame(width: 20, height: 20)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    Text(Self.timeFormatter.string(from: entry.at)).font(.system(size: 12)).foregroundStyle(.secondary)
+                    Text(AppDisplayName.resolve(bundleId: entry.appBundleId)).font(.system(size: 12)).foregroundStyle(.secondary)
+                    ModeChip(mode: entry.mode)
+                    Spacer()
+                    Button(action: onCopy) { Image(systemName: "doc.on.doc") }
+                        .buttonStyle(.plain).accessibilityLabel("Sao chép")
+                    Button(action: onDelete) { Image(systemName: "trash") }
+                        .buttonStyle(.plain).accessibilityLabel("Xoá mục này")
+                }
+                Text(entry.text).font(.system(size: 13)).lineLimit(4).fixedSize(horizontal: false, vertical: true)
             }
-            Text(entry.text).font(.system(size: 13)).fixedSize(horizontal: false, vertical: true)
         }
         .padding(.vertical, 6)
         .accessibilityElement(children: .combine)
+    }
+}
+
+private struct ModeChip: View {
+    let mode: String
+    var body: some View {
+        Text(mode)
+            .font(.system(size: 10, weight: .medium))
+            .padding(.horizontal, 6).padding(.vertical, 1)
+            .background(.quaternary, in: Capsule())
+            .foregroundStyle(.secondary)
+    }
+}
+
+/// Biểu tượng ứng dụng đích thật (`NSWorkspace.icon(forFile:)` theo bundle id) — dự phòng biểu
+/// tượng chung khi không rõ bundle id hoặc không tìm được app đã cài (vd. app đã bị xoá).
+private struct AppIconView: View {
+    let bundleId: String?
+
+    var body: some View {
+        if let icon = AppIconResolver.icon(forBundleId: bundleId) {
+            Image(nsImage: icon).resizable().accessibilityHidden(true)
+        } else {
+            Image(systemName: "app.dashed").resizable().foregroundStyle(.secondary).accessibilityHidden(true)
+        }
+    }
+}
+
+enum AppIconResolver {
+    static func icon(forBundleId bundleId: String?) -> NSImage? {
+        guard let bundleId, let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) else { return nil }
+        return NSWorkspace.shared.icon(forFile: url.path)
+    }
+}
+
+enum AppDisplayName {
+    static func resolve(bundleId: String?) -> String {
+        guard let bundleId else { return "?" }
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) else { return bundleId }
+        let name = FileManager.default.displayName(atPath: url.path)
+        return name.hasSuffix(".app") ? String(name.dropLast(4)) : name
+    }
+}
+
+/// Sheet thêm nhanh vào từ điển từ menu chuột phải "Thêm vào từ điển…" ở Lịch sử — tiền điền
+/// "cách nói" bằng nội dung đã chọn, người dùng chỉ cần gõ TÊN THUẬT NGỮ đúng. Dùng CHUNG kiểm hợp
+/// lệ với `DictionaryView` (`DictionaryValidation`/`controller.applyDictionaryChange`), không có
+/// logic đọc-sửa-ghi riêng.
+private struct AddToDictionarySheet: View {
+    let controller: AppController
+    let prefill: String
+    let onDone: () -> Void
+
+    @State private var term = ""
+    @State private var spoken: String
+    @State private var error: String?
+
+    init(controller: AppController, prefill: String, onDone: @escaping () -> Void) {
+        self.controller = controller
+        self.prefill = prefill
+        self.onDone = onDone
+        _spoken = State(initialValue: prefill)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Thêm vào từ điển").font(.system(size: 15, weight: .semibold))
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Thuật ngữ").font(.system(size: 12)).foregroundStyle(.secondary)
+                TextField("vd. deploy", text: $term).textFieldStyle(.roundedBorder)
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Cách nói (mỗi dòng một cách)").font(.system(size: 12)).foregroundStyle(.secondary)
+                TextEditor(text: $spoken)
+                    .font(.system(size: 13))
+                    .frame(minWidth: 380, minHeight: 80)
+                    .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.secondary.opacity(0.3)))
+            }
+            if let error {
+                Text(error).font(.system(size: 13)).foregroundStyle(Color.red)
+            }
+            HStack {
+                Button("Huỷ") { onDone() }
+                Spacer()
+                Button("Lưu") { Task { await save() } }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(term.trimmingCharacters(in: .whitespaces).isEmpty || spoken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(20)
+        .frame(minWidth: 440)
+    }
+
+    private func save() async {
+        let spokenList = spoken.split(separator: "\n", omittingEmptySubsequences: true)
+            .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        let t = term.trimmingCharacters(in: .whitespaces)
+        let entry = DictionaryEntry(term: t, spoken: spokenList)
+        switch await controller.applyDictionaryChange(.add(entry)) {
+        case .success: onDone()
+        case .failure(let e): error = ErrorText.message(e)
+        }
     }
 }

@@ -66,6 +66,22 @@ public enum SnippetValidation {
     }
 }
 
+/// Kiểm hợp lệ NGAY KHI GÕ cho biểu mẫu thêm/sửa snippet (U2 mục C) — tái dùng CHÍNH
+/// `SnippetValidation.validate`, giống `DictionaryFormValidation`.
+public enum SnippetFormValidation {
+    public static func error(trigger: String, text: String, existing: [SnippetEntry], originalTrigger: String?) -> String? {
+        let trimmedTrigger = trigger.trimmingCharacters(in: .whitespaces)
+        if trimmedTrigger.isEmpty { return nil } // chưa gõ gì — chưa cần báo lỗi
+        let candidate = SnippetEntry(trigger: trimmedTrigger, text: text.isEmpty ? "_" : text)
+        var others = existing
+        if let originalTrigger { others.removeAll { $0.trigger == originalTrigger } }
+        others.append(candidate)
+        if case .failure(let e) = SnippetValidation.validate(others) { return e.message }
+        if text.isEmpty { return "Nội dung không được để trống." }
+        return nil
+    }
+}
+
 /// Áp một thay đổi (thêm/sửa/xoá) lên danh sách vừa đọc lại — đọc-sửa-ghi, giống `DictionaryPlanner`.
 public enum SnippetPlanner {
     public static func apply(_ change: SnippetChange, to current: [SnippetEntry]) -> Result<[SnippetEntry], SnippetValidationError> {

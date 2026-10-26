@@ -16,14 +16,17 @@ enum WindowRectDebug {
         let height = forceHeight ?? size.height
         // y=120 (gốc dưới-trái của AppKit): chừa khoảng cách với Dock để `screencapture -R` không
         // lẫn icon Dock vào ảnh (đã đo thật: y=40 bị Dock đè lên đáy cửa sổ).
-        window.setFrame(NSRect(x: 80, y: 90, width: max(size.width, 880), height: height), display: true)
+        window.setFrame(NSRect(x: 80, y: 90, width: max(size.width, 960), height: height), display: true)
         guard let screen = window.screen ?? NSScreen.main else { return }
         let f = window.frame
         let x = Int(f.origin.x.rounded())
         let y = Int((screen.frame.height - f.origin.y - f.height).rounded())
         let w = Int(f.width.rounded())
         let h = Int(f.height.rounded())
-        print("VFLOW_WINDOW_RECT \(label) \(x) \(y) \(w) \(h)")
+        // `windowNumber` cuối dòng: cho phép chụp bằng `screencapture -l <windowNumber>` (CHỈ cửa sổ
+        // này, không phải toàn màn hình) — số này do CHÍNH tiến trình tự biết (không cần enumerate
+        // cửa sổ của tiến trình khác qua CGWindowListCopyWindowInfo, vốn cần quyền Ghi màn hình).
+        print("VFLOW_WINDOW_RECT \(label) \(x) \(y) \(w) \(h) \(window.windowNumber)")
         fflush(stdout)
     }
 }

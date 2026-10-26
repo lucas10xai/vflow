@@ -85,6 +85,24 @@ public enum DictionaryValidation {
     }
 }
 
+/// Kiểm hợp lệ NGAY KHI GÕ cho biểu mẫu thêm/sửa từ điển (U2 mục C) — tái dùng CHÍNH
+/// `DictionaryValidation.validate` áp lên danh sách SẼ CÓ sau khi lưu (không viết luật riêng, nên
+/// không bao giờ lệch với luật engine). `nil` = hợp lệ, có thể bấm Lưu.
+public enum DictionaryFormValidation {
+    public static func error(term: String, spokenLines: [String], existing: [DictionaryEntry], originalTerm: String?) -> String? {
+        let trimmedTerm = term.trimmingCharacters(in: .whitespaces)
+        if trimmedTerm.isEmpty { return nil } // chưa gõ gì — chưa cần báo lỗi
+        let spoken = spokenLines.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        let candidate = DictionaryEntry(term: trimmedTerm, spoken: spoken.isEmpty ? ["_"] : spoken)
+        var others = existing
+        if let originalTerm { others.removeAll { $0.term == originalTerm } }
+        others.append(candidate)
+        if case .failure(let e) = DictionaryValidation.validate(others) { return e.message }
+        if spoken.isEmpty { return "Cần ít nhất một cách nói." }
+        return nil
+    }
+}
+
 /// Áp một thay đổi (thêm/sửa/xoá) hoặc một gợi ý sửa lên danh sách vừa đọc lại — đọc-sửa-ghi:
 /// luôn gọi sau khi `GET /v1/dictionary` mới nhất để không đè thay đổi của người khác/engine.
 public enum DictionaryPlanner {
