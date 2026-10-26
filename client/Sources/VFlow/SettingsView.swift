@@ -1,67 +1,113 @@
 import SwiftUI
 import VFlowCore
 
-/// Tab "Cài đặt": chế độ mặc định, bật khi đăng nhập, hiện cửa sổ/biểu tượng thanh menu, lưu lịch
-/// sử + xoá, đường dẫn dữ liệu (tôn trọng `VFLOW_HOME`), phiên bản.
-struct SettingsView: View {
+/// Bốn mục của cửa sổ Cài đặt (`SettingsWindow.swift`) — xem mô tả từng mục ở từng `*SettingsTab`
+/// bên dưới. Giữ TOÀN BỘ hành vi/kết nối engine cũ (U1: chỉ sắp xếp lại vào cửa sổ chuẩn macOS).
+enum SettingsCategory: String, CaseIterable, Identifiable {
+    case general, cloud, historyPrivacy, advanced
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .general: "Chung"
+        case .cloud: "Đám mây"
+        case .historyPrivacy: "Lịch sử & riêng tư"
+        case .advanced: "Nâng cao"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .general: "gearshape"
+        case .cloud: "cloud"
+        case .historyPrivacy: "lock.shield"
+        case .advanced: "wrench.and.screwdriver"
+        }
+    }
+}
+
+/// Bộ chọn chế độ dạng Picker gọn (dùng ở Cài đặt › Chung; Tổng quan dùng `ModeCard`, dạng thẻ đầy
+/// đủ hơn — cùng nguồn `DictationMode`/`ModeCloudLabel` nên không bao giờ nói khác nhau).
+struct ModeSection: View {
+    let mode: DictationMode
+    let onChange: @MainActor (DictationMode) -> Void
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Picker("Chế độ", selection: Binding(get: { mode }, set: onChange)) {
+                ForEach(DictationMode.allCases, id: \.self) { m in
+                    Text(m.title).tag(m)
+                }
+            }
+            .labelsHidden()
+            Text(mode.subtitle).font(.footnote).foregroundStyle(.secondary)
+            Text(ModeCloudLabel.text(mode))
+                .font(.caption)
+                .foregroundStyle(mode.sendsTextToCloud ? Color.orange : Color.secondary)
+        }
+    }
+}
+
+/// Mục "Chung": chế độ mặc định, bật khi đăng nhập, hiện cửa sổ khi mở app, biểu tượng thanh menu.
+struct GeneralSettingsTab: View {
     let model: StatusModel
     let controller: AppController
 
     @AppStorage("showWindowOnLaunch") private var showWindowOnLaunch = ShowWindowPreference.defaultValue
     @AppStorage("showMenuBarIcon") private var showMenuBarIcon = true
+
+    var body: some View {
+        Form {
+            Section("Chế độ mặc định") {
+                ModeSection(mode: model.mode) { controller.mode = $0 }
+            }
+            Section("Hành vi") {
+                Toggle("Bật khi đăng nhập", isOn: Binding(
+                    get: { model.launchAtLogin },
+                    set: { _ in controller.toggleLaunchAtLogin() }))
+                Toggle("Hiện cửa sổ \"vflow\" khi mở app", isOn: $showWindowOnLaunch)
+                Toggle("Hiện biểu tượng trên thanh menu", isOn: Binding(
+                    get: { showMenuBarIcon },
+                    set: { controller.showMenuBarIcon = $0; showMenuBarIcon = $0 }))
+                    .help("Biểu tượng thanh menu chỉ là phụ — cách điều khiển chính là cửa sổ \"vflow\" (Dock, ⌘-Tab).")
+            }
+            Section {
+                Button("Thoát vflow") { NSApp.terminate(nil) }
+                    .keyboardShortcut("q", modifiers: .command)
+            }
+        }
+        .formStyle(.grouped)
+    }
+}
+
+/// Mục "Lịch sử & riêng tư": công tắc lưu lịch sử + xoá toàn bộ, câu giải thích riêng tư.
+struct HistoryPrivacySettingsTab: View {
+    let controller: AppController
     @AppStorage("historyEnabled") private var historyEnabled = true
     @State private var confirmClearHistory = false
     @State private var clearHistoryError: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            ModeSection(mode: model.mode) { controller.mode = $0 }
-
-            CloudSettingsSection(model: model, controller: controller)
-
-            VStack(alignment: .leading, spacing: 10) {
-                SectionTitle(text: "Hành vi")
-                Toggle("Bật khi đăng nhập", isOn: Binding(
-                    get: { model.launchAtLogin },
-                    set: { _ in controller.toggleLaunchAtLogin() }))
-                    .font(.system(size: 13))
-                Toggle("Hiện cửa sổ này khi mở app", isOn: $showWindowOnLaunch)
-                    .font(.system(size: 13))
-                Toggle("Hiện biểu tượng trên thanh menu", isOn: Binding(
-                    get: { showMenuBarIcon },
-                    set: { controller.showMenuBarIcon = $0; showMenuBarIcon = $0 }))
-                    .font(.system(size: 13))
-            }
-
-            VStack(alignment: .leading, spacing: 10) {
-                SectionTitle(text: "Lịch sử")
+        Form {
+            Section("Lịch sử") {
                 Toggle("Lưu lịch sử", isOn: Binding(
                     get: { historyEnabled },
                     set: { controller.historyEnabled = $0; historyEnabled = $0 }))
-                    .font(.system(size: 13))
-                Text("Tắt: không ghi mục mới, không xoá lịch sử đã có. Chỉ lưu văn bản, không lưu âm thanh.")
-                    .font(.system(size: 12))
+                Text("Tắt: không ghi mục mới, không xoá lịch sử đã có. Chỉ lưu văn bản, không bao giờ lưu âm thanh.")
+                    .font(.footnote)
                     .foregroundStyle(.secondary)
-                Button("Xoá toàn bộ lịch sử…") { confirmClearHistory = true }
+                Button("Xoá toàn bộ lịch sử…", role: .destructive) { confirmClearHistory = true }
                 if let e = clearHistoryError {
-                    Text(e).font(.system(size: 12)).foregroundStyle(Color.red)
+                    Text(e).font(.footnote).foregroundStyle(Color.red)
                 }
             }
-
-            VStack(alignment: .leading, spacing: 6) {
-                SectionTitle(text: "Dữ liệu")
-                Text("Thư mục dữ liệu: \(controller.dataHomePath)")
-                    .font(.system(size: 13))
-                    .textSelection(.enabled)
-                Button("Mở thư mục dữ liệu") { controller.openDataFolder() }
-                Text("Phiên bản vflow: \(AppVersion.current)")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
+            Section("Riêng tư") {
+                Label("Âm thanh không bao giờ được ghi xuống đĩa và không rời máy này.", systemImage: "waveform.badge.exclamationmark")
+                    .font(.footnote)
+                Label("Chế độ Gọn, Thư và Command Mode gửi CHỮ (không phải âm thanh) qua 9Router — xem mục Đám mây.", systemImage: "text.bubble")
+                    .font(.footnote)
             }
-
-            Button("Thoát vflow") { NSApp.terminate(nil) }
-                .keyboardShortcut("q", modifiers: .command)
         }
+        .formStyle(.grouped)
         .alert("Xoá toàn bộ lịch sử?", isPresented: $confirmClearHistory) {
             Button("Xoá", role: .destructive) {
                 do { try controller.clearHistory() } catch { clearHistoryError = "Không xoá được lịch sử: \(error.localizedDescription)" }
@@ -70,6 +116,26 @@ struct SettingsView: View {
         } message: {
             Text("Không thể hoàn tác. Toàn bộ các câu đã đọc chính tả được lưu ở thiết bị này sẽ bị xoá.")
         }
+    }
+}
+
+/// Mục "Nâng cao": thư mục dữ liệu, phiên bản.
+struct AdvancedSettingsTab: View {
+    let controller: AppController
+
+    var body: some View {
+        Form {
+            Section("Dữ liệu") {
+                LabeledContent("Thư mục dữ liệu") {
+                    Text(controller.dataHomePath).textSelection(.enabled)
+                }
+                Button("Mở thư mục dữ liệu") { controller.openDataFolder() }
+            }
+            Section("Phiên bản") {
+                LabeledContent("Phiên bản vflow", value: AppVersion.current)
+            }
+        }
+        .formStyle(.grouped)
     }
 }
 
@@ -93,14 +159,15 @@ struct CloudSettingsSection: View {
     @State private var saving = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            SectionTitle(text: "Đám mây (9Router)")
-            Text("Âm thanh không bao giờ rời máy. Chế độ Gọn, Thư và Command Mode gửi CHỮ (không phải âm thanh) qua 9Router tới nhà cung cấp model.")
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+        Form {
+            Section {
+                Text("Âm thanh không bao giờ rời máy. Chế độ Gọn, Thư và Command Mode gửi CHỮ (không phải âm thanh) qua 9Router tới nhà cung cấp model.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
             body_
         }
+        .formStyle(.grouped)
         .task(id: model.engineReady) {
             guard model.engineReady, !loaded else { return }
             await load()
@@ -109,52 +176,42 @@ struct CloudSettingsSection: View {
 
     @ViewBuilder private var body_: some View {
         if model.engineBlocked {
-            Text(model.engineSummary).font(.system(size: 13)).foregroundStyle(Color.red)
+            Section { Text(model.engineSummary).foregroundStyle(Color.red) }
         } else if !model.engineReady {
-            Text("Đang chờ engine khởi động…").font(.system(size: 13)).foregroundStyle(.secondary)
+            Section { Text("Đang chờ engine khởi động…").foregroundStyle(.secondary) }
         } else if let e = loadError {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(ErrorText.message(e)).font(.system(size: 13)).foregroundStyle(Color.red)
+            Section {
+                Text(ErrorText.message(e)).foregroundStyle(Color.red)
                 Button("Thử lại") { Task { await load() } }
             }
         } else if !loaded {
-            Text("Đang tải…").font(.system(size: 13)).foregroundStyle(.secondary)
+            Section { Text("Đang tải…").foregroundStyle(.secondary) }
         } else {
             form
         }
     }
 
-    private var form: some View {
-        VStack(alignment: .leading, spacing: 10) {
+    @ViewBuilder private var form: some View {
+        Section("9Router") {
             Toggle("Cho phép gửi chữ qua 9Router", isOn: $cloudLlm)
-                .font(.system(size: 13))
                 .onChange(of: cloudLlm) { _, v in Task { await save(.init(cloudLlm: v)) } }
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Model").font(.system(size: 12)).foregroundStyle(.secondary)
-                HStack {
-                    TextField("vd. ag/gemini-3.8-flash (để trống = chưa đặt)", text: $llmModelText)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(maxWidth: 360)
-                        .onSubmit { Task { await save(.init(llmModel: .some(llmModelText.isEmpty ? nil : llmModelText))) } }
-                    Button("Lưu") { Task { await save(.init(llmModel: .some(llmModelText.isEmpty ? nil : llmModelText))) } }
-                }
-                if llmModelText.isEmpty {
-                    Text("Chưa đặt model: Gọn/Thư/Command Mode sẽ không chạy được.")
-                        .font(.system(size: 11)).foregroundStyle(Color.orange)
-                }
+            TextField("Model (vd. ag/gemini-3.8-flash)", text: $llmModelText)
+                .onSubmit { Task { await save(.init(llmModel: .some(llmModelText.isEmpty ? nil : llmModelText))) } }
+            if llmModelText.isEmpty {
+                Text("Chưa đặt model: Gọn/Thư/Command Mode sẽ không chạy được.")
+                    .font(.footnote).foregroundStyle(Color.orange)
             }
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Thời gian chờ (giây)").font(.system(size: 12)).foregroundStyle(.secondary)
-                Stepper(value: $timeoutSeconds, in: 1...30) { Text("\(timeoutSeconds) s") }
-                    .frame(maxWidth: 160)
-                    .onChange(of: timeoutSeconds) { _, v in Task { await save(.init(llmTimeoutMs: v * 1000)) } }
-            }
+            Button("Lưu model") { Task { await save(.init(llmModel: .some(llmModelText.isEmpty ? nil : llmModelText))) } }
+            Stepper(value: $timeoutSeconds, in: 1...30) { Text("Thời gian chờ: \(timeoutSeconds) giây") }
+                .onChange(of: timeoutSeconds) { _, v in Task { await save(.init(llmTimeoutMs: v * 1000)) } }
+        }
+        Section("Hành động bằng giọng") {
             Toggle("Nhấn Enter bằng giọng", isOn: $actionsEnabled)
-                .font(.system(size: 13))
                 .onChange(of: actionsEnabled) { _, v in Task { await save(.init(actionsEnabled: v)) } }
-            if let e = saveError {
-                Text(e).font(.system(size: 13)).foregroundStyle(Color.red)
-            }
+                .help("Nói \"nhấn enter\" ở cuối câu để tự động gửi phím Return sau khi dán.")
+        }
+        if let e = saveError {
+            Section { Text(e).foregroundStyle(Color.red) }
         }
     }
 

@@ -13,10 +13,16 @@ extension PermissionKind {
     }
 
     var granted: Bool {
+        // Cờ CHỈ-ĐỂ-CHỤP-ẢNH: giả lập "đủ quyền"/"thiếu quyền" mà không đụng TCC thật (tránh cấp
+        // sai hoặc đổi quyền thật của app đang dùng) — chỉ có tác dụng khi biến môi trường được đặt
+        // tường minh, nếu không hành vi giống hệt trước (đọc trạng thái hệ thống thật).
+        if let override = ProcessInfo.processInfo.environment["VFLOW_DEMO_PERMISSIONS"] {
+            return override == "granted"
+        }
         switch self {
-        case .microphone: AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
-        case .inputMonitoring: CGPreflightListenEventAccess()
-        case .accessibility: CGPreflightPostEventAccess()
+        case .microphone: return AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
+        case .inputMonitoring: return CGPreflightListenEventAccess()
+        case .accessibility: return CGPreflightPostEventAccess()
         }
     }
 

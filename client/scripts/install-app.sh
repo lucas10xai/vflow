@@ -2,31 +2,54 @@
 # Dựng bản đầy đủ (build-app.sh, có đóng gói engine) rồi cài vào /Applications/vflow.app.
 # Dùng: client/scripts/install-app.sh
 #
-# - Thoát NHẸ NHÀNG (AppleScript quit, chờ tối đa 10s, KHÔNG kill -9) CHỈ các tiến trình vflow có
+# - Thoát NHẸ NHÀNG (AppleScript quit, chờ tối đa 15s, KHÔNG kill -9) CHỈ các tiến trình vflow có
 #   đường dẫn thực thi nằm trong client/build/VFlow.app hoặc /Applications/vflow.app — không đụng
-#   Haynoi hay app nào khác.
-# - Sao chép bằng `ditto`; nếu đã có bản cũ ở /Applications/vflow.app thì giữ một bản sao lưu .bak
-#   ngoài /Applications (~/.vflow/backup/).
+#   Haynoi hay app nào khác. Sau khi yêu cầu thoát, CHỜ rồi KIỂM LẠI bằng pgrep rằng cả tiến trình
+#   vflow VÀ engine con của nó đã thoát hẳn; còn sống ⇒ DỪNG (mã khác 0), KHÔNG chép đè, KHÔNG kill -9
+#   (trước đây script chỉ in cảnh báo rồi vẫn tiếp tục chép đè — đã đo thấy "báo OK" dù tiến trình cũ
+#   vẫn sống, sửa ở đây).
+# - Sao chép bằng `ditto`; nếu đã có bản cũ ở /Applications/vflow.app thì giữ CHỈ MỘT bản sao lưu gần
+#   nhất ngoài /Applications (~/.vflow/backup/, xoá các bản `vflow.app.bak.*` cũ hơn do chính script
+#   này tạo).
 # - Không dùng sudo; thiếu quyền ghi /Applications thì DỪNG, không tự ý làm gì thêm.
-# - Không tự mở app sau khi cài.
+# - Nếu TRƯỚC ĐÓ có bản đang chạy (vừa thoát nhẹ nhàng ở bước trên) thì SAU KHI cài xong tự mở lại
+#   bản mới và in PID + thời điểm bắt đầu.
+#
+# Biến môi trường (chỉ dùng cho test tự động bằng shim, KHÔNG dùng khi cài thật):
+#   VFLOW_INSTALL_SRC_APP, VFLOW_INSTALL_DEST_APP, VFLOW_INSTALL_BACKUP_DIR — đổi đường dẫn.
+#   VFLOW_INSTALL_SKIP_BUILD=1 — bỏ qua bước build-app.sh (test tự chuẩn bị sẵn SRC_APP giả).
+#   VFLOW_INSTALL_NO_REOPEN=1 — không tự mở lại sau khi cài (test không có GUI thật để `open`).
 set -euo pipefail
 
 CLIENT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-SRC_APP="$CLIENT_DIR/build/VFlow.app"
-DEST_APP="/Applications/vflow.app"
-BACKUP_DIR="$HOME/.vflow/backup"
+SRC_APP="${VFLOW_INSTALL_SRC_APP:-$CLIENT_DIR/build/VFlow.app}"
+DEST_APP="${VFLOW_INSTALL_DEST_APP:-/Applications/vflow.app}"
+BACKUP_DIR="${VFLOW_INSTALL_BACKUP_DIR:-$HOME/.vflow/backup}"
+# Mặc định 15s (thật); test tự động rút ngắn bằng VFLOW_INSTALL_QUIT_TIMEOUT_SECONDS để không phải
+# chờ 15s thật cho kịch bản "tiến trình cứng đầu".
+QUIT_TIMEOUT_SECONDS="${VFLOW_INSTALL_QUIT_TIMEOUT_SECONDS:-15}"
 # shellcheck source=./lib-signing.sh
 source "$CLIENT_DIR/scripts/lib-signing.sh"
 
-echo "• dựng bản đầy đủ (build-app.sh)…"
-"$CLIENT_DIR/scripts/build-app.sh"
+if [ "${VFLOW_INSTALL_SKIP_BUILD:-0}" = "1" ]; then
+  echo "• VFLOW_INSTALL_SKIP_BUILD=1: bỏ qua build-app.sh (chỉ dùng khi kiểm tự động)"
+else
+  echo "• dựng bản đầy đủ (build-app.sh)…"
+  "$CLIENT_DIR/scripts/build-app.sh"
+fi
 
-# ── Thoát nhẹ nhàng các bản vflow đang chạy từ build cũ hoặc /Applications ──────────────────────
+# ── Thoát nhẹ nhàng các bản vflow đang chạy từ build cũ hoặc /Applications, rồi XÁC NHẬN đã thoát ──
+# Khớp cả "VFlow.app" (dựng từ client/build) lẫn "vflow.app" (đã cài ở /Applications) — case-
+# insensitive (-i) vì ditto tạo DEST_APP đúng theo tên viết hoa/thường được truyền vào, khác với tên
+# thư mục nguồn "VFlow.app" trong client/build.
+WAS_RUNNING=0
 quit_running_instances() {
   local allowed_prefixes=("$SRC_APP" "$DEST_APP")
   local pids
-  pids="$(pgrep -f 'VFlow\.app/Contents/MacOS/VFlow' || true)"
+  pids="$(pgrep -if 'vflow\.app/contents/macos/vflow' || true)"
   [ -z "$pids" ] && return 0
+
+  local to_quit=()
   for pid in $pids; do
     local exe
     exe="$(ps -p "$pid" -o comm= 2>/dev/null || true)"
@@ -41,28 +64,70 @@ quit_running_instances() {
       echo "  bỏ qua tiến trình không thuộc vflow build/cài đặt: $exe (pid $pid)"
       continue
     fi
+    to_quit+=("$pid")
+  done
+  [ ${#to_quit[@]} -eq 0 ] && return 0
+  WAS_RUNNING=1
+
+  # Bắt pid của engine con NGAY (trước khi gửi quit) — sau khi tiến trình cha thoát, engine mồ côi
+  # đổi ppid về 1 nên không còn dò được bằng `pgrep -P`; bắt trước để vẫn `kill -0` đúng pid sau này.
+  local engine_pids=()
+  for pid in "${to_quit[@]}"; do
+    while IFS= read -r epid; do
+      [ -n "$epid" ] && engine_pids+=("$epid")
+    done < <(pgrep -P "$pid" -f 'vflow\.js serve' 2>/dev/null || true)
+  done
+
+  for pid in "${to_quit[@]}"; do
+    local exe
+    exe="$(ps -p "$pid" -o comm= 2>/dev/null || echo "?")"
     echo "  thoát nhẹ nhàng: $exe (pid $pid)…"
     osascript -e "tell application \"System Events\"" \
               -e "  if exists (first process whose unix id is $pid) then" \
               -e "    quit (first process whose unix id is $pid)" \
               -e "  end if" \
               -e "end tell" >/dev/null 2>&1 || true
-    local waited=0
-    while kill -0 "$pid" 2>/dev/null && [ "$waited" -lt 10 ]; do
-      sleep 1
-      waited=$((waited + 1))
+  done
+
+  echo "  chờ tối đa ${QUIT_TIMEOUT_SECONDS}s để thoát hẳn (tiến trình vflow + engine con)…"
+  local waited=0
+  while [ "$waited" -lt "$QUIT_TIMEOUT_SECONDS" ]; do
+    local still_alive=0
+    for pid in "${to_quit[@]}" "${engine_pids[@]:-}"; do
+      [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && still_alive=1
     done
+    [ "$still_alive" -eq 0 ] && break
+    sleep 1
+    waited=$((waited + 1))
+  done
+
+  local failed=0
+  for pid in "${to_quit[@]}"; do
     if kill -0 "$pid" 2>/dev/null; then
-      echo "  CẢNH BÁO: $exe (pid $pid) chưa thoát sau 10s — KHÔNG kill -9, bỏ qua (anh tự thoát thủ công nếu cần)." >&2
+      echo "LỖI: tiến trình vflow (pid $pid) VẪN CÒN SỐNG sau ${QUIT_TIMEOUT_SECONDS}s." >&2
+      failed=1
     fi
   done
+  for pid in "${engine_pids[@]:-}"; do
+    [ -z "$pid" ] && continue
+    if kill -0 "$pid" 2>/dev/null; then
+      echo "LỖI: engine con (pid $pid, vflow.js serve) VẪN CÒN SỐNG sau ${QUIT_TIMEOUT_SECONDS}s." >&2
+      failed=1
+    fi
+  done
+  if [ "$failed" = "1" ]; then
+    echo "DỪNG: không cài đè khi tiến trình vflow cũ (hoặc engine con) chưa thoát hẳn — KHÔNG kill -9, KHÔNG chép đè. Hãy tự thoát vflow (⌘Q) rồi chạy lại install-app.sh." >&2
+    exit 1
+  fi
+  echo "  đã thoát hẳn."
 }
 echo "• thoát các bản vflow đang chạy (nếu có, chỉ ${SRC_APP} hoặc ${DEST_APP})…"
 quit_running_instances
 
-# ── Quyền ghi /Applications ──────────────────────────────────────────────────────────────────
-if [ ! -w /Applications ]; then
-  echo "DỪNG: không có quyền ghi /Applications. Không dùng sudo tự động — cần chủ dự án cấp quyền hoặc cài thủ công." >&2
+# ── Quyền ghi /Applications (hoặc thư mục đích, khi test) ──────────────────────────────────────
+DEST_PARENT="$(dirname "$DEST_APP")"
+if [ ! -w "$DEST_PARENT" ]; then
+  echo "DỪNG: không có quyền ghi $DEST_PARENT. Không dùng sudo tự động — cần chủ dự án cấp quyền hoặc cài thủ công." >&2
   exit 1
 fi
 
@@ -72,7 +137,17 @@ if [ -d "$DEST_APP" ]; then
   BACKUP_PATH="$BACKUP_DIR/vflow.app.bak.$(date +%Y%m%d-%H%M%S)"
   echo "• đã có bản cũ ở ${DEST_APP} — sao lưu sang ${BACKUP_PATH}…"
   ditto "$DEST_APP" "$BACKUP_PATH"
+  echo "  dung lượng bản sao lưu: $(du -sh "$BACKUP_PATH" | cut -f1)"
   rm -rf "$DEST_APP"
+
+  # Giữ CHỈ MỘT bản sao lưu gần nhất (bản vừa tạo) — xoá mọi bản `vflow.app.bak.*` cũ hơn do chính
+  # script này tạo trong $BACKUP_DIR.
+  for old in "$BACKUP_DIR"/vflow.app.bak.*; do
+    [ -e "$old" ] || continue
+    [ "$old" = "$BACKUP_PATH" ] && continue
+    echo "  xoá bản sao lưu cũ: $old"
+    rm -rf "$old"
+  done
 fi
 
 echo "• sao chép vào $DEST_APP (ditto)…"
@@ -95,3 +170,21 @@ case "$(vflow_signing_state)" in
     echo "LƯU Ý: chữ ký ad-hoc của bản trong /Applications khác bản trong client/build (ký lại mỗi lần cài) nên macOS sẽ đòi cấp quyền macOS (Micro/Theo dõi đầu vào/Trợ năng) lại cho bản này — đó là bản dùng thật. Chạy client/scripts/make-signing-identity.sh --yes để tránh việc này."
     ;;
 esac
+
+# ── Có bản đang chạy trước khi cài ⇒ tự mở lại bản mới, in PID + thời điểm bắt đầu ──────────────
+if [ "$WAS_RUNNING" = "1" ] && [ "${VFLOW_INSTALL_NO_REOPEN:-0}" != "1" ]; then
+  echo "• trước đó có bản đang chạy — mở lại $DEST_APP…"
+  open "$DEST_APP"
+  NEW_PID=""
+  for _ in $(seq 1 10); do
+    NEW_PID="$(pgrep -if 'vflow\.app/contents/macos/vflow' | head -1 || true)"
+    [ -n "$NEW_PID" ] && break
+    sleep 1
+  done
+  if [ -n "$NEW_PID" ]; then
+    START="$(ps -p "$NEW_PID" -o lstart= 2>/dev/null || echo "?")"
+    echo "  đã mở lại: pid $NEW_PID, bắt đầu lúc $START"
+  else
+    echo "  CẢNH BÁO: đã gọi \`open\` nhưng chưa thấy tiến trình mới sau 10s — kiểm tay." >&2
+  fi
+fi

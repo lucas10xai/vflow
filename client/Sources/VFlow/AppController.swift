@@ -17,6 +17,8 @@ final class AppController: NSObject {
     private var engineSpec: EngineLaunchSpec?
     private var menu: StatusMenu!
     private var statusWindow: StatusWindowController!
+    private var settingsWindow: SettingsWindowController!
+    private var welcomeWindow: WelcomeWindowController!
     private var tickTimer: Timer?
     private var healthTimer: Timer?
     private var hotkeyRetryTimer: Timer?
@@ -97,6 +99,8 @@ final class AppController: NSObject {
         menu = StatusMenu(controller: self)
         menu.setVisible(showMenuBarIcon)
         statusWindow = StatusWindowController(controller: self)
+        settingsWindow = SettingsWindowController(controller: self)
+        welcomeWindow = WelcomeWindowController(controller: self)
         recorder.onLevel = { [weak self] l in self?.overlay.setLevel(l) }
         recorder.onInterrupted = { [weak self] why in self?.micInterrupted(why) }
         hotkeys.onInput = { [weak self] input in self?.handle(input) }
@@ -127,6 +131,41 @@ final class AppController: NSObject {
         }
         refreshUI()
         if showWindowOnLaunch { openStatusWindow() }
+        if WelcomeDecision.shouldAutoShow(hasSeenWelcome: hasSeenWelcome, permissions: PermissionKind.items),
+           !CommandLine.arguments.contains("--no-welcome") {
+            openWelcome()
+        }
+    }
+
+    /// Cờ "đã từng xem Chào mừng" (UserDefaults, tách biệt khỏi "đã cấp đủ quyền" — xem
+    /// `VFlowCore.WelcomeDecision`).
+    var hasSeenWelcome: Bool {
+        get { (UserDefaults.standard.object(forKey: "hasSeenWelcome") as? Bool) ?? false }
+        set { UserDefaults.standard.set(newValue, forKey: "hasSeenWelcome") }
+    }
+
+    func openWelcome() {
+        refreshUI()
+        welcomeWindow.show()
+    }
+
+    /// Đóng tờ Chào mừng (nút "Bắt đầu dùng vflow") — đánh dấu đã xem, giống hành vi đóng cửa sổ
+    /// (nút đỏ) qua `windowWillClose`.
+    func closeWelcome() {
+        welcomeWindow.window?.close()
+    }
+
+    func markWelcomeSeen() {
+        hasSeenWelcome = true
+    }
+
+    /// "Mở README hoặc hướng dẫn quyền" — dùng chung cho menu Trợ giúp và nút trong tờ Chào mừng.
+    func openHelpDocument() {
+        if let repo = repoPathForHelp(), FileManager.default.fileExists(atPath: repo + "/client/README.md") {
+            NSWorkspace.shared.open(URL(fileURLWithPath: repo + "/client/README.md"))
+        } else {
+            openStatusWindow(tab: .overview)
+        }
     }
 
     /// Thoát: đóng engine con trước.
@@ -146,6 +185,13 @@ final class AppController: NSObject {
         NSApp.activate()
     }
 
+    /// Cửa sổ Cài đặt CHUẨN macOS, tách khỏi cửa sổ chính (⌘,; menu "vflow › Cài đặt…"); `tab`
+    /// dùng cho `--open-tab caidat` (chụp ảnh) và chọn đúng mục khi mở từ nơi khác.
+    func openSettingsWindow(tab: SettingsCategory? = nil) {
+        refreshUI()
+        settingsWindow.show(tab: tab)
+    }
+
     func openDataFolder() {
         NSWorkspace.shared.open(URL(fileURLWithPath: vflowHome))
     }
@@ -157,6 +203,8 @@ final class AppController: NSObject {
         let model = statusModel
         menu.refresh(model)
         statusWindow.update(model)
+        settingsWindow.update(model)
+        welcomeWindow.update(model)
     }
 
     /// Cửa sổ trạng thái gọi mỗi 2 giây khi đang hiện: quyền có thể vừa được cấp trong System Settings.

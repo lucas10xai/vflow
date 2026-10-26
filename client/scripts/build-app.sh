@@ -35,7 +35,10 @@ if [ -f "$CLIENT_DIR/Resources/AppIcon.icns" ]; then
 else
   echo "CẢNH BÁO: thiếu $CLIENT_DIR/Resources/AppIcon.icns — chạy client/scripts/make-icon.sh trước." >&2
 fi
-MENUBAR_MARKS=("menubar-mark-18.png" "menubar-mark-18@2x.png" "menubar-mark-18@3x.png")
+MENUBAR_MARKS=(
+  "menubar-mark-18.png" "menubar-mark-18@2x.png" "menubar-mark-18@3x.png"
+  "menubar-mark-18-template.png" "menubar-mark-18-template@2x.png" "menubar-mark-18-template@3x.png"
+)
 for f in "${MENUBAR_MARKS[@]}"; do
   if [ -f "$CLIENT_DIR/Resources/$f" ]; then
     cp "$CLIENT_DIR/Resources/$f" "$APP/Contents/Resources/$f"

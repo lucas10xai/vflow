@@ -40,10 +40,16 @@ iconutil -c icns "$ICONSET" -o "$RES/AppIcon.icns"
 echo "  Xong: $RES/AppIcon.icns ($(du -h "$RES/AppIcon.icns" | cut -f1))"
 
 # ── 2. Ảnh thanh menu / đầu cửa sổ: logo-mark.png thu nhỏ trực tiếp (sips), giữ nền trong suốt ────
-echo "• sinh ảnh thanh menu từ logo-mark.png (18/36/54 px)…"
+echo "• sinh ảnh thanh menu (màu, dùng cho đầu cửa sổ/thanh trạng thái) từ logo-mark.png (18/36/54 px)…"
 sips -z 18 18 "$LOGO_MARK" --out "$RES/menubar-mark-18.png" >/dev/null
 sips -z 36 36 "$LOGO_MARK" --out "$RES/menubar-mark-18@2x.png" >/dev/null
 sips -z 54 54 "$LOGO_MARK" --out "$RES/menubar-mark-18@3x.png" >/dev/null
 echo "  Xong: $RES/menubar-mark-18{,@2x,@3x}.png"
+
+# ── 3. Ảnh thanh menu TEMPLATE (đơn sắc đen+alpha) — macOS tự vẽ trắng/đen theo nền thanh menu ───
+echo "• sinh ảnh thanh menu TEMPLATE (đơn sắc) từ logo-mark.png (CoreGraphics)…"
+swift "$SCRIPTS_DIR/make-icon-template.swift" "$LOGO_MARK" \
+  "$RES/menubar-mark-18-template.png" "$RES/menubar-mark-18-template@2x.png" "$RES/menubar-mark-18-template@3x.png"
+echo "  Xong: $RES/menubar-mark-18-template{,@2x,@3x}.png"
 
 echo "Hoàn tất. (hai tệp gốc trong $BRANDING không bị đổi.)"

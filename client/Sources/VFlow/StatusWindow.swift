@@ -52,6 +52,7 @@ final class StatusWindowController: NSObject, NSWindowDelegate {
         if let tab { viewModel.selectedTab = tab }
         window.makeKeyAndOrderFront(nil)
         startPermissionPolling()
+        WindowRectDebug.printIfRequested(window, label: "main-\(viewModel.selectedTab.rawValue)", forceHeight: 1100)
     }
 
     /// ID cửa sổ thật trên màn hình, dùng để `screencapture -l <id>` từng tab riêng (không chụp
@@ -76,7 +77,9 @@ final class StatusWindowController: NSObject, NSWindowDelegate {
     }
 }
 
-/// Cửa sổ chính: thanh bên 4 mục (Tổng quan, Lịch sử, Từ điển, Cài đặt) + nội dung bên phải.
+/// Cửa sổ chính: thanh bên có logo+tên ở đầu, 4 mục xếp theo 2 nhóm ("Sử dụng": Tổng quan/Lịch sử;
+/// "Cá nhân hoá": Từ điển/Snippets — Cài đặt KHÔNG còn ở đây, xem `SettingsWindow.swift`) + nội
+/// dung bên phải, thanh công cụ thống nhất, phím tắt ⌘1…⌘4 chuyển mục, ⌘, mở Cài đặt.
 struct MainWindowView: View {
     @ObservedObject var viewModel: StatusWindowViewModel
     private var model: StatusModel { viewModel.model }
@@ -84,29 +87,83 @@ struct MainWindowView: View {
 
     var body: some View {
         NavigationSplitView {
-            List(MainTab.allCases, selection: $viewModel.selectedTab) { tab in
-                Label(tab.title, systemImage: tab.symbol)
-                    .font(.system(size: 13))
-                    .tag(tab)
-            }
-            .navigationSplitViewColumnWidth(min: 150, ideal: 170, max: 220)
+            sidebar
         } detail: {
             VStack(spacing: 0) {
                 HeaderBar(tab: viewModel.selectedTab)
                 Divider()
                 ScrollView {
                     tabContent
-                        .padding(20)
+                        .padding(Theme.Spacing.xl)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 Divider()
                 Text("Đóng cửa sổ không thoát vflow; thoát bằng ⌘Q.")
-                    .font(.system(size: 12))
+                    .font(.footnote)
                     .foregroundStyle(.secondary)
                     .padding(.vertical, 8)
+                    .help("Ghi âm bằng phím nóng và engine vẫn hoạt động khi cửa sổ đóng. Mở lại ở Dock, ⌘-Tab, hoặc menu thanh trạng thái.")
             }
         }
-        .frame(minWidth: 640, minHeight: 480)
+        .frame(minWidth: 720, minHeight: 520)
+        .tint(Theme.accent)
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                Text(viewModel.selectedTab.title).font(.headline)
+            }
+        }
+        .background(keyboardShortcuts)
+    }
+
+    private var sidebar: some View {
+        List(selection: $viewModel.selectedTab) {
+            sidebarHeader
+            ForEach(MainTab.Group.allCases) { group in
+                Section(group.rawValue) {
+                    ForEach(MainTab.allCases.filter { $0.group == group }) { tab in
+                        sidebarRow(tab)
+                    }
+                }
+            }
+        }
+        .listStyle(.sidebar)
+        .navigationSplitViewColumnWidth(min: 170, ideal: 190, max: 240)
+    }
+
+    private var sidebarHeader: some View {
+        HStack(spacing: Theme.Spacing.sm) {
+            if let mark = BrandIcon.headerMark(pointSize: 22) {
+                Image(nsImage: mark).resizable().frame(width: 22, height: 22).accessibilityHidden(true)
+            }
+            Text("vflow").font(.system(size: 15, weight: .semibold))
+        }
+        .padding(.vertical, Theme.Spacing.xs)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("vflow")
+        .listRowSeparator(.hidden)
+    }
+
+    private func sidebarRow(_ tab: MainTab) -> some View {
+        Label(tab.title, systemImage: tab.symbol)
+            .badge(sidebarBadge(tab))
+            .tag(tab)
+    }
+
+    /// Huy hiệu nhỏ ở Tổng quan khi có việc cần chú ý (quyền thiếu) — chấm cam, không chặn điều hướng.
+    private func sidebarBadge(_ tab: MainTab) -> Int {
+        guard tab == .overview else { return 0 }
+        return model.missingPermissions.count
+    }
+
+    /// ⌘1…⌘4 chuyển mục thanh bên (nút ẩn, chỉ mang phím tắt — `MainTab.keyboardShortcutDigit`).
+    private var keyboardShortcuts: some View {
+        ForEach(MainTab.allCases) { tab in
+            Button("") { viewModel.selectedTab = tab }
+                .keyboardShortcut(KeyEquivalent(tab.keyboardShortcutDigit), modifiers: .command)
+                .buttonStyle(.plain)
+                .frame(width: 0, height: 0)
+                .accessibilityHidden(true)
+        }
     }
 
     @ViewBuilder private var tabContent: some View {
@@ -115,30 +172,23 @@ struct MainWindowView: View {
         case .history: HistoryView(controller: controller)
         case .dictionary: DictionaryView(model: model, controller: controller)
         case .snippets: SnippetsView(model: model, controller: controller)
-        case .settings: SettingsView(model: model, controller: controller)
         }
     }
 }
 
-/// Đầu cửa sổ chính: logo-mark (~28pt, xem `BrandIcon`) cạnh tiêu đề tab đang chọn. Không có logo
-/// đóng gói (vd. chạy ngoài `build-app.sh`) ⇒ chỉ hiện chữ, không vỡ giao diện.
+/// Đầu nội dung cửa sổ chính: chỉ còn tiêu đề (logo đã chuyển lên đầu thanh bên, xem
+/// `sidebarHeader`) — tránh lặp logo hai lần trong cùng cửa sổ.
 private struct HeaderBar: View {
     let tab: MainTab
 
     var body: some View {
-        HStack(spacing: 10) {
-            if let mark = BrandIcon.headerMark(pointSize: 28) {
-                Image(nsImage: mark)
-                    .resizable()
-                    .frame(width: 28, height: 28)
-                    .accessibilityHidden(true)
-            }
+        HStack(spacing: Theme.Spacing.sm) {
             Text(tab.title)
-                .font(.system(size: 17, weight: .semibold))
+                .font(.title2.weight(.semibold))
             Spacer()
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 12)
+        .padding(.horizontal, Theme.Spacing.xl)
+        .padding(.vertical, Theme.Spacing.md)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("vflow — \(tab.title)")
     }

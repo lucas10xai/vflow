@@ -60,6 +60,40 @@ private let clientDir: URL = {
         #expect(data.prefix(8) == Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]), "\(name) không phải PNG hợp lệ")
     }
 
+    /// Biểu tượng thanh menu TEMPLATE (đơn sắc, `make-icon-template.swift`): tồn tại ở 3 kích
+    /// thước, và mọi điểm ảnh có alpha>0 phải là đen tuyệt đối (R=G=B=0) — đúng yêu cầu "template"
+    /// của AppKit (`NSImage.isTemplate = true` ở `BrandIcon.swift` vẽ lại thành trắng/đen theo nền
+    /// thanh menu dựa trên alpha, KHÔNG dựa trên RGB gốc — nhưng nếu RGB gốc không phải đen tuyệt
+    /// đối thì không còn là ảnh "đơn sắc" đúng nghĩa và dễ lộ màu lạ ở công cụ khác đọc file trực
+    /// tiếp, vd. Finder preview/Icon Composer).
+    @Test(arguments: ["menubar-mark-18-template.png", "menubar-mark-18-template@2x.png", "menubar-mark-18-template@3x.png"])
+    func menuBarTemplateMarkIsMonochromeBlack(name: String) throws {
+        let path = clientDir.appendingPathComponent("Resources/\(name)").path
+        guard let img = NSImage(contentsOfFile: path),
+              let cg = img.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+            Issue.record("thiếu hoặc không đọc được \(path) — chạy client/scripts/make-icon.sh trước"); return
+        }
+        let w = cg.width, h = cg.height
+        #expect(w > 0 && h > 0)
+        var pixels = [UInt8](repeating: 0, count: w * h * 4)
+        guard let ctx = CGContext(data: &pixels, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+                                  space: CGColorSpaceCreateDeviceRGB(),
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
+            Issue.record("không tạo được context đọc pixel cho \(name)"); return
+        }
+        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: w, height: h))
+        var opaqueCount = 0
+        var nonBlackCount = 0
+        for i in 0..<(w * h) {
+            let o = i * 4
+            guard pixels[o + 3] > 0 else { continue }
+            opaqueCount += 1
+            if pixels[o] != 0 || pixels[o + 1] != 0 || pixels[o + 2] != 0 { nonBlackCount += 1 }
+        }
+        #expect(opaqueCount > 0, "\(name) hoàn toàn trong suốt — không có hình gì để làm template")
+        #expect(nonBlackCount == 0, "\(name) có \(nonBlackCount)/\(opaqueCount) điểm ảnh có alpha>0 nhưng KHÔNG phải đen — không phải ảnh template đơn sắc hợp lệ")
+    }
+
     /// Hai tệp gốc do chủ dự án cung cấp KHÔNG được bị script đổi/nén lại.
     @Test func originalBrandingFilesAreUntouchedAndFullSize() {
         for name in ["logo-main.png", "logo-mark.png"] {

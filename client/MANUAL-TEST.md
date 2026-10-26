@@ -3,11 +3,13 @@
 Dành cho chủ dự án, trên Mac thật. Mỗi bước có **Dự kiến**; khác dự kiến thì ghi lại bước + thông điệp trên thanh/menu.
 Chuẩn bị: `client/scripts/build-app.sh`; model `zipformer-vi-30m` đã có trong `~/.vflow/models`; chưa có engine nào chạy (`lsof -nP -iTCP:7611 -sTCP:LISTEN` rỗng).
 
-## A. Khởi động, Dock, cửa sổ "vflow" và cấp quyền
-1. `open client/build/VFlow.app`.
-   **Dự kiến:** **có biểu tượng Dock** (micro cam trên nền tối) và app xuất hiện trong ⌘-Tab; biểu tượng micro trên menu bar cũng có (phụ, có thể bị ẩn nếu thanh menu chật/notch che — xem bước 1b, tắt được ở Cài đặt); **cửa sổ chính "vflow" tự hiện** (mặc định bật) ở tab **Tổng quan** với: dòng hướng dẫn giữ ⌥ trái, trạng thái engine + model, 3 quyền (Chưa cấp lúc đầu), chế độ, lỗi gần nhất nếu có; thanh bên có đủ 4 mục Tổng quan/Lịch sử/Từ điển/Cài đặt; hộp thoại xin quyền Micro (chữ tiếng Việt từ Info.plist); hộp thoại/nhắc “Theo dõi đầu vào”; cửa sổ hiện lỗi “Thiếu quyền Theo dõi đầu vào (Input Monitoring)”. Menu ứng dụng ở góc trên trái có tên "vflow" với Giới thiệu/Cài đặt…(⌘,)/Ẩn(⌘H)/Thoát(⌘Q).
+## A. Khởi động, Dock, cửa sổ "vflow", Chào mừng và cấp quyền
+1. `open client/build/VFlow.app` (lần đầu, chưa cấp quyền nào).
+   **Dự kiến:** **có biểu tượng Dock** (ô cam bo góc, chữ V đen) và app xuất hiện trong ⌘-Tab; biểu tượng TRẮNG trên thanh menu tối (đen trên thanh menu sáng — đổi System Settings › Chung › Giao diện để thử cả hai), phụ, có thể bị ẩn nếu thanh menu chật/notch che (xem bước 1b, tắt được ở Cài đặt › Chung); **tờ "Chào mừng đến với vflow" tự hiện** (chưa đủ quyền) với 3 bước Micro/Theo dõi đầu vào/Trợ năng, mỗi bước có nút "Mở Cài đặt hệ thống" và dấu tích tự cập nhật; **cửa sổ chính "vflow" cũng tự hiện** (mặc định bật) ở mục **Tổng quan**: thẻ trạng thái lớn "Thiếu 3 quyền macOS" + nút "Cấp quyền…", thẻ Phím tắt, thẻ Chế độ (6 chế độ, nhãn "Trong máy"/"Gửi chữ qua 9Router"), thẻ Quyền (0/3), thẻ "Hôm nay"; thanh bên có logo+"vflow" rồi 2 nhóm — **Sử dụng** (Tổng quan có huy hiệu cam "3", Lịch sử) và **Cá nhân hoá** (Từ điển, Snippets) — KHÔNG có mục Cài đặt trong thanh bên; hộp thoại xin quyền Micro (chữ tiếng Việt từ Info.plist); hộp thoại/nhắc "Theo dõi đầu vào"; thẻ lỗi gần nhất "Thiếu quyền Theo dõi đầu vào (Input Monitoring)" (đóng được bằng nút x). Menu ứng dụng ở góc trên trái có tên "vflow" với Giới thiệu/Cài đặt…(⌘,)/Ẩn(⌘H)/Thoát(⌘Q); menu "Trợ giúp" có thêm "Xem hướng dẫn chào mừng…" (mở lại tờ Chào mừng bất cứ lúc nào).
 1a. Bấm menu "vflow" › "Cài đặt…" (hoặc ⌘,).
-   **Dự kiến:** cửa sổ chuyển sang tab **Cài đặt** (không mở cửa sổ mới).
+   **Dự kiến:** mở một **CỬA SỔ RIÊNG** "Cài đặt vflow" (không phải chuyển mục trong cửa sổ chính) với thanh công cụ 4 mục: Chung/Đám mây/Lịch sử & riêng tư/Nâng cao. Bấm lại ⌘, lần nữa (hoặc menu Cài đặt… lần nữa) ⇒ KHÔNG mở cửa sổ Cài đặt thứ hai, chỉ đưa cửa sổ đã có ra trước. Thử phím ⌘1…⌘4 ở cửa sổ CHÍNH (không phải cửa sổ Cài đặt) ⇒ chuyển lần lượt Tổng quan/Lịch sử/Từ điển/Snippets.
+1a2. Bấm "Bắt đầu dùng vflow" ở tờ Chào mừng (dù chưa cấp đủ quyền).
+   **Dự kiến:** tờ Chào mừng đóng lại ngay (không chặn), cửa sổ chính và menu vẫn hoạt động bình thường. Mở lại qua menu "Trợ giúp › Xem hướng dẫn chào mừng…" ⇒ hiện lại đúng 3 bước với trạng thái quyền hiện tại.
 1b. Thu nhỏ cửa sổ "vflow" lại (đừng thoát app), giả lập biểu tượng thanh menu bị ẩn (thử thu nhỏ cửa sổ trình duyệt/mở nhiều ứng dụng để thanh menu chật). Bấm biểu tượng Dock của vflow (hoặc chạy lại `open client/build/VFlow.app`).
    **Dự kiến:** KHÔNG có tiến trình VFlow thứ hai (`pgrep -fl "VFlow.app/Contents/MacOS/VFlow"` chỉ ra đúng 1 dòng); cửa sổ "vflow" được đưa ra trước thay vì mở lại từ đầu.
 2. Bấm “Cho phép” Micro.
@@ -68,7 +70,7 @@ D2. Bấm "Sửa…" ở một mục, sửa vài chữ rồi "Lưu".
     **Dự kiến:** gọi `/v1/corrections`; nếu engine nhận ra thuật ngữ đổi (vd. "đi plôi" → "deploy") thì hiện gợi ý "Thêm '<term>' ← '<spoken>'?"; bấm "Thêm" mới ghi vào từ điển (xem lại ở tab Từ điển, mục đó có biến thể mới); KHÔNG tự dán văn bản đã sửa vào Terminal hay ứng dụng nào. Sửa câu mà không đổi gì đáng kể (chỉ khác hoa/thường) ⇒ "Không có gợi ý".
 D3. Xoá một mục lịch sử; rồi "Xoá toàn bộ lịch sử…" và xác nhận.
     **Dự kiến:** mục biến mất ngay; xoá toàn bộ cần xác nhận trước, sau đó danh sách trống hẳn ("Chưa có câu nào trong lịch sử.").
-D4. Tab Cài đặt › tắt "Lưu lịch sử", đọc chính tả một câu, bật lại.
+D4. Cài đặt › Lịch sử & riêng tư › tắt "Lưu lịch sử", đọc chính tả một câu, bật lại.
     **Dự kiến:** lúc tắt, câu mới KHÔNG xuất hiện ở tab Lịch sử (và `~/.vflow/history.jsonl` không có dòng mới — kiểm bằng `wc -l`); lịch sử cũ vẫn còn nguyên, không bị xoá chỉ vì tắt công tắc.
 D5. Mở tab "Từ điển", bấm "Thêm mục…", nhập thuật ngữ + vài cách nói (mỗi dòng một cách), Lưu.
     **Dự kiến:** mục mới xuất hiện trong danh sách, số lần dùng 0. Thử Lưu với thuật ngữ trùng mục có sẵn ⇒ báo lỗi tiếng Việt rõ ràng (không đè, không nuốt lỗi). Sửa một mục (đổi cách nói), Xoá một mục (có xác nhận) — số mục cập nhật đúng ngay.
@@ -112,21 +114,21 @@ D6b. Làm engine bỏ cuộc hẳn: `pkill -9 -f "vflow.js serve"` liên tục (
 35. Giữ ⌥ trái (kiểu giữ phím) đang "Đang nghe", bấm **Esc**.
     **Dự kiến:** "Đã huỷ"; vẫn đang giữ ⌥ thì chưa ghi lại tới khi nhả rồi bấm lại.
 36. Mở **Notes**, bôi đen một đoạn văn bản có sẵn. Giữ ⌥ trái; trong 400 ms đầu bấm thêm **⌃ trái** (vẫn giữ cả hai), nói một lệnh sửa (vd. "viết hoa toàn bộ"), nhả cả hai phím.
-    **Dự kiến:** thanh trạng thái chuyển "Đang nghe lệnh" ngay khi bấm ⌃; sau khi nhả ⇒ "Đang dịch" rồi "Xong"; đoạn bôi đen được THAY bằng kết quả (không còn lời dẫn, không có "Lệnh:"); nếu chưa đặt model 9Router (tab Cài đặt) thì thay vào đó hiện lỗi "Chế độ đám mây đang tắt…"/"Không thể xử lý lệnh…" và đoạn bôi đen giữ NGUYÊN (không bị xoá/thay bằng gì).
+    **Dự kiến:** thanh trạng thái chuyển "Đang nghe lệnh" ngay khi bấm ⌃; sau khi nhả ⇒ "Đang dịch" rồi "Xong"; đoạn bôi đen được THAY bằng kết quả (không còn lời dẫn, không có "Lệnh:"); nếu chưa đặt model 9Router (Cài đặt) thì thay vào đó hiện lỗi "Chế độ đám mây đang tắt…"/"Không thể xử lý lệnh…" và đoạn bôi đen giữ NGUYÊN (không bị xoá/thay bằng gì).
 37. Lặp lại bước 36 nhưng KHÔNG bôi đen gì trước (chỉ đặt con trỏ vào ô trống), nói "soạn một câu chào buổi sáng ngắn gọn".
     **Dự kiến:** câu mới được dán vào đúng vị trí con trỏ (chế độ "soạn mới" — `draft`, không có đoạn chọn để thay).
 38. Mở **Terminal**, gõ vài chữ rồi bôi đen bằng chuột (Terminal thường KHÔNG hỗ trợ Accessibility `kAXSelectedTextAttribute`). Giữ ⌥+⌃ như bước 36, nói một lệnh sửa đoạn đó.
     **Dự kiến:** vẫn lấy được đoạn đang bôi đen (qua đường ⌘C tổng hợp dự phòng, chậm hơn một chút); sau khi xong, thử ⌘V ở một chỗ khác để xác nhận clipboard GỐC (trước khi vflow mượn tạm) đã được khôi phục đúng, không phải đoạn vừa bôi đen trong Terminal.
 39. Tab **Lịch sử**: tìm mục vừa tạo ở bước 36/37.
     **Dự kiến:** có một dòng kiểu lệnh (`mode` bắt đầu bằng "command:"), `text_raw` là câu LỆNH đã nói, `text` là KẾT QUẢ — **không có bất kỳ dòng nào chứa đoạn văn bản đã bôi đen** ở Notes/Terminal.
-40. Tab **Cài đặt** › mục "Đám mây (9Router)": tắt công tắc "Cho phép gửi chữ qua 9Router".
+40. Mở cửa sổ **Cài đặt** (⌘,) › mục **Đám mây**: tắt công tắc "Cho phép gửi chữ qua 9Router".
     **Dự kiến:** đổi ngay (không cần Lưu riêng). Thử chế độ Gọn hoặc Command Mode (bước 36) lúc này.
     **Dự kiến:** không có yêu cầu mạng nào tới 9Router; Gọn vẫn dán được bản đã qua từ điển + làm sạch bằng quy tắc, kèm lỗi "Chế độ đám mây đang tắt…"; Command Mode báo lỗi rõ, không dán gì. Bật lại công tắc.
-41. Tab Cài đặt › xoá trắng ô "Model", bấm Lưu.
+41. Cài đặt › Đám mây › xoá trắng ô "Model", bấm Lưu.
     **Dự kiến:** dòng cảnh báo cam "Chưa đặt model: Gọn/Thư/Command Mode sẽ không chạy được." hiện ra. Thử chế độ Gọn ⇒ lỗi rõ ràng (không phải "không rõ lý do"). Đặt lại tên model cũ.
-42. Tab Cài đặt › đổi "Thời gian chờ (giây)" xuống 1, mục Model đặt một model KHÔNG tồn tại trên 9Router thật.
+42. Cài đặt › Đám mây › đổi "Thời gian chờ (giây)" xuống 1, mục Model đặt một model KHÔNG tồn tại trên 9Router thật.
     **Dự kiến:** chế độ Gọn/Thư/Command Mode báo lỗi "quá thời gian" hoặc lỗi dịch vụ rõ ràng trong khoảng 1 giây, không treo lâu. Đặt lại 8 giây.
-43. Mở **Terminal**, chọn chế độ **Lập trình** (menu hoặc tab Tổng quan), giữ ⌥ nói "biến tên gạch dưới người dùng mới bằng mười, rồi nhấn enter". Trước đó, tab Cài đặt bật "Nhấn Enter bằng giọng".
+43. Mở **Terminal**, chọn chế độ **Lập trình** (menu hoặc tab Tổng quan), giữ ⌥ nói "biến tên gạch dưới người dùng mới bằng mười, rồi nhấn enter". Trước đó, Cài đặt bật "Nhấn Enter bằng giọng".
     **Dự kiến:** chữ chèn vào Terminal là `biến tên_người_dùng_mới bằng mười` (không còn cụm "nhấn enter" trong chữ chèn) — RỒI dòng lệnh đó tự chạy (phím Return được gửi ~150 ms sau khi dán). Tắt công tắc "Nhấn Enter bằng giọng" ở Cài đặt rồi lặp lại câu tương tự.
     **Dự kiến:** chữ vẫn chèn đúng nhưng Return KHÔNG được gửi — con trỏ nằm cuối dòng lệnh, chưa chạy, phải tự bấm Enter.
 44. Tab **Snippets** › "Thêm mục…", trigger "chữ ký email", nội dung nhiều dòng (vd. "Trân trọng,\nAn"), Lưu.
