@@ -1,0 +1,315 @@
+import AppKit
+import ServiceManagement
+import VFlowCore
+
+/// Nối các phần: phím nóng ⇒ micro ⇒ engine ⇒ dán ⇒ thanh trạng thái.
+@MainActor
+final class AppController: NSObject {
+    private let overlay = OverlayController()
+    private let hotkeys = HotkeyMonitor()
+    private let recorder = AudioRecorder()
+    private let pasteboard = SystemPasteboard()
+    private var machine = HotkeyStateMachine()
+    private var retry = RetryBuffer()
+    private var supervisor: EngineSupervisor?
+    private var menu: StatusMenu!
+    private var tickTimer: Timer?
+    private var healthTimer: Timer?
+    private var hotkeyRetryTimer: Timer?
+    private var inflight: Task<Void, Never>?
+    private var targetApp: String?
+    private var recordingStartedAt: TimeInterval = 0
+    private let session: URLSession
+    private let home = FileManager.default.homeDirectoryForCurrentUser.path
+
+    private(set) var engineState: EngineState = .stopped
+    private(set) var configError: ClientError?
+    private(set) var lastError: String?
+
+    var mode: DictationMode {
+        get { DictationMode(rawValue: UserDefaults.standard.string(forKey: "mode") ?? "") ?? .auto }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: "mode") }
+    }
+
+    override init() {
+        let cfg = URLSessionConfiguration.ephemeral
+        cfg.connectionProxyDictionary = [:] // chỉ 127.0.0.1, không qua proxy hệ thống
+        cfg.urlCache = nil
+        cfg.httpCookieStorage = nil
+        session = URLSession(configuration: cfg)
+        super.init()
+    }
+
+    static var now: TimeInterval { ProcessInfo.processInfo.systemUptime }
+
+    func start() {
+        menu = StatusMenu(controller: self)
+        recorder.onLevel = { [weak self] l in self?.overlay.setLevel(l) }
+        recorder.onInterrupted = { [weak self] why in self?.micInterrupted(why) }
+        hotkeys.onInput = { [weak self] input in self?.handle(input) }
+        hotkeys.onTapDisabled = { [weak self] in self?.tapDisabled() }
+
+        if AudioRecorder.permission() == .notDetermined { Permission.microphone.request() }
+        startHotkeys()
+
+        switch ClientConfig.resolve(home: home, bundlePath: Bundle.main.bundlePath, fs: .live) {
+        case .failure(let e):
+            configError = e
+            setError(ErrorText.message(e), showOverlay: true)
+        case .success(let spec):
+            let port = spec.port
+            let sup = EngineSupervisor(spec: spec, launcher: FoundationProcessLauncher(),
+                                       probe: { [session] in await Self.probe(session: session, port: port) },
+                                       sleep: { try? await Task.sleep(for: $0) },
+                                       now: { Self.now })
+            sup.onStateChange = { [weak self] s in self?.engineStateChanged(s) }
+            supervisor = sup
+            Task { await sup.start() }
+            healthTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated { if let s = self?.supervisor { Task { await s.refresh() } } }
+            }
+        }
+        menu.refresh()
+    }
+
+    /// Thoát: đóng engine con trước.
+    func shutdown() async {
+        hotkeys.stop()
+        recorder.cancel()
+        inflight?.cancel()
+        await supervisor?.stop()
+    }
+
+    // MARK: engine
+
+    nonisolated static func probe(session: URLSession, port: Int) async -> HealthProbe {
+        do {
+            let (data, resp) = try await session.data(for: EngineAPI.healthRequest(port: port))
+            let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            if let h = EngineAPI.parseHealth(status: status, data: data) { return .engine(h) }
+            return .foreign
+        } catch {
+            return .unreachable
+        }
+    }
+
+    private func engineStateChanged(_ s: EngineState) {
+        engineState = s
+        if case .failed(let e) = s { setError(ErrorText.message(e), showOverlay: true) }
+        menu.refresh()
+    }
+
+    func restartEngine() {
+        guard let s = supervisor else { return }
+        Task { await s.stop(); await s.start() }
+    }
+
+    var health: Health? {
+        if case .running(_, let h) = engineState { return h }
+        return nil
+    }
+
+    var engineOwned: Bool { supervisor?.ownsChild ?? false }
+
+    // MARK: phím nóng
+
+    private func startHotkeys() {
+        // Chỉ tạo event tap khi đã có quyền (tapCreate khi chưa có quyền tự bật hộp thoại hệ thống).
+        if Permission.inputMonitoring.granted, hotkeys.start() {
+            hotkeyRetryTimer?.invalidate()
+            hotkeyRetryTimer = nil
+            menu.refresh()
+            return
+        }
+        // Thiếu quyền: hỏi một lần (thêm app vào danh sách), thử lại định kỳ.
+        Permission.inputMonitoring.request()
+        setError(ErrorText.message(.inputMonitoringDenied), showOverlay: true)
+        if hotkeyRetryTimer == nil {
+            hotkeyRetryTimer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self, Permission.inputMonitoring.granted, self.hotkeys.start() else { return }
+                    self.hotkeyRetryTimer?.invalidate()
+                    self.hotkeyRetryTimer = nil
+                    self.lastError = nil
+                    self.menu.refresh()
+                }
+            }
+        }
+    }
+
+    var hotkeysActive: Bool { hotkeys.isRunning }
+
+    private func handle(_ input: KeyInput) {
+        perform(machine.handle(input, at: Self.now))
+        updateTicking()
+    }
+
+    private func tapDisabled() {
+        perform(machine.reset(optionHeld: HotkeyMonitor.leftOptionHeldNow()))
+        updateTicking()
+    }
+
+    private func updateTicking() {
+        if machine.needsTicks, tickTimer == nil {
+            tickTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    self.perform(self.machine.tick(at: Self.now, optionHeld: HotkeyMonitor.leftOptionHeldNow()))
+                    self.updateTicking()
+                }
+            }
+        } else if !machine.needsTicks, let t = tickTimer {
+            t.invalidate()
+            tickTimer = nil
+        }
+    }
+
+    private func perform(_ action: HotkeyAction) {
+        switch action {
+        case .none: break
+        case .startRecording: beginRecording()
+        case .stopAndSend: finishRecording()
+        case .cancel:
+            recorder.cancel()
+            overlay.show(.notice(OverlayText.cancelled))
+            menu.refresh()
+        case .busyTimedOut:
+            inflight?.cancel()
+            inflight = nil
+            setError("Engine không phản hồi, đã bỏ yêu cầu", showOverlay: true)
+        }
+    }
+
+    private func abortRecording(_ error: ClientError) {
+        _ = machine.reset(optionHeld: HotkeyMonitor.leftOptionHeldNow())
+        recorder.cancel()
+        setError(ErrorText.message(error), showOverlay: true)
+        updateTicking()
+    }
+
+    private func beginRecording() {
+        switch AudioRecorder.permission() {
+        case .authorized: break
+        case .notDetermined:
+            Permission.microphone.request()
+            return abortRecording(.micDenied)
+        default:
+            return abortRecording(.micDenied)
+        }
+        guard engineState.isReady else {
+            if let e = configError { return abortRecording(e) }
+            if case .failed(let e) = engineState { return abortRecording(e) }
+            return abortRecording(.engineNotRunning)
+        }
+        targetApp = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+        do {
+            try recorder.start()
+        } catch let e as ClientError {
+            return abortRecording(e)
+        } catch {
+            return abortRecording(.micUnavailable(error.localizedDescription))
+        }
+        recordingStartedAt = Self.now
+        overlay.setLevel(0)
+        overlay.show(.listening(level: 0))
+        menu.refresh()
+    }
+
+    private func micInterrupted(_ why: String) {
+        guard machine.isRecording else { return }
+        abortRecording(.micUnavailable(why))
+    }
+
+    private func finishRecording() {
+        let pcm = recorder.stop()
+        let m = mode
+        retry.store(pcm: pcm, mode: m.rawValue, app: targetApp, at: Self.now)
+        send(pcm: pcm, mode: m, app: targetApp)
+    }
+
+    func retryLast() {
+        guard let e = retry.current(at: Self.now), machine.beginExternalJob(at: Self.now) else { return }
+        updateTicking()
+        send(pcm: e.pcm, mode: DictationMode(rawValue: e.mode) ?? .auto, app: e.app)
+    }
+
+    var canRetry: Bool {
+        var r = retry
+        return r.current(at: Self.now) != nil && machine.phase == .idle
+    }
+
+    private func send(pcm: Data, mode: DictationMode, app: String?) {
+        overlay.show(.transcribing)
+        menu.refresh()
+        let port = supervisor?.spec.port ?? ClientConfig.defaultPort
+        let tokenPath = home + "/.vflow/token"
+        inflight = Task { [session] in
+            let result: Result<TranscribeResult, ClientError>
+            if let contents = try? String(contentsOfFile: tokenPath, encoding: .utf8) {
+                if let token = EngineAPI.parseToken(contents) {
+                    result = await Self.transcribe(session: session, port: port, token: token, pcm: pcm, mode: mode, app: app)
+                } else {
+                    result = .failure(.tokenInvalid(path: tokenPath))
+                }
+            } else {
+                result = .failure(.tokenMissing(path: tokenPath))
+            }
+            guard !Task.isCancelled else { return }
+            await self.deliver(result)
+        }
+    }
+
+    nonisolated static func transcribe(session: URLSession, port: Int, token: String, pcm: Data,
+                                       mode: DictationMode, app: String?) async -> Result<TranscribeResult, ClientError> {
+        let req = EngineAPI.transcribeRequest(port: port, token: token, pcm: pcm, mode: mode, app: app)
+        do {
+            let (data, resp) = try await session.data(for: req)
+            return EngineAPI.parseTranscribe(status: (resp as? HTTPURLResponse)?.statusCode ?? 0, data: data)
+        } catch let e as URLError where e.code == .cannotConnectToHost || e.code == .networkConnectionLost {
+            return .failure(.engineNotRunning)
+        } catch let e as URLError where e.code == .timedOut {
+            return .failure(.engine(status: 0, code: "timeout", message: "hết thời gian chờ"))
+        } catch {
+            return .failure(.network(error.localizedDescription))
+        }
+    }
+
+    private func deliver(_ result: Result<TranscribeResult, ClientError>) async {
+        inflight = nil
+        let plan = DictationDecision.plan(for: result)
+        if plan.clearRetry { retry.clear() }
+        var overlayState = plan.overlay
+        if let text = plan.insert {
+            let inserter = ClipboardInserter(pasteboard: pasteboard, sendPaste: { PasteKeystroke.send() },
+                                             wait: { try? await Task.sleep(for: $0) })
+            let outcome = await inserter.insert(text)
+            overlayState = DictationDecision.overlay(after: outcome, planned: plan.overlay)
+        }
+        if case .error(let m) = overlayState { lastError = m } else { lastError = nil }
+        overlay.show(overlayState)
+        machine.finished(optionHeld: HotkeyMonitor.leftOptionHeldNow())
+        updateTicking()
+        menu.refresh()
+    }
+
+    private func setError(_ message: String, showOverlay: Bool) {
+        lastError = message
+        if showOverlay { overlay.show(.error(message)) }
+        menu?.refresh()
+    }
+
+    var phase: HotkeyPhase { machine.phase }
+
+    // MARK: đăng nhập
+
+    var launchAtLogin: Bool { SMAppService.mainApp.status == .enabled }
+
+    func toggleLaunchAtLogin() {
+        do {
+            if launchAtLogin { try SMAppService.mainApp.unregister() } else { try SMAppService.mainApp.register() }
+        } catch {
+            setError("Không đổi được “Bật khi đăng nhập”: \(error.localizedDescription)", showOverlay: true)
+        }
+        menu.refresh()
+    }
+}
