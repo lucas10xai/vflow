@@ -19,6 +19,8 @@ for arg in "$@"; do
   esac
 done
 cd "$CLIENT_DIR"
+# shellcheck source=./lib-signing.sh
+source "$CLIENT_DIR/scripts/lib-signing.sh"
 
 echo "• swift build -c release (VFlow)…"
 swift build -c release --product VFlow -j "${VFLOW_BUILD_JOBS:-2}"
@@ -66,12 +68,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 PLIST
 plutil -lint "$APP/Contents/Info.plist" >/dev/null
 
-SIGN_IDENTITY_NAME="vflow Local Signing"
-if security find-identity -v -p codesigning 2>/dev/null | grep -qF "\"$SIGN_IDENTITY_NAME\""; then
-  SIGN_IDENTITY="$SIGN_IDENTITY_NAME"
-else
-  SIGN_IDENTITY="-" # ad-hoc
-fi
+SIGN_STATE="$(vflow_signing_state)"
+SIGN_IDENTITY="$(vflow_signing_codesign_arg "$SIGN_STATE")"
 
 if [ "$BUNDLE_ENGINE" = "1" ]; then
   "$CLIENT_DIR/scripts/bundle-engine.sh" "$APP" "$SIGN_IDENTITY"
@@ -79,15 +77,12 @@ else
   echo "• --no-bundle: bỏ qua đóng gói engine (app cần repo + Node hệ thống như trước M4b)"
 fi
 
-if [ "$SIGN_IDENTITY" = "-" ]; then
-  echo "• ký ad-hoc: macOS có thể đòi cấp lại quyền macOS (Theo dõi đầu vào/Trợ năng/Micro) mỗi lần dựng lại."
-  echo "  Chạy client/scripts/make-signing-identity.sh --yes để tạo danh tính ký ổn định (cần chủ dự án duyệt)."
-else
-  echo "• ký ổn định bằng \"$SIGN_IDENTITY\": quyền macOS được giữ qua các lần cài (xem README mục Chữ ký)."
-fi
+vflow_signing_report "$SIGN_STATE"
 codesign --force --deep -s "$SIGN_IDENTITY" --identifier org.aios.vflow "$APP"
 codesign --verify --deep --strict "$APP"
 echo "• chữ ký OK"
+echo "• designated requirement:"
+vflow_signing_check_dr "$APP"
 
 if [ "$CLEAN" = "1" ]; then
   rm -rf "$CLIENT_DIR/.build"

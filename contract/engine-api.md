@@ -43,7 +43,7 @@ Quy tắc: `text_raw` luôn là chữ gốc do STT trả về, không đổi. `t
 - `normal`: STT + từ điển.
 - `clean`: như `normal` + bỏ từ đệm (ừm, à, ờ, uh…) và sửa dấu cách/chấm câu cơ bản; thuần quy tắc, không gọi LLM.
 - `email`: STT + từ điển + viết lại thành thư chuyên nghiệp qua endpoint OpenAI-compatible (`/chat/completions`); chỉ gửi **văn bản** (không âm thanh).
-- `auto`: chọn theo `app` qua `auto.apps` (mặc định: ứng dụng thư → `email`; terminal/IDE như Terminal, iTerm2, Warp, VS Code, Cursor → `dev`; ứng dụng nhắn tin → `tidy`; còn lại → `normal`).
+- `auto`: chọn theo `app` qua `auto.apps`. **Mặc định CHỈ chọn chế độ chạy trong máy, không bao giờ gọi LLM**: terminal/IDE (Terminal, iTerm2, Warp, VS Code, Cursor, Ghostty) → `dev`; ứng dụng thư và nhắn tin (Mail, Outlook, Slack, Telegram, Discord, Tin nhắn, WhatsApp…) → `clean`; còn lại → `normal`. `tidy` và `email` chỉ dùng khi người dùng CHỦ ĐỘNG chọn chúng (hoặc tự ánh xạ trong `auto.apps`); khi đó văn bản của app đó sẽ được gửi qua LLM.
 - `tidy` ("Gọn"): STT + từ điển + snippets + quy tắc đọc kiểu lập trình + **LLM làm gọn** qua endpoint OpenAI-compatible: tự thêm dấu câu và viết hoa, bỏ từ đệm, hiểu tự sửa giữa câu (backtrack: "…thứ Sáu, à nhầm, thứ Năm" chỉ giữ "thứ Năm"), định dạng danh sách khi người nói liệt kê. Chỉ gửi **văn bản**. KHÔNG được thêm ý, số, tên hay thuật ngữ không có trong lời nói. Lỗi/quá giờ/bị chặn bởi guard ⇒ `text` = văn bản đã qua từ điển và `clean` bằng quy tắc (không LLM), `rewrite = {used:false, error:"<mã>"}` (mã thêm: `guard_rejected`, `cloud_disabled`).
 - `dev` ("Lập trình"): như `clean` + quy tắc đọc kiểu lập trình (thuần quy tắc, không LLM, không gửi gì ra ngoài): "gạch dưới" → `_`, "gạch ngang" → `-`, "gạch chéo" → `/`, "hai chấm" → `:`, "chấm" giữa hai định danh (hoặc trước đuôi tệp đã biết) → `.`, "viết thường nối gạch dưới a b c" → `a_b_c` (snake_case), "camel case a b c" → `aBC` đúng quy ước, v.v. Chỉ áp dụng ở dạng cụm không nhập nhằng; không đổi từ tiếng Việt thường.
 
@@ -72,3 +72,4 @@ Luôn gửi `"stream": false`. Máy chủ đã thấy trả luồng SSE (`data: 
 7. `snippet` không bao giờ bị sửa bởi từ điển/làm gọn/viết lại; chỉ mở rộng đúng hai dạng đã nêu.
 8. `actions:["enter"]` chỉ xuất hiện khi cụm đứng ĐÚNG ở cuối lời nói và `actions_enabled` bật.
 9. `cloud_llm=false` ⇒ không có yêu cầu mạng nào tới endpoint LLM (kiểm bằng máy chủ giả đếm yêu cầu).
+10. Với cấu hình mặc định, `mode=auto` KHÔNG BAO GIỜ gọi LLM (kiểm bằng máy chủ giả đếm 0 yêu cầu qua mọi `app` trong `auto.apps` mặc định). Chỉ chọn thủ công `tidy`/`email` hoặc tự sửa `auto.apps` mới gửi chữ ra LLM.

@@ -143,14 +143,31 @@ Lỗi/quá giờ/tắt đám mây ở Gọn/Thư ⇒ vẫn dán bản đã qua t
 `client/Resources/branding/logo-main.png` (tròn cam, chữ V đen, 1024², do chủ dự án cung cấp, KHÔNG sửa) ⇒ `scripts/make-icon.sh` thu nhỏ vào vùng an toàn ≈824/1024 ở giữa canvas 1024 (CoreGraphics, `scripts/pad-icon.swift`) rồi `sips -z`/`iconutil -c icns` ra `client/Resources/AppIcon.icns` (biểu tượng Dock/Finder/Cmd-Tab/Giới thiệu, qua `CFBundleIconFile` trong Info.plist). `client/Resources/branding/logo-mark.png` (chữ V cam trên nền trong suốt, 1024², KHÔNG sửa) ⇒ `sips -z` ra `menubar-mark-18{,@2x,@3x}.png` (18/36/54 px) dùng cho biểu tượng thanh menu, đầu cửa sổ chính (`HeaderBar`, ~28pt) và cạnh chữ trên thanh trạng thái ghi âm (`VFlow.BrandIcon`, nạp từ `Bundle.main.resourcePath`). Trạng thái (nghe/dịch/lỗi) không dựa riêng vào màu: biểu tượng thanh menu phủ thêm một chấm nhỏ (hình, không chỉ màu) ở góc dưới-phải khi đang nghe/dịch/lỗi, cộng tooltip/nhãn trợ năng luôn mô tả bằng chữ. Chạy lại `scripts/make-icon.sh` khi đổi logo; `build-app.sh` chỉ COPY các tệp sinh ra (không tự sinh).
 
 ## Chữ ký
-Máy chưa có danh tính ký mã nào mặc định (`security find-identity -v -p codesigning`) ⇒ `build-app.sh` ký **ad-hoc** (`-s -`), mất quyền macOS mỗi lần dựng lại (xem mục Quyền macOS). `client/scripts/make-signing-identity.sh --yes` tạo một chứng chỉ **tự ký** tên cố định "vflow Local Signing" (RSA 2048, hạn 10 năm, `extendedKeyUsage=codeSigning`) và nhập vào login keychain (`-T /usr/bin/codesign`) — chạy MỘT LẦN, cần chủ dự án xác nhận hộp thoại keychain hiện ra; idempotent (chạy lại không tạo trùng); `--dry-run` chỉ in các lệnh sẽ chạy, không đổi gì. Có danh tính này ⇒ `build-app.sh`/`bundle-engine.sh` tự dùng nó để ký cả bundle lẫn nhị phân lồng nhau (node, `*.node`, `*.dylib`), giữ **cùng một chữ ký** qua các lần dựng ⇒ quyền macOS thường được giữ.
+`client/scripts/lib-signing.sh` (dùng chung, nạp bằng `source` trong `build-app.sh`/`install-app.sh`/`make-signing-identity.sh`) dò **3 trạng thái** của danh tính "vflow Local Signing" trong keychain — đo thật trên keychain tạm, không phải suy đoán:
+- **none** — chưa có chứng chỉ nào tên này.
+- **untrusted** — đã có chứng chỉ+khoá trong keychain (`security find-identity -p codesigning`, KHÔNG `-v`, thấy kèm `CSSMERR_TP_NOT_TRUSTED`) nhưng hệ thống CHƯA tin cậy nó cho ký mã ⇒ `security find-identity -v -p codesigning` báo "0 valid identities found" và `codesign -s "vflow Local Signing"` báo "no identity found" (exit 1) — **không ký được**, dù chứng chỉ đã tồn tại.
+- **valid** — đã tin cậy, `-v` thấy, ký được ngay.
+
+`none` và `untrusted` đều khiến `build-app.sh` ký **ad-hoc** (`-s -`, mất quyền macOS mỗi lần dựng lại — xem mục Quyền macOS), nhưng thông báo khác nhau: `untrusted` nhắc rõ chỉ cần chạy lại `--yes` để THÊM tin cậy (không cần tạo chứng chỉ mới), còn `none` cần tạo từ đầu.
+
+`client/scripts/make-signing-identity.sh --yes`:
+1. Tạo chứng chỉ **tự ký** tên cố định "vflow Local Signing" (RSA 2048, hạn 10 năm, `extendedKeyUsage=codeSigning`) bằng **`/usr/bin/openssl`** (LibreSSL của macOS — **không** dùng `openssl` trong PATH: bản Homebrew hiện tại xuất `.p12` bị `security import` từ chối "MAC verification failed", đã tự kiểm thật trước khi viết script).
+2. Nhập vào keychain (`-T /usr/bin/codesign`).
+3. **Tin cậy** chứng chỉ cho ký mã (`security add-trusted-cert -r trustRoot -p codeSign`) — bước này hiện hộp thoại đổi Certificate Trust Settings, **cần chủ dự án xác nhận trực tiếp** (có thể là hộp thoại mật khẩu keychain thứ hai, riêng với hộp thoại ở bước nhập).
+
+Idempotent theo đúng 3 trạng thái trên (xem chú thích đầu file); `--dry-run` chỉ in các lệnh sẽ chạy (gồm cả bước tin cậy), không đổi gì; `--remove [--yes|--dry-run]` xoá chứng chỉ+khoá và bỏ tin cậy (`security delete-identity -t`), cũng idempotent. Lần ký đầu sau khi có danh tính hợp lệ, macOS có thể hỏi thêm "codesign muốn dùng khoá riêng của bạn" — bấm **"Luôn cho phép"**.
+
+Biến môi trường `VFLOW_SIGN_KEYCHAIN` (đổi keychain đích) và `VFLOW_SIGN_SKIP_TRUST=1` (bỏ bước tin cậy) chỉ dùng cho test tự động trên keychain tạm — không dùng khi chạy `--yes` thật.
+
+Có danh tính ở trạng thái `valid` ⇒ `build-app.sh`/`bundle-engine.sh` tự dùng nó để ký cả bundle lẫn nhị phân lồng nhau (node, `*.node`, `*.dylib`), giữ **cùng một chữ ký** qua các lần dựng ⇒ quyền macOS thường được giữ.
 
 Xem chữ ký đang dùng và có giữ được quyền không:
 ```sh
 codesign -dvvv client/build/VFlow.app 2>&1 | grep -i "authority\|identifier\|designated"
+codesign -dr- client/build/VFlow.app     # build-app.sh tự in dòng này; còn "cdhash" ⇒ vẫn ad-hoc, ký "ổn định" chưa có tác dụng
 codesign -d --entitlements - client/build/VFlow.app   # (vflow không khai entitlement nào — không sandbox, không hardened runtime)
 ```
-`Authority=vflow Local Signing` (ký ổn định) hoặc `Authority=-` không xuất hiện/`adhoc` (ký ad-hoc) cho biết đang dùng kiểu nào; `designated requirement` ổn định (dựa trên chứng chỉ) là điều kiện để TCC coi các lần dựng là "cùng một app".
+`Authority=vflow Local Signing` (ký ổn định) hoặc `Authority=-` không xuất hiện/`adhoc` (ký ad-hoc) cho biết đang dùng kiểu nào; `designated requirement` ổn định (dựa trên chứng chỉ, không có `cdhash`) là điều kiện để TCC coi các lần dựng là "cùng một app".
 
 ## Rủi ro đã biết
 - **Va chạm ⌥**: vì tap chỉ nghe, ký tự gõ bằng ⌥ (å, ∫, “…) vẫn vào ứng dụng như thường. Nếu giữ ⌥ ≥ 200 ms rồi mới bấm phím (⌥← chậm, ⌥-kéo chuột) thì micro bật thoáng qua rồi huỷ (“Đã huỷ”), chỉ báo micro màu cam có thể nháy. Giữ ⌥ một mình (ví dụ chờ để ⌥-click) sẽ bắt đầu ghi.
