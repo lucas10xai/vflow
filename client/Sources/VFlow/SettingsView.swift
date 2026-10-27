@@ -1,34 +1,20 @@
 import SwiftUI
 import VFlowCore
 
-/// Bốn mục của cửa sổ Cài đặt (`SettingsWindow.swift`) — xem mô tả từng mục ở từng `*SettingsTab`
-/// bên dưới. Giữ TOÀN BỘ hành vi/kết nối engine cũ (U1: chỉ sắp xếp lại vào cửa sổ chuẩn macOS).
-enum SettingsCategory: String, CaseIterable, Identifiable {
-    case general, voice, apps, cloud, data, hotkeys, historyPrivacy, advanced
-    var id: String { rawValue }
+/// Năm mục của cửa sổ Cài đặt (`SettingsWindow.swift`) — logic chọn mục/tên cũ nằm ở
+/// `VFlowCore.SettingsPane` (có test); ở đây chỉ thêm biểu tượng. Giữ TOÀN BỘ chức năng cũ, chỉ gộp 8
+/// mục thành 5 để nhãn tab không bị cắt chữ.
+typealias SettingsCategory = SettingsPane
 
-    var title: String {
-        switch self {
-        case .general: "Chung"
-        case .voice: "Giọng nói"
-        case .apps: "Ứng dụng"
-        case .cloud: "Đám mây"
-        case .data: "Dữ liệu"
-        case .hotkeys: "Phím tắt"
-        case .historyPrivacy: "Lịch sử & riêng tư"
-        case .advanced: "Nâng cao"
-        }
-    }
+extension SettingsPane: Identifiable {
+    public var id: String { rawValue }
 
     var symbol: String {
         switch self {
         case .general: "gearshape"
         case .voice: "waveform"
         case .apps: "app.badge"
-        case .cloud: "cloud"
-        case .data: "tray.full"
-        case .hotkeys: "command"
-        case .historyPrivacy: "lock.shield"
+        case .data: "lock.shield"
         case .advanced: "wrench.and.screwdriver"
         }
     }
@@ -112,65 +98,6 @@ struct GeneralSettingsTab: View {
     }
 }
 
-/// Mục "Phím tắt": phím giữ-để-nói, phím thứ hai cho Command Mode, tổ hợp "Chèn lại câu vừa rồi" —
-/// áp dụng NGAY cho lần ghi kế tiếp (không ảnh hưởng lần ghi đang chạy, xem
-/// `VFlowCore.ActiveHotkeyConfig`); lưu qua `AppController.hotkeyConfig`/`reinsertChord`
-/// (UserDefaults, cô lập theo `VFLOW_HOME`).
-struct HotkeysSettingsTab: View {
-    let controller: AppController
-    @State private var holdKey: HoldModifierKey = .leftOption
-    @State private var commandKey: HoldModifierKey = .leftControl
-    @State private var reinsertPreset: ReinsertChordPreset = .optionCommandV
-
-    var body: some View {
-        Form {
-            Section("Giữ để nói") {
-                Picker("Phím giữ để nói", selection: $holdKey) {
-                    ForEach(HoldModifierKey.allCases, id: \.self) { Text($0.title).tag($0) }
-                }
-                .onChange(of: holdKey) { _, _ in save() }
-                Text("Giữ phím này, nói, nhả để chèn — đúp phím này để ghi hands-free.")
-                    .font(.footnote).foregroundStyle(.secondary)
-            }
-            Section("Command Mode (sửa/soạn văn bản bằng lời)") {
-                Picker("Phím thứ hai (cùng phím giữ để nói)", selection: $commandKey) {
-                    ForEach(HoldModifierKey.allCases, id: \.self) { Text($0.title).tag($0) }
-                }
-                .onChange(of: commandKey) { _, _ in save() }
-                Text("Giữ phím giữ-để-nói rồi bấm thêm phím này trong 400 ms đầu.")
-                    .font(.footnote).foregroundStyle(.secondary)
-            }
-            if let warning = HotkeyConfigValidation.conflictMessage(HotkeyKeyConfig(holdKey: holdKey, commandKey: commandKey)) {
-                Section { Text(warning).foregroundStyle(Color.red).font(.footnote) }
-            }
-            Section("Chèn lại câu vừa rồi") {
-                Picker("Tổ hợp phím", selection: $reinsertPreset) {
-                    ForEach(ReinsertChordPreset.allCases, id: \.self) { Text($0.title).tag($0) }
-                }
-                .onChange(of: reinsertPreset) { _, v in controller.reinsertChord = v.chord }
-            }
-            Section {
-                Button("Đặt lại mặc định") {
-                    controller.resetHotkeysToDefault()
-                    load()
-                }
-            }
-        }
-        .formStyle(.grouped)
-        .task { load() }
-    }
-
-    private func load() {
-        let cfg = controller.hotkeyConfig
-        holdKey = cfg.holdKey
-        commandKey = cfg.commandKey
-        reinsertPreset = ReinsertChordPreset.matching(controller.reinsertChord) ?? .optionCommandV
-    }
-
-    private func save() {
-        controller.hotkeyConfig = HotkeyKeyConfig(holdKey: holdKey, commandKey: commandKey)
-    }
-}
 
 /// Chọn micro (Cài đặt › Chung) — danh sách thiết bị đầu vào + "Mặc định hệ thống", lưu theo UID
 /// (`AppController.micDeviceUID`); thiết bị biến mất ⇒ tự rơi về mặc định + báo một lần bằng HUD
@@ -231,132 +158,76 @@ struct SilenceStopSection: View {
     }
 }
 
-/// Mục "Lịch sử & riêng tư": công tắc lưu lịch sử + xoá toàn bộ, câu giải thích riêng tư.
-struct HistoryPrivacySettingsTab: View {
-    let controller: AppController
-    @AppStorage("historyEnabled") private var historyEnabled = true
-    @State private var confirmClearHistory = false
-    @State private var clearHistoryError: String?
 
-    var body: some View {
-        Form {
-            Section("Lịch sử") {
-                Toggle("Lưu lịch sử", isOn: Binding(
-                    get: { historyEnabled },
-                    set: { controller.historyEnabled = $0; historyEnabled = $0 }))
-                Text("Tắt: không ghi mục mới, không xoá lịch sử đã có. Chỉ lưu văn bản, không bao giờ lưu âm thanh.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                Button("Xoá toàn bộ lịch sử…", role: .destructive) { confirmClearHistory = true }
-                if let e = clearHistoryError {
-                    Text(e).font(.footnote).foregroundStyle(Color.red)
-                }
-            }
-            Section("Riêng tư") {
-                Label("Âm thanh không bao giờ được ghi xuống đĩa và không rời máy này.", systemImage: "waveform.badge.exclamationmark")
-                    .font(.footnote)
-                Label("Chế độ Gọn, Thư và Command Mode gửi CHỮ (không phải âm thanh) qua 9Router — xem mục Đám mây.", systemImage: "text.bubble")
-                    .font(.footnote)
-            }
-        }
-        .formStyle(.grouped)
-        .alert("Xoá toàn bộ lịch sử?", isPresented: $confirmClearHistory) {
-            Button("Xoá", role: .destructive) {
-                do { try controller.clearHistory() } catch { clearHistoryError = "Không xoá được lịch sử: \(error.localizedDescription)" }
-            }
-            Button("Huỷ", role: .cancel) {}
-        } message: {
-            Text("Không thể hoàn tác. Toàn bộ các câu đã đọc chính tả được lưu ở thiết bị này sẽ bị xoá.")
-        }
-    }
-}
-
-/// Mục "Nâng cao": thư mục dữ liệu, phiên bản.
+/// Mục "Nâng cao": đám mây 9Router (công tắc, model, thời gian chờ), độ trễ bắt đầu ghi, thông tin kỹ
+/// thuật (thư mục dữ liệu, phiên bản). `GET/PUT /v1/settings` — hiệu lực ngay, lỗi `bad_request` của
+/// engine hiện tiếng Việt. (Gộp từ "Đám mây" + "Nâng cao" cũ để cửa sổ chỉ còn 5 mục, không cắt chữ.)
 struct AdvancedSettingsTab: View {
+    let model: StatusModel
     let controller: AppController
+
     @State private var latencyLog = RecordingLatencyStore.shared.snapshot
+    @State private var loaded = false
+    @State private var loadError: ClientError?
+    @State private var cloudLlm = true
+    @State private var llmModelText = ""
+    @State private var timeoutSeconds = 8
+    @State private var saveError: String?
 
     var body: some View {
         Form {
-            Section("Dữ liệu") {
-                LabeledContent("Thư mục dữ liệu") {
-                    Text(controller.dataHomePath).textSelection(.enabled)
-                }
-                Button("Mở thư mục dữ liệu") { controller.openDataFolder() }
-            }
+            cloudBody
             Section("Độ trễ bắt đầu ghi") {
                 LabeledContent("Từ nhấn phím tới khối âm thanh đầu") {
                     Text(RecordingLatencyText.summary(log: latencyLog)).textSelection(.enabled)
                 }
                 Text("Đo trong phiên này, chỉ giữ trong bộ nhớ (50 lượt gần nhất) — không ghi đĩa, không chứa nội dung giọng nói. Mở lại app là xoá.")
                     .font(.footnote).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            Section("Phiên bản") {
+            Section("Thông tin kỹ thuật") {
+                LabeledContent("Thư mục dữ liệu") {
+                    Text(controller.dataHomePath).textSelection(.enabled)
+                        .multilineTextAlignment(.trailing)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Button("Mở thư mục dữ liệu") { controller.openDataFolder() }
                 LabeledContent("Phiên bản vflow", value: AppVersion.current)
             }
-        }
-        .formStyle(.grouped)
-        .onAppear { latencyLog = RecordingLatencyStore.shared.snapshot }
-        .onReceive(NotificationCenter.default.publisher(for: RecordingLatencyStore.didRecord).receive(on: DispatchQueue.main)) { _ in
-            latencyLog = RecordingLatencyStore.shared.snapshot
-        }
-    }
-}
-
-enum AppVersion {
-    static let current = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "0.1.0"
-}
-
-/// Mục "Đám mây (9Router)": `GET/PUT /v1/settings` — công tắc gửi chữ qua 9Router, model, thời gian
-/// chờ, công tắc "Nhấn Enter bằng giọng". Hiệu lực ngay, lỗi `bad_request` của engine hiện tiếng Việt.
-struct CloudSettingsSection: View {
-    let model: StatusModel
-    let controller: AppController
-
-    @State private var loaded = false
-    @State private var loadError: ClientError?
-    @State private var cloudLlm = true
-    @State private var llmModelText = ""
-    @State private var timeoutSeconds = 8
-    @State private var actionsEnabled = true
-    @State private var saveError: String?
-    @State private var saving = false
-
-    var body: some View {
-        Form {
-            Section {
-                Text("Âm thanh không bao giờ rời máy. Chế độ Gọn, Thư và Command Mode gửi CHỮ (không phải âm thanh) qua 9Router tới nhà cung cấp model.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-            body_
         }
         .formStyle(.grouped)
         .task(id: model.engineReady) {
             guard model.engineReady, !loaded else { return }
             await load()
         }
+        .onAppear { latencyLog = RecordingLatencyStore.shared.snapshot }
+        .onReceive(NotificationCenter.default.publisher(for: RecordingLatencyStore.didRecord).receive(on: DispatchQueue.main)) { _ in
+            latencyLog = RecordingLatencyStore.shared.snapshot
+        }
     }
 
-    @ViewBuilder private var body_: some View {
+    @ViewBuilder private var cloudBody: some View {
         if model.engineBlocked {
-            Section { Text(model.engineSummary).foregroundStyle(Color.red) }
+            Section("Đám mây (9Router)") { Text(model.engineSummary).foregroundStyle(Color.red) }
         } else if !model.engineReady {
-            Section { Text("Đang chờ engine khởi động…").foregroundStyle(.secondary) }
+            Section("Đám mây (9Router)") { Text("Đang chờ engine khởi động…").foregroundStyle(.secondary) }
         } else if let e = loadError {
-            Section {
+            Section("Đám mây (9Router)") {
                 Text(ErrorText.message(e)).foregroundStyle(Color.red)
                 Button("Thử lại") { Task { await load() } }
             }
         } else if !loaded {
-            Section { Text("Đang tải…").foregroundStyle(.secondary) }
+            Section("Đám mây (9Router)") { Text("Đang tải…").foregroundStyle(.secondary) }
         } else {
-            form
+            cloudForm
         }
     }
 
-    @ViewBuilder private var form: some View {
-        Section("9Router") {
+    @ViewBuilder private var cloudForm: some View {
+        Section("Đám mây (9Router)") {
+            Text("Âm thanh không rời máy. Chế độ Gọn, Thư và Command Mode gửi CHỮ (không phải âm thanh) qua 9Router tới nhà cung cấp model.")
+                .font(.footnote).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             Toggle("Cho phép gửi chữ qua 9Router", isOn: $cloudLlm)
                 .onChange(of: cloudLlm) { _, v in Task { await save(.init(cloudLlm: v)) } }
             VStack(alignment: .leading, spacing: 4) {
@@ -370,6 +241,7 @@ struct CloudSettingsSection: View {
                 if llmModelText.isEmpty {
                     Text("Chưa đặt model: Gọn/Thư/Command Mode sẽ không chạy được.")
                         .font(.footnote).foregroundStyle(Theme.warningText)
+                        .fixedSize(horizontal: false, vertical: true)
                 } else {
                     Text("Đang dùng: \(llmModelText)").font(.footnote).foregroundStyle(.secondary)
                 }
@@ -380,11 +252,6 @@ struct CloudSettingsSection: View {
                 Stepper(value: $timeoutSeconds, in: 1...30) { Text("\(timeoutSeconds) giây") }
                     .onChange(of: timeoutSeconds) { _, v in Task { await save(.init(llmTimeoutMs: v * 1000)) } }
             }
-        }
-        Section("Hành động bằng giọng") {
-            Toggle("Nhấn Enter bằng giọng", isOn: $actionsEnabled)
-                .onChange(of: actionsEnabled) { _, v in Task { await save(.init(actionsEnabled: v)) } }
-                .help("Nói \"nhấn enter\" ở cuối câu để tự động gửi phím Return sau khi dán.")
         }
         if let e = saveError {
             Section { Text(e).foregroundStyle(Color.red) }
@@ -403,16 +270,17 @@ struct CloudSettingsSection: View {
         cloudLlm = s.cloudLlm
         llmModelText = s.llmModel ?? ""
         timeoutSeconds = max(1, s.llmTimeoutMs / 1000)
-        actionsEnabled = s.actionsEnabled
     }
 
     private func save(_ patch: SettingsPatch) async {
-        saving = true
-        let result = await controller.applySettingsPatch(patch)
-        saving = false
-        switch result {
+        switch await controller.applySettingsPatch(patch) {
         case .success(let s): apply(s); saveError = nil
         case .failure(let e): saveError = ErrorText.message(e)
         }
     }
 }
+
+enum AppVersion {
+    static let current = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "0.1.0"
+}
+

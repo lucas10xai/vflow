@@ -30,53 +30,69 @@ public enum PasteOutcome: Equatable, Sendable {
     case pastedRestored
     /// Đã dán; người dùng sao chép thứ khác trong lúc chờ ⇒ không đè.
     case pastedNotRestoredUserChanged
-    /// Không tổng hợp được ⌘V (thiếu quyền) ⇒ chữ để lại trên clipboard.
+    /// Không tổng hợp được ⌘V (thiếu quyền Trợ năng) ⇒ chữ để lại trên clipboard. ĐÂY LÀ LÝ DO DUY NHẤT
+    /// để không dán: việc "không dò được ô nhập" (Accessibility của nhiều app không chuẩn) KHÔNG BAO GIỜ
+    /// được dùng làm lý do bỏ dán — đó từng là hồi quy khiến người dùng phải tự bấm ⌘V.
     case pasteFailedTextLeftOnClipboard
-    /// Không có phần tử nhập chữ nào đang được focus (theo Accessibility) ⇒ không thử dán, giữ
-    /// nguyên chữ trên clipboard, KHÔNG khôi phục clipboard cũ.
-    case noFocusedInputTextKeptOnClipboard
     /// Văn bản rỗng ⇒ không đụng clipboard.
     case nothingToPaste
 }
 
-/// Chèn chữ bằng clipboard + ⌘V rồi khôi phục clipboard cũ.
+/// Chọn app cần kích hoạt lại TRƯỚC khi dán (thuần, test được). Chỉ "đòi lại" focus khi chính vflow
+/// (hoặc không app nào) đang ở trước — khi đó ⌘V chắc chắn rơi vào cửa sổ vflow thay vì app người dùng
+/// đang đọc chính tả vào. Nếu người dùng chủ động chuyển sang một app KHÁC trong lúc dịch thì tôn trọng
+/// (dán vào đó), không giật focus về lại.
+public enum PasteTargetPolicy {
+    public static func bundleIdToReactivate(target: String?, frontmost: String?, ownBundleId: String?) -> String? {
+        guard let target, !target.isEmpty, target != ownBundleId else { return nil }
+        guard frontmost != target else { return nil }
+        if frontmost == nil { return target }
+        return frontmost == ownBundleId ? target : nil
+    }
+}
+
+/// Chèn chữ bằng clipboard + ⌘V rồi khôi phục clipboard cũ. MẶC ĐỊNH LUÔN DÁN: chỉ có hai kết quả thật
+/// — dán được (khôi phục clipboard cũ) hoặc không gửi được ⌘V vì thiếu quyền (giữ chữ trên clipboard).
 @MainActor
 public struct ClipboardInserter {
     /// Kiểu đánh dấu để trình quản lý clipboard bỏ qua (nspasteboard.org).
     public static let markerTypes = ["org.nspasteboard.ConcealedType", "org.nspasteboard.TransientType"]
     /// Thời gian chờ ứng dụng đích đọc clipboard sau ⌘V.
     public static let defaultRestoreDelay: Duration = .milliseconds(350)
+    /// Chờ ngắn giữa lúc ghi clipboard và lúc gửi ⌘V để pasteboard server kịp công bố nội dung mới cho app
+    /// đích (Chrome/Electron đôi khi dán nội dung cũ nếu ⌘V tới sát lúc ghi). 25 ms: không nhận ra được.
+    public static let defaultPasteSettleDelay: Duration = .milliseconds(25)
 
     public let pasteboard: PasteboardStore
     public let restoreDelay: Duration
+    public let pasteSettleDelay: Duration
     /// Tổng hợp ⌘V; trả false nếu không gửi được.
     public let sendPaste: () -> Bool
     public let wait: (Duration) async -> Void
-    /// Có phần tử nhập chữ đang được focus (theo Accessibility) không — mặc định `true` (giữ đúng
-    /// hành vi cũ khi không truyền vào, ví dụ ở test hiện có).
-    public let hasFocusedTextInput: () -> Bool
+    /// Chạy sau khi đã ghi clipboard, trước ⌘V — chỗ để đưa app đích trở lại phía trước nếu vflow đang
+    /// chiếm focus (xem `PasteTargetPolicy`). Mặc định không làm gì.
+    public let beforePaste: () async -> Void
 
     public init(pasteboard: PasteboardStore,
                 restoreDelay: Duration = defaultRestoreDelay,
+                pasteSettleDelay: Duration = defaultPasteSettleDelay,
                 sendPaste: @escaping () -> Bool,
                 wait: @escaping (Duration) async -> Void,
-                hasFocusedTextInput: @escaping () -> Bool = { true }) {
+                beforePaste: @escaping () async -> Void = {}) {
         self.pasteboard = pasteboard
         self.restoreDelay = restoreDelay
+        self.pasteSettleDelay = pasteSettleDelay
         self.sendPaste = sendPaste
         self.wait = wait
-        self.hasFocusedTextInput = hasFocusedTextInput
+        self.beforePaste = beforePaste
     }
 
     public func insert(_ text: String) async -> PasteOutcome {
         guard !text.isEmpty else { return .nothingToPaste }
-        guard hasFocusedTextInput() else {
-            // Không có nơi nào để nhận chữ: giữ nguyên trên clipboard, không thử ⌘V, không khôi phục.
-            _ = pasteboard.writeText(text, markerTypes: Self.markerTypes)
-            return .noFocusedInputTextKeptOnClipboard
-        }
         let saved = pasteboard.snapshot()
         let ours = pasteboard.writeText(text, markerTypes: Self.markerTypes)
+        await beforePaste()
+        await wait(pasteSettleDelay)
         guard sendPaste() else { return .pasteFailedTextLeftOnClipboard }
         await wait(restoreDelay)
         guard pasteboard.changeCount == ours else { return .pastedNotRestoredUserChanged }

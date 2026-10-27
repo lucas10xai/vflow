@@ -806,9 +806,7 @@ final class AppController: NSObject {
         guard machine.beginExternalJob(at: Self.now) else { return }
         updateTicking()
         Task { @MainActor in
-            let inserter = ClipboardInserter(pasteboard: pasteboard, sendPaste: { PasteKeystroke.send() },
-                                             wait: { try? await Task.sleep(for: $0) },
-                                             hasFocusedTextInput: Self.hasFocusedTextInputOrUnknown)
+            let inserter = makeInserter()
             let outcome = await inserter.insert(text)
             let overlayState = DictationDecision.overlay(after: outcome, planned: .done)
             if case .error(let m) = overlayState { lastError = m } else { lastError = nil }
@@ -894,12 +892,14 @@ final class AppController: NSObject {
         }
     }
 
-    /// Chỉ tin kết quả dò ô nhập khi ĐÃ có quyền Trợ năng; thiếu quyền thì coi là "có" để nhường cho
-    /// đường cũ `PasteKeystroke.send()` → `.pasteFailedTextLeftOnClipboard` báo đúng lý do (thiếu
-    /// quyền), không lẫn với thông báo "Đã chép — bấm ⌘V" của trường hợp không có ô nhập.
-    private static func hasFocusedTextInputOrUnknown() -> Bool {
-        guard CGPreflightPostEventAccess() else { return true }
-        return FocusedInputProbe.hasFocusedTextInput()
+    /// Bộ chèn DUY NHẤT của mọi đường (dictation, Command Mode, chèn lại câu): LUÔN dán bằng ⌘V — không
+    /// còn dò ô nhập (Accessibility của nhiều app không chuẩn khiến chữ không tự hiện, từng là hồi quy).
+    /// Trước khi dán, nếu chính vflow đang ở trước thì đưa app đích (`targetApp`) về lại phía trước.
+    private func makeInserter() -> ClipboardInserter {
+        let target = targetApp
+        return ClipboardInserter(pasteboard: pasteboard, sendPaste: { PasteKeystroke.send() },
+                                 wait: { try? await Task.sleep(for: $0) },
+                                 beforePaste: { await PasteTargetActivator.reactivateIfNeeded(target: target) })
     }
 
     private func deliver(_ result: Result<TranscribeResult, ClientError>) async {
@@ -908,9 +908,7 @@ final class AppController: NSObject {
         if plan.clearRetry { retry.clear() }
         var overlayState = plan.overlay
         if let text = plan.insert {
-            let inserter = ClipboardInserter(pasteboard: pasteboard, sendPaste: { PasteKeystroke.send() },
-                                             wait: { try? await Task.sleep(for: $0) },
-                                             hasFocusedTextInput: Self.hasFocusedTextInputOrUnknown)
+            let inserter = makeInserter()
             let outcome = await inserter.insert(text)
             overlayState = DictationDecision.overlay(after: outcome, planned: plan.overlay)
             let pasted = outcome == .pastedRestored || outcome == .pastedNotRestoredUserChanged
@@ -950,9 +948,7 @@ final class AppController: NSObject {
                 lastError = nil
             } else {
                 let cmd = r.command!
-                let inserter = ClipboardInserter(pasteboard: pasteboard, sendPaste: { PasteKeystroke.send() },
-                                                 wait: { try? await Task.sleep(for: $0) },
-                                                 hasFocusedTextInput: Self.hasFocusedTextInputOrUnknown)
+                let inserter = makeInserter()
                 let outcome = await inserter.insert(cmd.text)
                 let overlayState = DictationDecision.overlay(after: outcome, planned: .done)
                 if case .error(let m) = overlayState { lastError = m } else { lastError = nil }

@@ -130,12 +130,11 @@ for appearance in light dark; do
   capture "$HOME_FULL"  granted tudien              "$appearance" "dictionary_with-suggestions_$appearance"
   capture "$HOME_FULL"  granted snippet             "$appearance" "snippets_$appearance"
   capture "$HOME_FULL"  granted "tudien:them-loi"   "$appearance" "dictionary_add-invalid_$appearance"
+  # Cài đặt: 5 mục sau khi gộp (cũ: hotkeys→voice, cloud→advanced, historyPrivacy→data).
   capture "$HOME_FULL"  granted "caidat:general"        "$appearance" "settings_general_$appearance"
   capture "$HOME_FULL"  granted "caidat:voice"           "$appearance" "settings_voice_$appearance"
   capture "$HOME_FULL"  granted "caidat:apps"            "$appearance" "settings_apps_$appearance"
-  capture "$HOME_FULL"  granted "caidat:cloud"           "$appearance" "settings_cloud_$appearance"
   capture "$HOME_FULL"  granted "caidat:data"            "$appearance" "settings_data_$appearance"
-  capture "$HOME_FULL"  granted "caidat:historyPrivacy"  "$appearance" "settings_historyPrivacy_$appearance"
   capture "$HOME_FULL"  granted "caidat:advanced"        "$appearance" "settings_advanced_$appearance"
   capture "$HOME_EMPTY" denied  welcome             "$appearance" "welcome_$appearance"
   capture_overlay ghi  "$appearance" "hud_listening_$appearance"

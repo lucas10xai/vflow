@@ -2,8 +2,9 @@ import AppKit
 import SwiftUI
 import VFlowCore
 
-/// Mục "Giọng nói" (V2): dấu câu bằng giọng, nói nhỏ, xem chữ chạy trực tiếp, tự dừng khi im lặng
-/// (dời từ "Chung"), giọng điệu (Gọn/Thư). `GET/PUT /v1/settings` — hiệu lực ngay, giống `CloudSettingsSection`.
+/// Mục "Giọng nói": phím tắt (giữ để nói, Command Mode, chèn lại câu), dấu câu bằng giọng, nói nhỏ, xem
+/// chữ chạy trực tiếp, ký hiệu theo ngữ cảnh, tự dừng khi im lặng, giọng điệu (Gọn/Thư), nhấn Enter bằng
+/// giọng. `GET/PUT /v1/settings` — hiệu lực ngay. (Gộp từ "Phím tắt" + "Giọng nói" cũ.)
 struct VoiceSettingsTab: View {
     let model: StatusModel
     let controller: AppController
@@ -16,13 +17,19 @@ struct VoiceSettingsTab: View {
     @State private var tone: Tone = .neutral
     @State private var cloudLlm = true
     @State private var contextSymbols = true
+    @State private var actionsEnabled = true
+    @State private var holdKey: HoldModifierKey = .leftOption
+    @State private var commandKey: HoldModifierKey = .leftControl
+    @State private var reinsertPreset: ReinsertChordPreset = .optionCommandV
     @State private var saveError: String?
 
     var body: some View {
         Form {
+            hotkeySections
             body_
         }
         .formStyle(.grouped)
+        .task { loadHotkeys() }
         .task(id: model.engineReady) {
             guard model.engineReady, !loaded else { return }
             await load()
@@ -79,7 +86,9 @@ struct VoiceSettingsTab: View {
                 .font(.footnote).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        SilenceStopSection(model: model, controller: controller)
+        Section("Tự dừng khi im lặng") {
+            SilenceStopSection(model: model, controller: controller)
+        }
         Section("Giọng điệu") {
             Picker("Giọng điệu", selection: $tone) {
                 ForEach(Tone.allCases, id: \.self) { Text($0.title).tag($0) }
@@ -91,9 +100,16 @@ struct VoiceSettingsTab: View {
                 Text("Chỉ áp dụng cho chế độ Gọn và Thư (viết lại qua 9Router) — không đổi chế độ Thường/Làm sạch/Lập trình.")
                     .font(.footnote).foregroundStyle(.secondary)
             } else {
-                Text("Đám mây đang tắt (Cài đặt › Đám mây) — Gọn/Thư không gọi 9Router nên giọng điệu không có tác dụng.")
+                Text("Đám mây đang tắt (Cài đặt › Nâng cao › Đám mây) — Gọn/Thư không gọi 9Router nên giọng điệu không có tác dụng.")
                     .font(.footnote).foregroundStyle(Color.orange)
             }
+        }
+        Section("Hành động bằng giọng") {
+            Toggle("Nhấn Enter bằng giọng", isOn: $actionsEnabled)
+                .onChange(of: actionsEnabled) { _, v in Task { await save(.init(actionsEnabled: v)) } }
+            Text("Nói \u{201C}nhấn enter\u{201D} ở cuối câu để tự động gửi phím Return sau khi dán.")
+                .font(.footnote).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
         if let saveError {
             Section { Text(saveError).foregroundStyle(Color.red) }
@@ -115,12 +131,61 @@ struct VoiceSettingsTab: View {
         tone = s.tone
         cloudLlm = s.cloudLlm
         contextSymbols = s.contextSymbols
+        actionsEnabled = s.actionsEnabled
     }
 
     private func save(_ patch: SettingsPatch) async {
         switch await controller.applySettingsPatch(patch) {
         case .success(let s): apply(s); saveError = nil
         case .failure(let e): saveError = ErrorText.message(e)
+        }
+    }
+
+    // MARK: phím tắt (gộp từ mục "Phím tắt" cũ) — áp dụng NGAY cho lần ghi kế tiếp, lưu qua
+    // `AppController.hotkeyConfig`/`reinsertChord` (UserDefaults, cô lập theo `VFLOW_HOME`).
+
+    private func loadHotkeys() {
+        let cfg = controller.hotkeyConfig
+        holdKey = cfg.holdKey
+        commandKey = cfg.commandKey
+        reinsertPreset = ReinsertChordPreset.matching(controller.reinsertChord) ?? .optionCommandV
+    }
+
+    private func saveHotkeys() {
+        controller.hotkeyConfig = HotkeyKeyConfig(holdKey: holdKey, commandKey: commandKey)
+    }
+
+    @ViewBuilder private var hotkeySections: some View {
+        Section("Giữ để nói") {
+            Picker("Phím giữ để nói", selection: $holdKey) {
+                ForEach(HoldModifierKey.allCases, id: \.self) { Text($0.title).tag($0) }
+            }
+            .onChange(of: holdKey) { _, _ in saveHotkeys() }
+            Text("Giữ phím này, nói, nhả để chèn — đúp phím này để ghi hands-free.")
+                .font(.footnote).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        Section("Command Mode (sửa/soạn văn bản bằng lời)") {
+            Picker("Phím thứ hai (cùng phím giữ để nói)", selection: $commandKey) {
+                ForEach(HoldModifierKey.allCases, id: \.self) { Text($0.title).tag($0) }
+            }
+            .onChange(of: commandKey) { _, _ in saveHotkeys() }
+            Text("Giữ phím giữ-để-nói rồi bấm thêm phím này trong 400 ms đầu.")
+                .font(.footnote).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        if let warning = HotkeyConfigValidation.conflictMessage(HotkeyKeyConfig(holdKey: holdKey, commandKey: commandKey)) {
+            Section { Text(warning).foregroundStyle(Color.red).font(.footnote).fixedSize(horizontal: false, vertical: true) }
+        }
+        Section("Chèn lại câu vừa rồi") {
+            Picker("Tổ hợp phím", selection: $reinsertPreset) {
+                ForEach(ReinsertChordPreset.allCases, id: \.self) { Text($0.title).tag($0) }
+            }
+            .onChange(of: reinsertPreset) { _, v in controller.reinsertChord = v.chord }
+            Button("Đặt lại phím tắt về mặc định") {
+                controller.resetHotkeysToDefault()
+                loadHotkeys()
+            }
         }
     }
 }
@@ -296,7 +361,8 @@ private struct AppRuleRow: View {
     }
 }
 
-/// Mục "Dữ liệu" (V2): công tắc thống kê, học từ lần sửa, xoá thống kê, xuất/nhập, chẩn đoán.
+/// Mục "Dữ liệu & Riêng tư": lịch sử (lưu/xoá), riêng tư, thống kê, lưu âm thanh để nghe lại, xuất/nhập,
+/// chẩn đoán. (Gộp từ "Lịch sử & riêng tư" + "Dữ liệu" cũ.)
 struct DataSettingsTab: View {
     let model: StatusModel
     let controller: AppController
@@ -314,8 +380,10 @@ struct DataSettingsTab: View {
     @State private var importResultText: String?
     @State private var diagnosticsCopiedAt: Date?
     @State private var diagnosticsError: String?
+    @State private var confirmClearHistory = false
+    @State private var clearHistoryError: String?
     // Lưu âm thanh để nghe lại (V3)
-    /// Cùng khoá/kho với `AppController.historyEnabled` (công tắc "Lưu lịch sử" ở tab Lịch sử & riêng tư).
+    /// Cùng khoá/kho với `AppController.historyEnabled` (công tắc "Lưu lịch sử" ngay trong mục này).
     @AppStorage("historyEnabled", store: VFlowDefaults.resolve()) private var historyEnabled = true
     @State private var audioHistory = false
     @State private var audioMb = 200
@@ -332,8 +400,33 @@ struct DataSettingsTab: View {
     @State private var audioLimitTask: Task<Void, Never>?
     @State private var audioExporting = false
 
+    /// Lịch sử + Riêng tư (gộp từ mục "Lịch sử & riêng tư" cũ) — không cần engine nên luôn hiện.
+    @ViewBuilder private var historySections: some View {
+        Section("Lịch sử") {
+            Toggle("Lưu lịch sử", isOn: Binding(
+                get: { historyEnabled },
+                set: { controller.historyEnabled = $0; historyEnabled = $0 }))
+            Text("Tắt: không ghi mục mới, không xoá lịch sử đã có. Lịch sử chỉ lưu văn bản; lưu giọng nói để nghe lại là tuỳ chọn riêng (tắt mặc định) ở mục \u{201C}Lưu âm thanh để nghe lại\u{201D} bên dưới.")
+                .font(.footnote).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Button("Xoá toàn bộ lịch sử…", role: .destructive) { confirmClearHistory = true }
+            if let e = clearHistoryError {
+                Text(e).font(.footnote).foregroundStyle(Color.red)
+            }
+        }
+        Section("Riêng tư") {
+            Label("Âm thanh không rời máy này. Mặc định vflow không lưu âm thanh; chỉ khi bạn bật \u{201C}Lưu âm thanh để nghe lại\u{201D} thì giọng nói mới được lưu trên máy (~/.vflow/audio).", systemImage: "waveform.badge.exclamationmark")
+                .font(.footnote)
+                .fixedSize(horizontal: false, vertical: true)
+            Label("Chế độ Gọn, Thư và Command Mode gửi CHỮ (không phải âm thanh) qua 9Router — xem Cài đặt › Nâng cao.", systemImage: "text.bubble")
+                .font(.footnote)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
     var body: some View {
         Form {
+            historySections
             body_
         }
         .formStyle(.grouped)
@@ -366,6 +459,14 @@ struct DataSettingsTab: View {
             Button("Huỷ", role: .cancel) {}
         } message: {
             Text("Xoá mọi bản ghi giọng nói đã lưu trong ~/.vflow/audio. Câu chữ trong Lịch sử vẫn còn, chỉ mất nút nghe lại. Không thể hoàn tác.")
+        }
+        .alert("Xoá toàn bộ lịch sử?", isPresented: $confirmClearHistory) {
+            Button("Xoá", role: .destructive) {
+                do { try controller.clearHistory() } catch { clearHistoryError = "Không xoá được lịch sử: \(error.localizedDescription)" }
+            }
+            Button("Huỷ", role: .cancel) {}
+        } message: {
+            Text("Không thể hoàn tác. Toàn bộ các câu đã đọc chính tả được lưu ở thiết bị này sẽ bị xoá.")
         }
     }
 

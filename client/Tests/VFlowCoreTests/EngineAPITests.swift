@@ -107,11 +107,18 @@ private func err(_ code: String, _ msg: String) -> Data { json(#"{"error":{"code
             Issue.record("phải lỗi"); return
         }
         #expect(m.contains("clipboard"))
+        #expect(m.contains("Trợ năng"), "phải nói đúng lý do duy nhất: thiếu quyền Trợ năng")
         #expect(DictationDecision.overlay(after: .pastedRestored, planned: .done) == .done)
     }
 
-    @Test func noFocusedInputShowsCopiedNotice() {
-        #expect(DictationDecision.overlay(after: .noFocusedInputTextKeptOnClipboard, planned: .done) == .notice("Đã chép — bấm ⌘V"))
+    /// Hồi quy "Đã chép — bấm ⌘V": mọi kết quả dán THÀNH CÔNG phải giữ nguyên HUD đã định, tuyệt đối
+    /// không bắt người dùng tự dán.
+    @Test func successfulPasteNeverAsksUserToPressCommandV() {
+        for outcome in [PasteOutcome.pastedRestored, .pastedNotRestoredUserChanged, .nothingToPaste] {
+            for planned in [OverlayState.done, .notice("9Router chậm")] {
+                #expect(DictationDecision.overlay(after: outcome, planned: planned) == planned)
+            }
+        }
     }
 }
 

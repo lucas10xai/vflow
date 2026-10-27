@@ -83,32 +83,18 @@ enum ReturnKeystroke {
     }
 }
 
-/// Dò xem phần tử đang được focus (qua Accessibility) có phải nơi có thể nhập chữ không — dùng để
-/// tránh dán "vô mục tiêu" khi không có ô nhập nào đang focus (xem contract/engine-api.md, mục dán).
-/// Cố ý CHỈ chặn các vai trò CHẮC CHẮN không phải ô nhập (nút, cửa sổ, menu, bảng…), không chặn vai
-/// trò lạ/không đọc được — nhiều ứng dụng (Terminal, trình duyệt…) có AX không chuẩn nhưng vẫn nhận
-/// ⌘V bình thường; chặn nhầm sẽ làm mất chữ đã đọc chính tả, tệ hơn là không chặn.
-enum FocusedInputProbe {
-    private static let definitelyNotTextInput: Set<String> = [
-        "AXWindow", "AXApplication", "AXButton", "AXStaticText", "AXMenuBar", "AXMenuBarItem",
-        "AXMenu", "AXMenuItem", "AXCheckBox", "AXRadioButton", "AXImage", "AXToolbar", "AXScrollBar",
-        "AXTable", "AXOutline", "AXRow", "AXColumn", "AXSlider", "AXTabGroup", "AXDisclosureTriangle",
-        "AXSplitGroup", "AXSplitter", "AXDockItem", "AXApplicationDockItem", "AXPopUpButton",
-        "AXColorWell", "AXProgressIndicator", "AXUnknown",
-    ]
-
-    /// `false` chỉ khi hoàn toàn không có phần tử nào đang focus (AX thất bại) hoặc vai trò đọc
-    /// được rõ ràng không phải ô nhập; đọc vai trò lỗi/lạ ⇒ coi là CÓ (an toàn, không chặn nhầm).
-    static func hasFocusedTextInput() -> Bool {
-        let systemWide = AXUIElementCreateSystemWide()
-        var focusedRef: AnyObject?
-        guard AXUIElementCopyAttributeValue(systemWide, kAXFocusedUIElementAttribute as CFString, &focusedRef) == .success,
-              let focused = focusedRef else { return false }
-        let axElement = focused as! AXUIElement
-        var roleRef: AnyObject?
-        guard AXUIElementCopyAttributeValue(axElement, kAXRoleAttribute as CFString, &roleRef) == .success,
-              let role = roleRef as? String else { return true }
-        return !definitelyNotTextInput.contains(role)
+/// Đưa app đích (app đang focus lúc bắt đầu ghi) trở lại phía trước TRƯỚC khi dán, CHỈ khi vflow (hoặc
+/// không app nào) đang ở trước — xem `PasteTargetPolicy`. Không bao giờ kích hoạt cửa sổ của vflow.
+enum PasteTargetActivator {
+    @MainActor
+    static func reactivateIfNeeded(target: String?) async {
+        let frontmost = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+        guard let id = PasteTargetPolicy.bundleIdToReactivate(target: target, frontmost: frontmost,
+                                                              ownBundleId: Bundle.main.bundleIdentifier),
+              let app = NSRunningApplication.runningApplications(withBundleIdentifier: id).first else { return }
+        NSApp.yieldActivation(to: app)
+        app.activate()
+        try? await Task.sleep(for: .milliseconds(120)) // để app đích nhận lại focus trước khi gửi ⌘V
     }
 }
 

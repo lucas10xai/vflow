@@ -3,10 +3,16 @@ import SwiftUI
 import VFlowCore
 
 /// Cửa sổ Cài đặt CHUẨN macOS (⌘,; menu "vflow › Cài đặt…") — TÁCH khỏi cửa sổ chính "vflow", có
-/// thanh công cụ dạng tab biểu tượng (Chung/Đám mây/Lịch sử & riêng tư/Nâng cao). Một cửa sổ duy
-/// nhất (singleton), gọi lại chỉ đưa lên trước + đổi mục thay vì mở cửa sổ mới.
+/// thanh tab biểu tượng 5 mục (Chung · Giọng nói · Ứng dụng · Dữ liệu & Riêng tư · Nâng cao). Bản 8 mục
+/// cũ chen một hàng nên 6/8 nhãn bị cắt chữ; nay 5 mục, cửa sổ rộng tối thiểu 720 pt (kéo giãn được) và
+/// mỗi mục là một `Form` cuộn được gồm nhiều `Section` có tiêu đề. Một cửa sổ duy nhất (singleton), gọi
+/// lại chỉ đưa lên trước + đổi mục thay vì mở cửa sổ mới.
 @MainActor
 final class SettingsWindowController: NSWindowController {
+    /// Cỡ nội dung mặc định/tối thiểu của cửa sổ Cài đặt (pt).
+    static let defaultContentSize = NSSize(width: 780, height: 600)
+    static let minContentSize = NSSize(width: 720, height: 460)
+
     private unowned let controller: AppController
     private let viewModel: SettingsWindowViewModel
     private var framePersistence: WindowFramePersistence?
@@ -16,14 +22,16 @@ final class SettingsWindowController: NSWindowController {
         let vm = SettingsWindowViewModel(controller: controller)
         self.viewModel = vm
         let hosting = NSHostingView(rootView: SettingsRootView(viewModel: vm))
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 420),
-                              styleMask: [.titled, .closable, .miniaturizable],
+        let window = NSWindow(contentRect: NSRect(origin: .zero, size: Self.defaultContentSize),
+                              styleMask: [.titled, .closable, .miniaturizable, .resizable],
                               backing: .buffered, defer: false)
         window.title = "Cài đặt vflow"
         window.contentView = hosting
+        window.contentMinSize = Self.minContentSize
         window.isReleasedWhenClosed = false
         super.init(window: window)
-        framePersistence = WindowFramePersistence(window: window, name: "org.aios.vflow.settingsWindow")
+        // Tên khung MỚI (v2): khung 560 pt đã lưu từ bản 8 tab sẽ làm tab bị cắt chữ nếu được khôi phục.
+        framePersistence = WindowFramePersistence(window: window, name: "org.aios.vflow.settingsWindow.v2")
     }
 
     required init?(coder: NSCoder) { fatalError("không dùng") }
@@ -73,23 +81,15 @@ struct SettingsRootView: View {
             AppsSettingsTab(model: viewModel.model, controller: viewModel.controller)
                 .tabItem { Label(SettingsCategory.apps.title, systemImage: SettingsCategory.apps.symbol) }
                 .tag(SettingsCategory.apps)
-            CloudSettingsSection(model: viewModel.model, controller: viewModel.controller)
-                .tabItem { Label(SettingsCategory.cloud.title, systemImage: SettingsCategory.cloud.symbol) }
-                .tag(SettingsCategory.cloud)
             DataSettingsTab(model: viewModel.model, controller: viewModel.controller)
                 .tabItem { Label(SettingsCategory.data.title, systemImage: SettingsCategory.data.symbol) }
                 .tag(SettingsCategory.data)
-            HotkeysSettingsTab(controller: viewModel.controller)
-                .tabItem { Label(SettingsCategory.hotkeys.title, systemImage: SettingsCategory.hotkeys.symbol) }
-                .tag(SettingsCategory.hotkeys)
-            HistoryPrivacySettingsTab(controller: viewModel.controller)
-                .tabItem { Label(SettingsCategory.historyPrivacy.title, systemImage: SettingsCategory.historyPrivacy.symbol) }
-                .tag(SettingsCategory.historyPrivacy)
-            AdvancedSettingsTab(controller: viewModel.controller)
+            AdvancedSettingsTab(model: viewModel.model, controller: viewModel.controller)
                 .tabItem { Label(SettingsCategory.advanced.title, systemImage: SettingsCategory.advanced.symbol) }
                 .tag(SettingsCategory.advanced)
         }
-        .frame(minWidth: 520, idealWidth: 560, minHeight: 380, idealHeight: 420)
+        .frame(minWidth: SettingsWindowController.minContentSize.width, idealWidth: SettingsWindowController.defaultContentSize.width,
+               minHeight: SettingsWindowController.minContentSize.height, idealHeight: SettingsWindowController.defaultContentSize.height)
         .defaultAppStorage(viewModel.controller.appStorageDefaults)
     }
 }

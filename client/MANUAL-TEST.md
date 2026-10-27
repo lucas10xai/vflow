@@ -70,7 +70,7 @@ D2. Bấm "Sửa…" ở một mục, sửa vài chữ rồi "Lưu".
     **Dự kiến:** gọi `/v1/corrections`; nếu engine nhận ra thuật ngữ đổi (vd. "đi plôi" → "deploy") thì hiện gợi ý "Thêm '<term>' ← '<spoken>'?"; bấm "Thêm" mới ghi vào từ điển (xem lại ở tab Từ điển, mục đó có biến thể mới); KHÔNG tự dán văn bản đã sửa vào Terminal hay ứng dụng nào. Sửa câu mà không đổi gì đáng kể (chỉ khác hoa/thường) ⇒ "Không có gợi ý".
 D3. Xoá một mục lịch sử; rồi "Xoá toàn bộ lịch sử…" và xác nhận.
     **Dự kiến:** mục biến mất ngay; xoá toàn bộ cần xác nhận trước, sau đó danh sách trống hẳn ("Chưa có câu nào trong lịch sử.").
-D4. Cài đặt › Lịch sử & riêng tư › tắt "Lưu lịch sử", đọc chính tả một câu, bật lại.
+D4. Cài đặt › Dữ liệu & Riêng tư › tắt "Lưu lịch sử", đọc chính tả một câu, bật lại.
     **Dự kiến:** lúc tắt, câu mới KHÔNG xuất hiện ở tab Lịch sử (và `~/.vflow/history.jsonl` không có dòng mới — kiểm bằng `wc -l`); lịch sử cũ vẫn còn nguyên, không bị xoá chỉ vì tắt công tắc.
 D5. Mở tab "Từ điển", bấm "Thêm mục…", nhập thuật ngữ + vài cách nói (mỗi dòng một cách), Lưu.
     **Dự kiến:** mục mới xuất hiện trong danh sách, số lần dùng 0. Thử Lưu với thuật ngữ trùng mục có sẵn ⇒ báo lỗi tiếng Việt rõ ràng (không đè, không nuốt lỗi). Sửa một mục (đổi cách nói), Xoá một mục (có xác nhận) — số mục cập nhật đúng ngay.
@@ -124,9 +124,9 @@ D6b. Làm engine bỏ cuộc hẳn: `pkill -9 -f "vflow.js serve"` liên tục (
 40. Mở cửa sổ **Cài đặt** (⌘,) › mục **Đám mây**: tắt công tắc "Cho phép gửi chữ qua 9Router".
     **Dự kiến:** đổi ngay (không cần Lưu riêng). Thử chế độ Gọn hoặc Command Mode (bước 36) lúc này.
     **Dự kiến:** không có yêu cầu mạng nào tới 9Router; Gọn vẫn dán được bản đã qua từ điển + làm sạch bằng quy tắc, kèm lỗi "Chế độ đám mây đang tắt…"; Command Mode báo lỗi rõ, không dán gì. Bật lại công tắc.
-41. Cài đặt › Đám mây › xoá trắng ô "Model", bấm Lưu.
+41. Cài đặt › Nâng cao › xoá trắng ô "Model", bấm Lưu.
     **Dự kiến:** dòng cảnh báo cam "Chưa đặt model: Gọn/Thư/Command Mode sẽ không chạy được." hiện ra. Thử chế độ Gọn ⇒ lỗi rõ ràng (không phải "không rõ lý do"). Đặt lại tên model cũ.
-42. Cài đặt › Đám mây › đổi "Thời gian chờ (giây)" xuống 1, mục Model đặt một model KHÔNG tồn tại trên 9Router thật.
+42. Cài đặt › Nâng cao › đổi "Thời gian chờ (giây)" xuống 1, mục Model đặt một model KHÔNG tồn tại trên 9Router thật.
     **Dự kiến:** chế độ Gọn/Thư/Command Mode báo lỗi "quá thời gian" hoặc lỗi dịch vụ rõ ràng trong khoảng 1 giây, không treo lâu. Đặt lại 8 giây.
 43. Mở **Terminal**, chọn chế độ **Lập trình** (menu hoặc tab Tổng quan), giữ ⌥ nói "biến tên gạch dưới người dùng mới bằng mười, rồi nhấn enter". Trước đó, Cài đặt bật "Nhấn Enter bằng giọng".
     **Dự kiến:** chữ chèn vào Terminal là `biến tên_người_dùng_mới bằng mười` (không còn cụm "nhấn enter" trong chữ chèn) — RỒI dòng lệnh đó tự chạy (phím Return được gửi ~150 ms sau khi dán). Tắt công tắc "Nhấn Enter bằng giọng" ở Cài đặt rồi lặp lại câu tương tự.
@@ -171,12 +171,12 @@ D6b. Làm engine bỏ cuộc hẳn: `pkill -9 -f "vflow.js serve"` liên tục (
     **Dự kiến:** KHÔNG bị đòi cấp lại quyền (khác hẳn bản ad-hoc ở bước 28/31) — vì chữ ký (danh tính) giống hệt lần trước dù nhị phân có thể đổi byte.
 
 ## I. U4: dán an toàn, chèn lại câu vừa rồi, dự phòng khi che biểu tượng, nút Cài đặt, phím tắt tuỳ chỉnh, micro/VAD
-60. Mở TextEdit, bấm vào vùng TRANG (không phải ô soạn — ví dụ bấm vào thanh tiêu đề cửa sổ hoặc chuyển sang Finder/desktop ngay trước khi nhả phím) sao cho KHÔNG có ô nhập chữ nào đang focus, rồi giữ ⌥ nói một câu.
-    **Dự kiến:** HUD "Đã chép — bấm ⌘V" (không phải "Xong"); ⌘V tay sau đó dán đúng câu đã nói; clipboard CŨ (trước khi nói) đã bị thay (không khôi phục) vì đây là trường hợp "không có ô nhập", khác với trường hợp thiếu quyền Trợ năng (bước 22, báo "thiếu quyền Trợ năng" + vẫn giữ nguyên trên clipboard).
-61. Đọc chính tả một câu bình thường vào Terminal (có ô nhập thật), kiểm tra vẫn "Xong" như cũ.
-    **Dự kiến:** KHÔNG bị ảnh hưởng bởi thay đổi ở bước 60 — Terminal/Notes/trình duyệt vẫn nhận ⌘V bình thường (xem giới hạn: bộ dò chỉ chặn vai trò AX CHẮC CHẮN không phải ô nhập, không chặn vai trò lạ/không đọc được).
+60. (Q1 — hồi quy "phải bấm ⌘V") Giữ ⌥ trái nói một câu ngắn vào MỖI app sau, rồi nhả phím: Notes, Terminal, Chrome (ô tìm kiếm/ô soạn Gmail), Zalo, Claude Code/Orca, và một app Electron bất kỳ (VS Code/Slack).
+    **Dự kiến:** ngay khi nhả phím chữ TỰ HIỆN vào ô đang gõ, HUD "Xong"; KHÔNG BAO GIỜ hiện "Đã chép — bấm ⌘V" và anh KHÔNG phải tự bấm ⌘V ở bất kỳ app nào kể cả app có Accessibility không chuẩn (Zalo, Chrome, Electron). Clipboard CŨ (trước khi nói) được khôi phục nguyên vẹn sau ~0,4 giây.
+61. Giữ ⌥ nói một câu, trong lúc HUD "Đang dịch" thì bấm vào cửa sổ vflow (làm vflow thành app phía trước), rồi chờ kết quả.
+    **Dự kiến:** vflow tự đưa app đích (app đang focus lúc bắt đầu ghi) lên trước rồi dán vào đó, không dán vào cửa sổ vflow. Nếu thay vào đó anh chủ động chuyển sang một app KHÁC (không phải vflow) trong lúc dịch ⇒ chữ dán vào app đó (không bị giật focus về app cũ). Lặp lại với "nhấn enter" ở cuối câu (Enter gửi sau khi dán), với Command Mode (⌥+⌃) và với ghi hands-free (đúp ⌥): cả ba đều dán ngay như trên.
 62. Đọc chính tả một câu bất kỳ, sau đó bấm biểu tượng thanh menu › "Chèn lại câu vừa rồi" (hoặc chuột phải biểu tượng Dock › cùng mục, hoặc ⌥⌘V) khi đang focus ô nhập khác.
-    **Dự kiến:** câu vừa nói được chèn lại đúng y nguyên vào ô đang focus (cùng cách dán/khôi phục clipboard như dictation). Cài đặt › Lịch sử & riêng tư tắt "Lưu lịch sử", lặp lại với MỘT câu mới nói trong phiên này ⇒ vẫn chèn lại được (nhớ trong RAM); thoát app rồi mở lại (lịch sử đang tắt) rồi bấm "Chèn lại câu vừa rồi" ngay ⇒ HUD "Chưa có câu nào" (bộ nhớ phiên đã mất).
+    **Dự kiến:** câu vừa nói được chèn lại đúng y nguyên vào ô đang focus (cùng cách dán/khôi phục clipboard như dictation). Cài đặt › Dữ liệu & Riêng tư tắt "Lưu lịch sử", lặp lại với MỘT câu mới nói trong phiên này ⇒ vẫn chèn lại được (nhớ trong RAM); thoát app rồi mở lại (lịch sử đang tắt) rồi bấm "Chèn lại câu vừa rồi" ngay ⇒ HUD "Chưa có câu nào" (bộ nhớ phiên đã mất).
 63. Chưa nói câu nào từ lúc mở app (lịch sử đang tắt) rồi bấm "Chèn lại câu vừa rồi".
     **Dự kiến:** HUD "Chưa có câu nào", không dán gì, không đổi clipboard.
 64. Chuột phải (hoặc giữ) biểu tượng Dock của vflow.
@@ -187,13 +187,13 @@ D6b. Làm engine bỏ cuộc hẳn: `pkill -9 -f "vflow.js serve"` liên tục (
     **Dự kiến:** 8 tab (Chung/Giọng nói/Ứng dụng/Đám mây/Dữ liệu/Phím tắt/Lịch sử & riêng tư/Nâng cao) — V2 thêm Giọng nói/Ứng dụng/Dữ liệu.
 67. Cửa sổ chính "vflow": nhìn chân thanh bên và thanh công cụ.
     **Dự kiến:** chân thanh bên có nút bánh răng "Cài đặt" kèm chữ "⌘," mờ bên phải; thanh công cụ (góc trên-phải cửa sổ) cũng có nút bánh răng riêng. Bấm MỘT trong hai (hoặc ⌘, hoặc menu/Dock) ⇒ luôn mở đúng MỘT cửa sổ Cài đặt (không có cửa sổ thứ hai).
-68. Cài đặt › Phím tắt: đổi "Phím giữ để nói" thành "⌃ trái", đổi "Phím Command Mode" thành "⌥ trái" (đảo ngược mặc định).
+68. Cài đặt › Giọng nói: đổi "Phím giữ để nói" thành "⌃ trái", đổi "Phím Command Mode" thành "⌥ trái" (đảo ngược mặc định).
     **Dự kiến:** không có cảnh báo trùng (hai phím khác nhau). Thử giữ ⌃ trái ở Terminal ⇒ ghi âm như trước đây ⌥ trái làm; giữ ⌃ trái rồi bấm thêm ⌥ trái trong 400ms đầu ⇒ vào Command Mode. ⌥ trái một mình giờ KHÔNG còn bắt đầu ghi nữa.
-69. Cài đặt › Phím tắt: đổi cả hai phím về CÙNG một phím (vd. cả hai đều "⌥ trái").
+69. Cài đặt › Giọng nói: đổi cả hai phím về CÙNG một phím (vd. cả hai đều "⌥ trái").
     **Dự kiến:** hiện cảnh báo đỏ tiếng Việt về trùng phím ngay trong Cài đặt.
-70. Cài đặt › Phím tắt: bấm "Đặt lại mặc định".
+70. Cài đặt › Giọng nói: bấm "Đặt lại mặc định".
     **Dự kiến:** cả hai phím về ⌥ trái/⌃ trái, tổ hợp "Chèn lại câu vừa rồi" về ⌥⌘V.
-71. Đang giữ ⌥ trái ghi âm (chưa nhả), MỞ cửa sổ Cài đặt › Phím tắt ở một lúc khác đổi phím giữ sang "⌃ trái" (nếu máy cho tương tác cả hai cùng lúc — thử bằng cách đổi cài đặt rồi NGAY LẬP TỨC nhả ⌥ đang giữ).
+71. Đang giữ ⌥ trái ghi âm (chưa nhả), MỞ cửa sổ Cài đặt › Giọng nói ở một lúc khác đổi phím giữ sang "⌃ trái" (nếu máy cho tương tác cả hai cùng lúc — thử bằng cách đổi cài đặt rồi NGAY LẬP TỨC nhả ⌥ đang giữ).
     **Dự kiến:** lượt ghi ĐANG CHẠY vẫn kết thúc đúng khi nhả ⌥ (không bị "mất nút nhả" vì đổi cấu hình giữa chừng) — cấu hình mới chỉ áp dụng cho LẦN SAU.
 72. Cài đặt › Chung › Micro: mở danh sách.
     **Dự kiến:** thấy "Mặc định hệ thống" + micro trong máy (và micro ngoài nếu có cắm). Chọn micro trong máy (hoặc để mặc định), ghi thử ⇒ vẫn nghe/chèn chữ bình thường (KHÔNG có micro ngoài để thử đổi thật trong môi trường dựng — chủ dự án tự thử nếu có tai nghe/micro USB, xem giới hạn đã biết trong README).
@@ -212,16 +212,16 @@ D6b. Làm engine bỏ cuộc hẳn: `pkill -9 -f "vflow.js serve"` liên tục (
     **Dự kiến:** dòng chào lớn "Chưa có câu nào. Giữ ⌥ trái và nói thử." rồi một khối trống đẹp (icon sóng âm + gợi ý) — không có số 0 giả nào ở dưới.
 78. Nói vài chục câu rải trong vài ngày (hoặc dùng dữ liệu mẫu — xem `client/scripts/snapshot-seed.mjs`/`snapshot.sh` để xem trước hình dạng), rồi mở lại tab Thống kê.
     **Dự kiến:** dòng chào đổi theo đúng ngưỡng số từ (1–99/100–999/1.000–9.999/≥10.000, định dạng dấu chấm ngăn nghìn); 4 thẻ số đúng (Từ đã nói, WPM trung bình — "—" nếu tổng thời lượng ghi âm thật < 1 phút, Chuỗi ngày, Chuỗi dài nhất); lưới "Hoạt động N tuần" có ô HÔM NAY viền nổi, ô ngày tương lai không vẽ, di chuột vào một ô có tooltip "dd/mm/yyyy: N từ · N câu"; "Từ của bạn đi đâu" liệt kê đúng ứng dụng đã nói vào (biểu tượng thật nếu app còn cài, "Không rõ" nếu không). Đọc thêm một câu ở Terminal ⇒ quay lại tab Thống kê (không cần bấm làm mới) ⇒ số liệu đã cập nhật theo câu vừa nói.
-79. Cài đặt › Dữ liệu: tắt công tắc "Thu thập thống kê", mở tab Thống kê.
-    **Dự kiến:** thẻ "Thống kê đang tắt" kèm nút "Bật" (bật lại ngay, không cần vào Cài đặt) và "Mở Cài đặt › Dữ liệu". Nói thêm một câu trong lúc đang tắt rồi bật lại ⇒ câu lúc tắt KHÔNG được đếm (số không tăng thêm vì câu đó), dữ liệu cũ trước khi tắt vẫn còn nguyên.
-80. Cài đặt › Dữ liệu › "Xoá thống kê…", xác nhận.
+79. Cài đặt › Dữ liệu & Riêng tư: tắt công tắc "Thu thập thống kê", mở tab Thống kê.
+    **Dự kiến:** thẻ "Thống kê đang tắt" kèm nút "Bật" (bật lại ngay, không cần vào Cài đặt) và "Mở Cài đặt › Dữ liệu & Riêng tư". Nói thêm một câu trong lúc đang tắt rồi bật lại ⇒ câu lúc tắt KHÔNG được đếm (số không tăng thêm vì câu đó), dữ liệu cũ trước khi tắt vẫn còn nguyên.
+80. Cài đặt › Dữ liệu & Riêng tư › "Xoá thống kê…", xác nhận.
     **Dự kiến:** hộp thoại xác nhận tiếng Việt rõ ràng; sau khi xoá, tab Thống kê về lại trạng thái "Chưa có câu nào" dù lịch sử (tab Lịch sử) KHÔNG bị xoá.
 81. Cài đặt › Giọng nói: tắt "Ra lệnh dấu câu bằng giọng". Giữ ⌥ nói "mở ngoặc xin chào xuống dòng tạm biệt dấu chấm".
     **Dự kiến:** chữ chèn giữ NGUYÊN các cụm "mở ngoặc"/"xuống dòng"/"dấu chấm" dưới dạng chữ (không đổi thành `(`/xuống dòng thật/`.`). Bật lại công tắc, nói lại CÙNG câu đó.
     **Dự kiến:** chữ chèn có `(` thật, xuống dòng thật giữa "xin chào" và "tạm biệt", và dấu `.` dính liền cuối câu (không có khoảng trắng thừa trước dấu chấm).
 82. Cài đặt › Giọng nói: bật "Chế độ nói nhỏ", thử nói rất khẽ (gần như thì thầm) ở nơi yên tĩnh.
     **Dự kiến:** vẫn nhận dạng được tốt hơn rõ rệt so với lúc tắt công tắc này (so sánh bằng cách tắt rồi nói y hệt lại) — đây là khuếch đại trong máy, không đổi quyết định "im lặng hoàn toàn" (`silence:true` vẫn đúng khi thật sự không nói gì).
-83. Cài đặt › Phím tắt: đổi "Phím giữ để nói" thành **"⌥ phải"**.
+83. Cài đặt › Giọng nói: đổi "Phím giữ để nói" thành **"⌥ phải"**.
     **Dự kiến:** giữ ⌥ TRÁI giờ KHÔNG còn bắt đầu ghi (không phản ứng gì); giữ ⌥ PHẢI ≥200ms ⇒ "Đang nghe" như ⌥ trái làm trước đây; mọi hành vi khác (đúp để khoá, Esc huỷ, giới hạn thời gian) giữ nguyên với phím mới. Đặt lại "Đặt lại mặc định" trước khi tiếp tục các bước khác (nhiều bước trong tài liệu này giả định ⌥ trái).
 84. Cài đặt › Chung › Micro: đổi từ "Mặc định hệ thống" sang một micro CỤ THỂ trong danh sách (micro trong máy nếu không có micro ngoài), đọc chính tả vài câu, rồi đổi LẠI "Mặc định hệ thống".
     **Dự kiến:** mỗi lần đổi, lần ghi KẾ TIẾP dùng đúng micro vừa chọn (nếu có nhiều micro để so sánh bằng tai/chỉ báo hệ thống); không có lỗi/crash khi đổi qua lại; micro đã chọn được NHỚ lại sau khi thoát/mở lại app (đổi `VFLOW_HOME` để kiểm cô lập nếu cần).
@@ -229,22 +229,22 @@ D6b. Làm engine bỏ cuộc hẳn: `pkill -9 -f "vflow.js serve"` liên tục (
     **Dự kiến:** sau khoảng 1 giây kể từ lúc bắt đầu nói, một dòng CHỮ MỜ (nhạt hơn dòng "Đang nghe") xuất hiện dưới thanh trạng thái, cập nhật dần theo những gì đang nói (tối đa 2 dòng, chỉ phần cuối nếu câu dài) — chữ này KHÔNG được chèn vào ô đang gõ (ô đích vẫn trống cho tới khi nhả phím). Nhả phím ⇒ chữ mờ biến mất, thay bằng kết quả CUỐI CÙNG thật (`/v1/transcribe`, có thể khác đôi chút so với chữ mờ lúc đang nói — đó là bình thường, chữ mờ chỉ là bản thô tạm).
 86. Tắt công tắc "Hiện chữ đang nghe lúc nói" ở Cài đặt › Giọng nói, lặp lại bước 85.
     **Dự kiến:** không có dòng chữ mờ nào xuất hiện trong lúc nói; kết quả cuối sau khi nhả phím vẫn đúng như trước (tính năng chỉ ẩn/hiện phần xem trước, không đổi kết quả thật).
-87. (Cần mạng tới 9Router) Cài đặt › Đám mây: tắt "Cho phép gửi chữ qua 9Router". Chọn chế độ **Gọn**, giữ ⌥ nói một câu.
+87. (Cần mạng tới 9Router) Cài đặt › Nâng cao: tắt "Cho phép gửi chữ qua 9Router". Chọn chế độ **Gọn**, giữ ⌥ nói một câu.
     **Dự kiến:** HUD báo ngắn gọn "Đám mây đang tắt — dùng Làm sạch" (không phải lỗi đỏ dài dòng); chữ vẫn được chèn (bản Làm sạch, không có LLM); mở tab Lịch sử, mục vừa tạo có đánh dấu suy giảm (nếu cột đó hiển thị ở UI) hoặc ít nhất không có gì mất mát (text vẫn đúng). Bật lại công tắc.
 88. Cài đặt › Ứng dụng: bấm "Chọn ứng dụng…", chọn Terminal.app (hoặc app bất kỳ trong `/Applications`), đặt chế độ "Lập trình". Mở Terminal, chọn chế độ **Tự động** (không chọn tay), giữ ⌥ nói một câu có từ kỹ thuật (vd. "git_commit_message viết thường nối gạch dưới").
     **Dự kiến:** dù đang ở chế độ Tự động, Terminal vẫn được xử lý theo luật vừa đặt (Lập trình) thay vì luật mặc định của `auto` — câu được tách theo quy tắc lập trình (`git_commit_message`, không phải chữ thường bình thường).
-89. Cài đặt › Ứng dụng: bấm "Từ ứng dụng đang chạy…", chọn một app đang mở, đặt chế độ **Gọn**. Tắt đám mây (Cài đặt › Đám mây) trong lúc luật đó vẫn còn.
+89. Cài đặt › Ứng dụng: bấm "Từ ứng dụng đang chạy…", chọn một app đang mở, đặt chế độ **Gọn**. Tắt đám mây (Cài đặt › Nâng cao) trong lúc luật đó vẫn còn.
     **Dự kiến:** hàng luật đó hiện nhãn cảnh báo cam "đám mây tắt — rơi về Làm sạch" (không phải nhãn xám "gửi chữ qua 9Router" như lúc đám mây đang bật). Xoá luật đó bằng nút thùng rác.
     **Dự kiến:** hàng biến mất ngay, không cần Lưu riêng.
-90. Cài đặt › Dữ liệu: bấm "Xuất dữ liệu…" (để công tắc "Gồm lịch sử khi xuất" TẮT), lưu vào `~/Desktop/vflow-export.json`.
+90. Cài đặt › Dữ liệu & Riêng tư: bấm "Xuất dữ liệu…" (để công tắc "Gồm lịch sử khi xuất" TẮT), lưu vào `~/Desktop/vflow-export.json`.
     **Dự kiến:** hộp thoại lưu tệp chuẩn macOS hiện ra; sau khi lưu, `ls -l ~/Desktop/vflow-export.json` cho quyền `-rw-------` (0600); mở tệp bằng trình soạn thảo — có `dictionary`/`snippets`/`settings`/`stats`, KHÔNG có `history`, và chắc chắn KHÔNG có chuỗi nào chứa khoá 9Router hay token (tìm `grep -i "key\|token"` trong tệp, chỉ nên thấy tên trường `llm_model`, không thấy giá trị bí mật nào).
-91. Cài đặt › Dữ liệu: sửa tay tệp vừa xuất — đổi `"term"` của một mục `dictionary` thành chuỗi RỖNG `""` — rồi bấm "Nhập dữ liệu…", chọn đúng tệp đã sửa hỏng đó.
+91. Cài đặt › Dữ liệu & Riêng tư: sửa tay tệp vừa xuất — đổi `"term"` của một mục `dictionary` thành chuỗi RỖNG `""` — rồi bấm "Nhập dữ liệu…", chọn đúng tệp đã sửa hỏng đó.
     **Dự kiến:** thông báo lỗi cụ thể (có chữ "dictionary", chỉ đúng chỉ số mục hỏng) — và SAU ĐÓ kiểm tab Từ điển: KHÔNG có gì bị thêm/đổi (kiểm bằng đếm số mục trước và sau, phải bằng nhau) — gói hỏng một phần bị từ chối CẢ GÓI, không "nhập được phần còn lại".
-92. Sửa lại tệp xuất (bỏ chỗ hỏng ở bước 91, hoặc xuất lại tệp mới sạch), Cài đặt › Dữ liệu › "Nhập dữ liệu…" (Gộp).
+92. Sửa lại tệp xuất (bỏ chỗ hỏng ở bước 91, hoặc xuất lại tệp mới sạch), Cài đặt › Dữ liệu & Riêng tư › "Nhập dữ liệu…" (Gộp).
     **Dự kiến:** thông báo kết quả cụ thể dạng "Đã nhập: từ điển N, snippets N, cài đặt N, thống kê N ngày, lịch sử N." — số khớp đúng nội dung tệp.
 93. Tab Từ điển: đọc chính tả một câu có thuật ngữ chưa có trong từ điển (vd. tên một thư viện lạ), rồi SỬA lại câu đó ở tab Lịch sử đúng thành thuật ngữ đó HAI LẦN (hai lần sửa riêng biệt, cùng một cặp trước/sau).
     **Dự kiến:** sau lần sửa thứ hai, mở tab Từ điển ⇒ khối "Gợi ý từ lần anh sửa" xuất hiện phía trên danh sách với đúng thuật ngữ, cách nói sai, "Gặp 2 lần". Bấm "Thêm vào từ điển" ⇒ mở sheet Thêm mục đã điền sẵn thuật ngữ + cách nói, Lưu ⇒ gợi ý đó biến mất khỏi danh sách và mục mới xuất hiện trong từ điển chính. Thử lại với một gợi ý khác (nếu có) bằng nút "Bỏ qua" ⇒ gợi ý đó biến mất và KHÔNG quay lại kể cả sau khi mở lại app.
-94. Cài đặt › Dữ liệu: bấm "Sao chép chẩn đoán", dán (⌘V) vào một trình soạn thảo.
+94. Cài đặt › Dữ liệu & Riêng tư: bấm "Sao chép chẩn đoán", dán (⌘V) vào một trình soạn thảo.
     **Dự kiến:** nội dung là JSON có `engine_version`/`model`/`settings`/`counts`/`recent_errors`; tìm (⌘F) chuỗi "key"/"token" trong nội dung dán ra — không thấy giá trị bí mật nào (chỉ tên trường, nếu có). Bấm "Lưu chẩn đoán…" lưu ra tệp, kiểm quyền tệp `-rw-------` như bước 90.
 
 ## L. Nhóm A (V3): dạy từ bằng giọng, lưu âm thanh để nghe lại, HUD, giao diện, "Hôm nay", ký hiệu theo ngữ cảnh, độ trễ ghi
@@ -267,13 +267,13 @@ Chuẩn bị: đã dựng và mở bản mới (`client/scripts/build-app.sh`, r
 3. Bật công tắc. Hộp thoại hỏi xác nhận phải nói rõ: lưu ở `~/.vflow/audio` trên máy này, không gửi đi đâu, giới hạn dung lượng/số ngày, tệp quyền 0600, xoá được bất cứ lúc nào. Bấm **"Bật lưu âm thanh"**.
 4. Đọc chính tả một câu (ví dụ "hôm nay trời đẹp quá"). Mở tab Lịch sử, bấm nút nghe lại ở dòng câu đó (KHÔNG tự phát khi mở tab), rồi bấm lại để dừng.
 5. Kiểm tệp: `ls -ld ~/.vflow/audio && ls -l ~/.vflow/audio`.
-6. Cài đặt › Dữ liệu: đọc dòng dung lượng đã lưu, bấm **"Xuất ZIP…"**, lưu ra Desktop, nhấp đúp mở ZIP trong Finder; mở `index.json` bằng TextEdit.
-7. Chuột phải câu đó trong Lịch sử › **"Xoá âm thanh của câu này"**; rồi đọc thêm vài câu và Cài đặt › Dữ liệu › **"Xoá toàn bộ âm thanh…"** (xác nhận). Chạy lại `ls ~/.vflow/audio`.
-8. Tắt công tắc "Lưu lịch sử" ở Cài đặt › Lịch sử & riêng tư (khi lưu âm thanh đang bật).
+6. Cài đặt › Dữ liệu & Riêng tư: đọc dòng dung lượng đã lưu, bấm **"Xuất ZIP…"**, lưu ra Desktop, nhấp đúp mở ZIP trong Finder; mở `index.json` bằng TextEdit.
+7. Chuột phải câu đó trong Lịch sử › **"Xoá âm thanh của câu này"**; rồi đọc thêm vài câu và Cài đặt › Dữ liệu & Riêng tư › **"Xoá toàn bộ âm thanh…"** (xác nhận). Chạy lại `ls ~/.vflow/audio`.
+8. Tắt công tắc "Lưu lịch sử" ở Cài đặt › Dữ liệu & Riêng tư (khi lưu âm thanh đang bật).
    **KỲ VỌNG:** (1–2) mặc định tắt, không có tệp, không có nút nghe lại. (3) hộp thoại đúng nội dung trên. (4) nghe đúng giọng và đúng câu mình vừa nói; nút đổi thành "dừng". (5) thư mục `drwx------` (0700), mỗi tệp `.wav` `-rw-------` (0600), tên kiểu `tr_….wav`; có `index.json` 0600; số tệp = số câu đã đọc kể từ lúc bật. (6) ZIP mở được, có đủ tệp `.wav` nghe được + `index.json` chỉ có `id`, `at`, `audio_ms`, `app`, `mode` — KHÔNG có chữ của câu nói. (7) xoá một: nút nghe lại của câu đó mất, các câu khác vẫn nghe được; xoá hết: thông báo "Đã xoá N tệp âm thanh.", `ls` không còn `.wav`, các câu trong Lịch sử vẫn còn (chỉ mất âm thanh). (8) tự tắt công tắc lưu âm thanh kèm thông báo "Đã tự tắt lưu âm thanh vì Lịch sử đang tắt."; bật lại Lịch sử KHÔNG tự bật lại lưu âm thanh.
    **DẤU HIỆU SAI:** công tắc tự bật sẵn; có tệp `.wav` trong `~/.vflow/audio` khi công tắc tắt (kể cả câu im lặng, câu dạy từ, lệnh Command Mode); quyền tệp/thư mục khác 0600/0700; nghe ra giọng/câu khác; nút nghe lại tự phát khi mở tab; `index.json` hay ZIP chứa chữ của câu nói; sau "Xoá toàn bộ" `ls` vẫn còn `.wav`; thông báo lỗi tiếng Anh/mã máy.
-   Kiểm riêng tư thêm (một lần): Cài đặt › Dữ liệu › **"Xuất dữ liệu…"** (để công tắc "Gồm lịch sử" tắt) và **"Sao chép chẩn đoán"** rồi dán vào trình soạn thảo. **KỲ VỌNG:** chỉ là văn bản JSON nhỏ (vài KB); tìm "audio" chỉ thấy tên các cờ cài đặt (`audio_history`…), KHÔNG có đường dẫn `/Users/…`, KHÔNG có dữ liệu âm thanh, token hay khoá. **SAI:** tệp xuất/chẩn đoán lớn bất thường, có chuỗi "RIFF"/"WAVE", đường dẫn tuyệt đối thư mục cá nhân, hoặc token.
-   Giới hạn dung lượng/hạn ngày (tự kiểm ở mức engine bằng `probe-group-a.mjs`; thử tay nếu muốn): đặt giới hạn nhỏ nhất (50 MB) và 1 ngày ở Cài đặt › Dữ liệu rồi đọc nhiều câu dài — **KỲ VỌNG:** tổng dung lượng hiển thị không vượt giới hạn, bản CŨ nhất bị xoá trước; **SAI:** dung lượng vượt giới hạn mà không bản nào bị xoá, hoặc bản MỚI nhất bị xoá thay vì bản cũ.
+   Kiểm riêng tư thêm (một lần): Cài đặt › Dữ liệu & Riêng tư › **"Xuất dữ liệu…"** (để công tắc "Gồm lịch sử" tắt) và **"Sao chép chẩn đoán"** rồi dán vào trình soạn thảo. **KỲ VỌNG:** chỉ là văn bản JSON nhỏ (vài KB); tìm "audio" chỉ thấy tên các cờ cài đặt (`audio_history`…), KHÔNG có đường dẫn `/Users/…`, KHÔNG có dữ liệu âm thanh, token hay khoá. **SAI:** tệp xuất/chẩn đoán lớn bất thường, có chuỗi "RIFF"/"WAVE", đường dẫn tuyệt đối thư mục cá nhân, hoặc token.
+   Giới hạn dung lượng/hạn ngày (tự kiểm ở mức engine bằng `probe-group-a.mjs`; thử tay nếu muốn): đặt giới hạn nhỏ nhất (50 MB) và 1 ngày ở Cài đặt › Dữ liệu & Riêng tư rồi đọc nhiều câu dài — **KỲ VỌNG:** tổng dung lượng hiển thị không vượt giới hạn, bản CŨ nhất bị xoá trước; **SAI:** dung lượng vượt giới hạn mà không bản nào bị xoá, hoặc bản MỚI nhất bị xoá thay vì bản cũ.
 
 **L3. Đổi vị trí và cỡ thanh ghi âm (HUD) sang cạnh notch**
 1. Cài đặt › **Chung** › mục **"Thanh ghi âm"**: Vị trí = **"Cạnh notch"**, Cỡ = **"Lớn"**.
