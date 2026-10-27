@@ -24,6 +24,10 @@ on:
         description: 'Chạy thử: dựng + test + zip nhưng KHÔNG tạo GitHub Release'
         type: boolean
         default: true
+      runner:
+        description: 'Nhãn runner (chỉ để thử; bỏ trống = macos-latest)'
+        type: string
+        default: 'macos-latest'
 
 permissions:
   contents: write # chỉ để tạo Release bằng GITHUB_TOKEN tự cấp
@@ -35,7 +39,10 @@ concurrency:
 jobs:
   release:
     name: Test, dựng và phát hành
-    runs-on: macos-latest # Apple Silicon (arm64) — bản dựng chỉ hỗ trợ arm64
+    # Mặc định macos-latest (Apple Silicon, arm64 — bản dựng chỉ hỗ trợ arm64). Chạy tay có thể đổi nhãn
+    # runner qua đầu vào "runner" (vd. xcode-27 = image xem trước có Xcode 27/Swift 6.4) để thử mà không
+    # phải sửa tệp; gắn thẻ v* luôn dùng macos-latest.
+    runs-on: ${{ inputs.runner || 'macos-latest' }}
     timeout-minutes: 60
     env:
       # Chạy tay (workflow_dispatch) mà tắt dry_run thì phải có thẻ thật; xem bước "Xác định phiên bản".
@@ -45,19 +52,36 @@ jobs:
       VFLOW_BUILD_JOBS: '3'
     steps:
       - name: Lấy mã nguồn
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Cài Node.js 22
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: '22'
           cache: npm
 
-      - name: Kiểm công cụ dựng (Swift ≥ 6, arm64)
+      - name: Chọn Xcode có Swift mới nhất và kiểm công cụ dựng (Swift ≥ 6, arm64)
+        # Vì sao chọn Xcode ở đây: Xcode mặc định của runner có thể mang Swift cũ hơn máy dev (macos-latest
+        # = Xcode 26.6 = Swift 6.3.3; máy dev = Swift 6.4). Liệt kê MỌI Xcode có sẵn kèm phiên bản Swift
+        # (để lần sau nhìn nhật ký là biết runner có gì) rồi chọn bản có Swift cao nhất.
         run: |
           set -euo pipefail
           uname -m
           [ "$(uname -m)" = "arm64" ] || { echo "LỖI: runner không phải arm64" >&2; exit 1; }
+          echo "Runner: ${RUNNER_OS:-?}, image: ${ImageVersion:-?}"
+          echo "Xcode mặc định trước khi chọn:"; xcodebuild -version; swift --version
+          best=""; best_ver="0"
+          for app in /Applications/Xcode*.app; do
+            [ -d "$app/Contents/Developer" ] || continue
+            ver="$(DEVELOPER_DIR="$app/Contents/Developer" swift --version 2>&1 | sed -nE 's/.*Swift version ([0-9]+(\.[0-9]+)*).*/\1/p' | head -n1)"
+            echo "  $app → Swift ${ver:-?}"
+            [ -n "$ver" ] || continue
+            top="$(printf '%s\n%s\n' "$best_ver" "$ver" | sort -V | tail -n1)"
+            if [ "$top" = "$ver" ] && [ "$ver" != "$best_ver" ]; then best="$app"; best_ver="$ver"; fi
+          done
+          [ -n "$best" ] || { echo "LỖI: không thấy Xcode nào có Swift" >&2; exit 1; }
+          echo "Chọn: $best (Swift $best_ver)"
+          sudo xcode-select -s "$best/Contents/Developer"
           xcodebuild -version
           swift --version
           swift_major="$(swift --version | sed -nE 's/.*Swift version ([0-9]+)\..*/\1/p' | head -n1)"
@@ -198,7 +222,7 @@ jobs:
           cat "$RUNNER_TEMP/release-notes.md"
 
       - name: Đưa zip lên Artifacts (dùng khi chạy thử)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.pack.outputs.name }}
           path: dist/*

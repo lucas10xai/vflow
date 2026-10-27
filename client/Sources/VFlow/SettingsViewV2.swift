@@ -346,7 +346,10 @@ private struct AppRuleRow: View {
                 Text(rule.bundleId).font(.caption2).foregroundStyle(.secondary)
             }
             Spacer()
-            Picker("", selection: Binding(get: { rule.mode }, set: onChangeMode)) {
+            // Closure `{ onChangeMode($0) }` thay vì `set: onChangeMode` — cùng lý do với `ModeSection`
+            // (SettingsView.swift): tránh reabstraction thunk làm swift-frontend 6.3.3 sập lúc IRGen
+            // (run lỗi https://github.com/lucas10xai/vflow/actions/runs/40461536988). Đừng "dọn" ngược lại.
+            Picker("", selection: Binding(get: { rule.mode }, set: { onChangeMode($0) })) {
                 ForEach(AppRuleMode.allCases, id: \.self) { m in Text(m.dictationMode.title).tag(m) }
             }
             .labelsHidden()

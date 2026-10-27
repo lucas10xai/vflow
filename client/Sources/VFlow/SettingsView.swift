@@ -27,7 +27,14 @@ struct ModeSection: View {
     let onChange: @MainActor (DictationMode) -> Void
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Picker("Chế độ", selection: Binding(get: { mode }, set: onChange)) {
+            // GIỮ DẠNG closure `{ onChange($0) }`, KHÔNG truyền thẳng `set: onChange`: truyền một giá trị
+            // hàm `@MainActor (DictationMode) -> Void` vào tham số `@isolated(any) @Sendable` của
+            // `Binding.init(get:set:)` buộc trình biên dịch sinh "reabstraction thunk" mà swift-frontend 6.3.3
+            // (Xcode 26.6, runner `macos-latest` của GitHub) SẬP lúc IRGen ("SmallVector unable to grow" trong
+            // IRGenSILFunction::visitFullApplySite → SyncCallEmission::setArgs, thunk
+            // $s9VFlowCore13DictationModeOScA_pSgIeAghyg_ACIeAghn_TR). Swift 6.4 biên dịch được cả hai dạng.
+            // Run lỗi: https://github.com/lucas10xai/vflow/actions/runs/40461536988 — đừng "dọn" ngược lại.
+            Picker("Chế độ", selection: Binding(get: { mode }, set: { onChange($0) })) {
                 ForEach(DictationMode.allCases, id: \.self) { m in
                     Text(m.title).tag(m)
                 }
