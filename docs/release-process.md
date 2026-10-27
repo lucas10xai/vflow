@@ -36,7 +36,7 @@ Ghi chú lấy từ `CHANGELOG.md`. Trước khi gắn thẻ:
 Chạy trên Mac Apple Silicon, ở nhánh `main` sạch, đã commit mọi thứ:
 
 - [ ] `npm ci && npm test` xanh.
-- [ ] `(cd client && swift test)` xanh.
+- [ ] `(cd client && swift test)` xanh (máy dev: Swift 6.4 / Xcode 27; runner: Swift 6.3.3 — xem mục 7, KHÔNG thay được dry-run).
 - [ ] Số phiên bản đã khớp ở cả hai nơi (mục 1) và `CHANGELOG.md` đã có mục `[X.Y.Z]`.
 - [ ] Dựng bản công khai và kiểm **không có model** trong gói:
   ```sh
@@ -52,7 +52,7 @@ Chạy trên Mac Apple Silicon, ở nhánh `main` sạch, đã commit mọi th�
   git ls-files | grep -iE '\.(wav|onnx|pcm|pyc)$|(^|/)\.env'                                  # phải RỖNG
   ```
   (Kết quả không rỗng không tự động là lỗi — xem từng dòng — nhưng phải xử lý có chủ đích.)
-- [ ] **Chạy thử workflow:** GitHub › Actions › "Phát hành" › *Run workflow* (để `dry_run` bật). Phải xanh toàn bộ, rồi tải zip ở mục *Artifacts* về kiểm.
+- [ ] **Chạy thử workflow:** GitHub › Actions › "Phát hành" › *Run workflow* (để `dry_run` bật) hoặc `gh workflow run "Phát hành" --ref main -f dry_run=true` (chi tiết ở mục 7). Phải xanh toàn bộ, rồi tải zip ở mục *Artifacts* về kiểm. Bước này CÀNG QUAN TRỌNG vì runner dùng Swift cũ hơn máy dev (mục 7): lỗi biên dịch riêng của Swift cũ chỉ lộ ở đây.
 - [ ] **Kiểm tay trên máy sạch** (tài khoản macOS mới hoặc Mac khác, chưa có `~/.vflow`): tải zip **bằng trình duyệt** (để có nhãn quarantine thật) ⇒ làm đúng hướng dẫn gỡ chặn trong README ⇒ cấp 3 quyền ⇒ cửa sổ tải model hiện và tải xong ⇒ đọc chính tả một câu vào Terminal và một ô văn bản. Theo `client/MANUAL-TEST.md`.
 - [ ] Đối chiếu `shasum -a 256 -c` với tệp `.sha256` của bản dry-run.
 
@@ -99,6 +99,35 @@ Chưa làm. Chuẩn bị sẵn để sau này thêm được mà không phải �
 - **Cask chính thức (`homebrew/cask`):** theo thảo luận của Homebrew (<https://github.com/orgs/Homebrew/discussions/6482>, <https://github.com/orgs/Homebrew/discussions/7050>), cask không qua Gatekeeper (không ký Developer ID + công chứng) bị vô hiệu hoá từ 2026-09-01. Vì vậy **không thể vào cask chính thức nếu chưa mua Apple Developer Program và công chứng app** — tap riêng là đường duy nhất cho tới lúc đó. Tự kiểm lại chính sách hiện hành trước khi gửi.
 - Nếu sau này mua chứng chỉ: thêm bước ký Developer ID + `notarytool` vào workflow bằng *GitHub Secrets* của chủ dự án (chưa có), bỏ phần hướng dẫn gỡ chặn khỏi README và `RELEASE_NOTES_FOOTER.md`.
 
-## 7. Phần chưa được kiểm chứng
+## 7. Môi trường runner, và điều đã/chưa được kiểm chứng
 
-Workflow `release.yml` **chưa từng chạy trên GitHub Actions** khi viết (không có runner ở môi trường soạn): mới kiểm cú pháp YAML, `bash -n` từng bước, và chạy riêng các đoạn trích phiên bản/CHANGELOG/regex thẻ trên máy cục bộ. Những điều chỉ biết được khi chạy thật: `swift test` có chạy được trên runner không đầu (một số test dựng cửa sổ AppKit ngoài màn hình), Xcode mặc định của `macos-latest` có đủ Swift 6 không (workflow dừng với thông báo rõ nếu không), thời gian chạy, và quyền tạo Release bằng `GITHUB_TOKEN` (cần *Settings › Actions › General › Workflow permissions* cho phép ghi nếu repo/tổ chức mặc định chỉ đọc — workflow đã khai `permissions: contents: write`). Hãy chạy **dry-run** (mục 3) trước thẻ đầu tiên.
+**Đã kiểm chứng thật** (workflow chạy dry-run XANH hoàn toàn trên GitHub Actions: https://github.com/lucas10xai/vflow/actions/runs/40462431540 — 3 phút): `npm test`, `swift test` (666 test = 653 + 13), dựng `build-app.sh --no-model`, kiểm gói (không model, arm64, ký ad-hoc, phiên bản), nén zip + SHA-256, tải Artifacts về giải nén kiểm lại.
+
+**Runner:** `macos-latest` (image `macos-26`, Apple Silicon). Các Xcode có sẵn và Swift đi kèm (đo thật trong nhật ký run): 26.0/26.0.1 = Swift 6.2; 26.1/26.1.1 = 6.2.1; 26.2 = 6.2.3; 26.3 = 6.2.4; 26.4/26.4.1 = 6.3.1; 26.5 = 6.3.2; **26.6 (mặc định) = 6.3.3**. Không có Swift ≥ 6.4 trên image này; Swift 6.4 (= Xcode 27, cùng bản với máy dev) chỉ có ở image xem trước `xcode-27` (Xcode 27.0/27.1/27.2). Workflow tự liệt kê mọi Xcode và chọn bản có Swift cao nhất (bước "Chọn Xcode có Swift mới nhất…") — khi GitHub đưa Xcode mới vào `macos-latest` thì tự dùng bản mới.
+
+**Lỗi trình biên dịch đã gặp (đừng sửa ngược):** run đầu tiên (https://github.com/lucas10xai/vflow/actions/runs/40461536988) thất bại vì `swift-frontend` 6.3.3 SẬP lúc IRGen khi biên dịch module `VFlow` ("SmallVector unable to grow", thunk `@isolated(any)` của `DictationMode`) — máy dev dùng Swift 6.4 nên không thấy. Nguyên nhân tìm được: truyền thẳng một hàm `@MainActor` làm tham số `set:` của `Binding(get:set:)`. Cách né (giữ nguyên hành vi): bọc closure `set: { onChange($0) }` ở `SettingsView.swift` (`ModeSection`) và `SettingsViewV2.swift` (`AppRuleRow`); chú thích tại chỗ nhắc không dọn ngược. Quy tắc cho mã mới: **KHÔNG truyền giá trị hàm `@MainActor`/non-Sendable thẳng vào tham số closure của SwiftUI (`Binding(get:set:)`, …) — bọc bằng closure literal**; và vì máy dev chạy Swift mới hơn runner, một lỗi biên dịch riêng của Swift cũ chỉ lộ ra ở dry-run — luôn chạy dry-run trước khi gắn thẻ (mục 3).
+
+**Chưa kiểm chứng:** bước "Tạo GitHub Release" (bị bỏ qua khi dry-run, chỉ chạy khi gắn thẻ `v*`): quyền tạo Release bằng `GITHUB_TOKEN` (cần *Settings › Actions › General › Workflow permissions* cho phép ghi nếu repo/tổ chức mặc định chỉ đọc — workflow đã khai `permissions: contents: write`) và cờ `--verify-tag`/`--prerelease`. Thẻ đầu tiên là lần chạy thật đầu tiên của bước này; nên thử bằng thẻ tiền phát hành (`v0.1.0-rc.1`, cần khớp quy tắc phiên bản ở mục 1) trước.
+
+### Cách chạy thử (dry-run)
+
+```sh
+gh workflow run "Phát hành" --ref main -f dry_run=true     # hoặc GitHub › Actions › Phát hành › Run workflow
+gh run list --workflow "Phát hành" --limit 1               # lấy ID run
+gh run watch <ID> --exit-status                            # theo dõi (khoảng 3 phút)
+gh run download <ID> --dir /tmp/vflow-dry-run              # tải Artifacts (zip + .sha256)
+cd /tmp/vflow-dry-run/vflow-*-macos-arm64 && shasum -a 256 -c *.sha256
+```
+
+Muốn thử trên runner khác mà không sửa tệp: `gh workflow run "Phát hành" --ref main -f dry_run=true -f runner=xcode-27` (đầu vào `runner`; gắn thẻ `v*` luôn dùng `macos-latest`). Dry-run KHÔNG tạo Release và KHÔNG cần/động đến bí mật nào.
+
+Kiểm zip đã tải (ví dụ):
+
+```sh
+ditto -x -k vflow-*-macos-arm64.zip x && ls x                         # LICENSE NOTICE VFlow.app
+ls x/VFlow.app/Contents/Resources/models                              # phải báo: No such file
+ls x/VFlow.app/Contents/Resources/LICENSES                            # có MODEL-ZIPFORMER-VI-30M.txt…
+codesign --verify --deep --strict x/VFlow.app && codesign -dv x/VFlow.app 2>&1 | grep Signature   # Signature=adhoc
+/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' x/VFlow.app/Contents/Info.plist
+du -sh x/VFlow.app                                                    # ≈ 146M (zip nén ≈ 46 MB)
+```
