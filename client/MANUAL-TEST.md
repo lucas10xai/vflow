@@ -47,7 +47,7 @@ Chuẩn bị: `client/scripts/build-app.sh`; model `zipformer-vi-30m` đã có t
 
 ## C. Lỗi và hồi phục
 15. Rút micro USB/tai nghe giữa lúc đang nghe (nếu có micro ngoài).
-    **Dự kiến:** “Lỗi: Micro không dùng được: thiết bị micro thay đổi hoặc bị rút”; lần giữ ⌥ sau dùng micro mặc định mới.
+    **Dự kiến (Q2):** KHÔNG còn thanh đỏ "thiết bị micro thay đổi hoặc bị rút" khi đầu vào vẫn dùng được; vflow dựng lại êm và ghi tiếp bằng micro còn lại (HUD nhắc nhẹ MỘT lần nếu micro đã chọn không còn); chỉ khi không thu được chút âm thanh nào mới báo đỏ với thông điệp đúng nguyên nhân. Xem mục M.
 16. System Settings › Micro: tắt vflow, giữ ⌥.
     **Dự kiến:** “Lỗi: Chưa cấp quyền Micro”. Bật lại.
 17. `pkill -9 -f "vflow.js serve"`.
@@ -315,3 +315,32 @@ Chuẩn bị: đã dựng và mở bản mới (`client/scripts/build-app.sh`, r
 
 **L8. Chạy bộ kiểm tự động của engine (một lệnh)**
 - `node client/scripts/probe-group-a.mjs` — dựng engine thử ở cổng ngẫu nhiên 27800–27899 trong thư mục tạm (KHÔNG đụng `~/.vflow`, KHÔNG dùng cổng 7611), in bảng PASS/FAIL tiếng Việt cho teach, lưu âm thanh, ngân sách/hạn, xoá, path traversal, ZIP, rò rỉ riêng tư, ký hiệu theo ngữ cảnh, cài đặt; tự dọn. **KỲ VỌNG:** dòng cuối "N PASS, 0 FAIL", thoát mã 0, dòng "Dọn dẹp: engine … đã tắt; thư mục tạm đã xoá.". **SAI:** có FAIL (nhất là mục "Rò rỉ riêng tư" hay "Xoá và path traversal" — nghiêm trọng, dừng dùng tính năng lưu âm thanh và báo ngay).
+
+## M. Q2: micro bị ngắt/đổi tuyến giữa lượt (CHỈ kiểm được trên máy thật của chủ dự án)
+
+Lỗi gốc: thông báo `AVAudioEngineConfigurationChange` (bắn rất thường, vd. mỗi khi chọn micro cụ thể ở Cài đặt, hoặc khi tai nghe Bluetooth đổi tuyến) từng bị coi là "micro bị rút" ⇒ huỷ lượt + thẻ đỏ "Micro không dùng được: thiết bị micro thay đổi hoặc bị rút". Nay: kiểm trạng thái thật, dựng lại engine ÊM, giữ nguyên âm thanh đã thu. Cần bản mới `client/scripts/build-app.sh` rồi cài như thường lệ. Việc đo trong môi trường dựng đã chạy trên micro thật (tai nghe Ulisten B1 ANC, micro MacBook), nhưng các ca dưới đây cần thao tác vật lý nên không tự động hoá được.
+
+**M1. Chọn một micro cụ thể rồi đọc chính tả nhiều lượt (ca tái hiện lỗi)**
+1. Cài đặt › Chung › Micro: chọn đúng tên tai nghe đang dùng (không để "Mặc định hệ thống"). Giữ ⌥ trái, nói một câu, nhả — lặp 10 lượt liên tiếp.
+   **KỲ VỌNG:** cả 10 lượt ra chữ; KHÔNG lần nào hiện đỏ "thiết bị micro thay đổi hoặc bị rút"; thẻ "Lỗi gần nhất"/"Có vấn đề cần xử lý" ở Tổng quan không xuất hiện.
+   **DẤU HIỆU SAI:** thanh đỏ + mất chữ ở lượt bất kỳ khi KHÔNG hề rút/đổi gì.
+
+**M2. Rút/tắt tai nghe Bluetooth GIỮA câu (đang chọn đúng tai nghe đó)**
+1. Chọn tai nghe Bluetooth ở Cài đặt. Giữ ⌥ trái, nói liền khoảng 4–5 giây, trong lúc đang nói TẮT tai nghe (hoặc đưa ra xa tới khi ngắt), vẫn giữ ⌥, nói thêm 2 giây rồi nhả.
+   **KỲ VỌNG:** KHÔNG có thanh đỏ; vflow vẫn ghi tiếp bằng micro mặc định của máy (micro MacBook), chữ của CẢ câu (kể cả phần trước lúc tắt tai nghe) được gửi đi; HUD hiện MỘT lần nhắc nhẹ "Micro đã chọn không còn — dùng micro mặc định"; Cài đặt › Chung › Micro tự về "Mặc định hệ thống" nếu tai nghe thật sự không còn trong danh sách.
+   **DẤU HIỆU SAI:** thanh đỏ "Micro không dùng được…"; mất phần đã nói trước lúc tắt; nhắc lặp lại ở lượt sau.
+2. Lặp lại nhưng tắt tai nghe NGAY khi vừa bấm ⌥ (chưa kịp nói gì), rồi nói bằng micro máy.
+   **KỲ VỌNG:** nếu không thu được gì thì (và chỉ khi đó) mới hiện đỏ, với thông điệp ĐÚNG: "Micro không dùng được: micro bị ngắt giữa chừng (tên thiết bị)" hoặc "không mở được micro (…)", KHÔNG phải câu cũ "thiết bị micro thay đổi hoặc bị rút".
+
+**M3. App khác chiếm/nhả micro (Zoom/Meet/FaceTime) trong lúc đọc chính tả**
+1. Mở cuộc họp (Meet/Zoom) có bật micro, rồi giữ ⌥ trái nói một câu ở vflow; thử cả khi bật/tắt micro trong cuộc họp giữa lúc đang nói.
+   **KỲ VỌNG:** không thanh đỏ; chữ ra bình thường (nếu hệ thống tạm giữ micro khiến vflow không nhận được tiếng thì vflow tự dựng lại, tối đa vài giây).
+   **DẤU HIỆU SAI:** thanh đỏ chỉ vì cuộc họp đổi trạng thái micro.
+
+**M4. Đổi tai nghe Bluetooth sang chế độ gọi (HFP) ↔ nghe nhạc (A2DP) trong lúc giữ ⌥**
+1. Đang nghe nhạc bằng tai nghe Bluetooth (micro mặc định là tai nghe), giữ ⌥ trái nói một câu 5–6 giây.
+   **KỲ VỌNG:** chữ ra đủ câu dù hệ thống đổi tuyến âm thanh/tần số lấy mẫu giữa chừng; không thanh đỏ.
+
+**M5. Thẻ "Lỗi gần nhất" tự hết**
+1. (Tạo lỗi: tắt quyền Micro ở System Settings, giữ ⌥ để thấy lỗi, bật lại quyền.) Sau đó đọc chính tả MỘT lượt thành công.
+   **KỲ VỌNG:** ngay sau lượt thành công thẻ "Lỗi gần nhất" và "Có vấn đề cần xử lý" biến mất, KHÔNG cần bấm X.

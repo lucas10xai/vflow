@@ -54,3 +54,13 @@ public enum DictationDecision {
         }
     }
 }
+
+/// "Lỗi gần nhất" (thẻ ở Tổng quan, mục trong menu, thẻ "Có vấn đề cần xử lý") sau khi MỘT lượt kết thúc.
+/// Lỗi chỉ giữ lại khi chính lượt vừa rồi lại lỗi; mọi kết quả khác (đã dán, "không nghe thấy gì", nhắc
+/// nhẹ) xoá lỗi cũ — người dùng không phải bấm X sau khi đã dùng lại được bình thường.
+public enum LastErrorPolicy {
+    public static func after(overlay: OverlayState) -> String? {
+        if case .error(let message) = overlay { return message }
+        return nil
+    }
+}

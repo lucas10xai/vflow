@@ -34,6 +34,8 @@ final class AppController: NSObject {
     private var lastSpokenTextMemory: String?
     /// UID micro đã báo "không còn" một lần trong phiên này (tránh báo lặp lại mỗi lần ghi).
     private var warnedMissingMicUIDs: Set<String> = []
+    /// Nhắc nhẹ micro đang chờ hiện ngay sau HUD "Đang nghe" (xem `showPendingMicNotice`).
+    private var pendingMicNotice: String?
     /// VAD đang chạy CHỈ khi ghi khoá (hands-free) và `silence_stop_seconds` > 0 (xem contract mục 7b).
     private var vad: VoiceActivityDetector?
     /// "Xem chữ chạy trực tiếp" (`POST /v1/partial`) — chỉ tồn tại trong lúc đang ghi dictation
@@ -156,9 +158,8 @@ final class AppController: NSObject {
         case .systemDefault: return nil
         case .configured(let d): return d.uid
         case .fallbackDeviceMissing(let previousUID):
-            if !warnedMissingMicUIDs.contains(previousUID) {
-                warnedMissingMicUIDs.insert(previousUID)
-                overlay.show(.notice("Micro đã chọn không còn — dùng micro mặc định"), thenRestore: currentListeningOverlay())
+            if warnedMissingMicUIDs.insert(previousUID).inserted {
+                pendingMicNotice = MicRecoveryPolicy.deviceMissingNotice
             }
             micDeviceUID = nil
             return nil
@@ -235,7 +236,7 @@ final class AppController: NSObject {
         settingsWindow = SettingsWindowController(controller: self)
         welcomeWindow = WelcomeWindowController(controller: self)
         recorder.onLevel = { [weak self] l in self?.overlay.setLevel(l); self?.processVoiceActivity(level: l) }
-        recorder.onInterrupted = { [weak self] why in self?.micInterrupted(why) }
+        recorder.onEvent = { [weak self] event in self?.micEvent(event) }
         // Khung âm thanh đầu tiên của lượt (luồng audio, mốc đơn điệu) ⇒ chốt mẫu đo độ trễ bắt đầu ghi.
         recorder.onFirstBuffer = { arrivedAt in RecordingLatencyStore.shared.firstBufferReceived(at: arrivedAt) }
         hotkeys.onInput = { [weak self] input in self?.handle(input) }
@@ -555,6 +556,7 @@ final class AppController: NSObject {
         _ = machine.reset(optionHeld: hotkeys.leftOptionHeldNow())
         commandSelectionTask?.cancel()
         commandSelectionTask = nil
+        pendingMicNotice = nil
         RecordingLatencyStore.shared.cancel() // không phải lượt ghi (lỗi quyền/engine/mic): không tạo mẫu
         recorder.cancel()
         stopLivePreview()
@@ -600,6 +602,7 @@ final class AppController: NSObject {
         lastAnnouncedVadCountdown = nil
         overlay.setLevel(0)
         overlay.show(machine.isLocked ? .listeningLocked(level: 0) : .listening(level: 0))
+        showPendingMicNotice()
         startLivePreviewIfEnabled()
         refreshUI()
     }
@@ -673,6 +676,7 @@ final class AppController: NSObject {
         vad = nil
         overlay.setLevel(0)
         overlay.show(.listeningCommand(level: 0))
+        showPendingMicNotice()
         refreshUI()
         // Lấy đoạn đang chọn NGAY LÚC BẮT ĐẦU, song song với ghi âm lệnh (xem contract/engine-api.md,
         // mục Command Mode, bước a) — chờ ở `finishCommandRecording` nếu chưa xong.
@@ -721,9 +725,45 @@ final class AppController: NSObject {
         }
     }
 
-    private func micInterrupted(_ why: String) {
+    /// Sự kiện từ `AudioRecorder` GIỮA lượt ghi (Q2). KHÔNG BAO GIỜ huỷ lượt vì thông báo cấu hình:
+    /// `.recovered` ⇒ ghi tiếp (im lặng, trừ khi phải rơi về micro mặc định ⇒ nhắc nhẹ MỘT lần);
+    /// `.failed` ⇒ mọi bước khôi phục đã hỏng: đã có ≥ 0,5 s thì GỬI ĐI + nhắc ngắn (không mất câu nói),
+    /// chưa có gì thì mới báo lỗi đỏ với đúng nguyên nhân.
+    private func micEvent(_ event: AudioRecorder.Event) {
         guard machine.isRecording else { return }
-        abortRecording(.micUnavailable(why))
+        switch event {
+        case .recovered(let fellBackFromUID):
+            if let uid = fellBackFromUID { noteMicFellBack(from: uid) }
+        case .failed(let detail, let deviceName, let collectedSeconds, let neverStarted):
+            switch MicRecoveryPolicy.outcome(collectedSeconds: collectedSeconds, deviceName: deviceName,
+                                             neverStarted: neverStarted, detail: detail) {
+            case .error(let message):
+                abortRecording(.micUnavailable(message))
+            case .sendCollected(let notice):
+                perform(machine.handle(.leftOptionUp, at: Self.now)) // như người dùng nhả phím: dừng + gửi phần đã ghi
+                updateTicking()
+                overlay.show(.notice(notice), thenRestore: .transcribing)
+            }
+        }
+    }
+
+    /// Micro đã chọn không dùng lại được giữa lượt ⇒ đã rơi về mặc định hệ thống. Nhắc nhẹ MỘT lần
+    /// (không phải lỗi đỏ); nếu thiết bị thật sự không còn thì cập nhật luôn lựa chọn trong Cài đặt.
+    private func noteMicFellBack(from uid: String) {
+        let stillExists = availableMicDevices().contains { $0.uid == uid }
+        if !stillExists, micDeviceUID == uid { micDeviceUID = nil }
+        if warnedMissingMicUIDs.insert(uid).inserted {
+            let text = stillExists ? "Micro đã chọn đang không dùng được — tạm dùng micro mặc định" : MicRecoveryPolicy.deviceMissingNotice
+            overlay.show(.notice(text), thenRestore: currentListeningOverlay())
+        }
+    }
+
+    /// Nhắc nhẹ chuẩn bị ở `resolvedMicDeviceUIDForRecording`, hiện SAU khi HUD "Đang nghe" đã lên (hiện
+    /// trước thì bị "Đang nghe" đè mất sau vài mili giây — trước đây thông báo thiết bị mất không ai thấy).
+    private func showPendingMicNotice() {
+        guard let text = pendingMicNotice else { return }
+        pendingMicNotice = nil
+        overlay.show(.notice(text), thenRestore: currentListeningOverlay())
     }
 
     private func finishRecording() {
@@ -809,7 +849,7 @@ final class AppController: NSObject {
             let inserter = makeInserter()
             let outcome = await inserter.insert(text)
             let overlayState = DictationDecision.overlay(after: outcome, planned: .done)
-            if case .error(let m) = overlayState { lastError = m } else { lastError = nil }
+            lastError = LastErrorPolicy.after(overlay: overlayState)
             overlay.show(overlayState)
             machine.finished(optionHeld: hotkeys.leftOptionHeldNow())
             updateTicking()
@@ -917,7 +957,7 @@ final class AppController: NSObject {
                 if !ReturnKeystroke.send() { overlayState = .error(ErrorText.message(.enterKeystrokeFailed)) }
             }
         }
-        if case .error(let m) = overlayState { lastError = m } else { lastError = nil }
+        lastError = LastErrorPolicy.after(overlay: overlayState)
         if let text = plan.insert { lastSpokenTextMemory = text }
         recordHistoryIfNeeded(result: result, insertedText: plan.insert)
         // Engine tự cộng thống kê cho MỌI dictation thành công, bất kể công tắc "Lưu lịch sử" của
@@ -951,7 +991,7 @@ final class AppController: NSObject {
                 let inserter = makeInserter()
                 let outcome = await inserter.insert(cmd.text)
                 let overlayState = DictationDecision.overlay(after: outcome, planned: .done)
-                if case .error(let m) = overlayState { lastError = m } else { lastError = nil }
+                lastError = LastErrorPolicy.after(overlay: overlayState)
                 lastSpokenTextMemory = cmd.text
                 overlay.show(overlayState)
                 recordCommandHistory(instruction: r.instruction, command: cmd, audioMs: r.audioMs)
