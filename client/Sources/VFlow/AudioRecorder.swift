@@ -13,6 +13,19 @@ final class AudioRecorder: @unchecked Sendable {
     var onLevel: (@MainActor (Float) -> Void)?
     /// Thiết bị đổi/rút micro trong lúc ghi.
     var onInterrupted: (@MainActor (String) -> Void)?
+    /// Gọi MỘT lần cho mỗi lần `start()` khi khung âm thanh ĐẦU TIÊN của lượt đó tới tap (mốc đơn điệu
+    /// `systemUptime` lấy ngay đầu callback tap) — dùng đo độ trễ bắt đầu ghi (`RecordingLatencyStore`).
+    /// Đặt MỘT lần trước khi ghi; không đặt (vd. sheet Dạy từ) thì không đo. Khung đến muộn của một
+    /// lượt đã `stop()`/`cancel()` bị `FirstBufferGate` chặn, không lọt vào lượt kế tiếp.
+    var onFirstBuffer: (@Sendable (TimeInterval) -> Void)?
+    private var firstBufferGate: FirstBufferGate?
+
+    private final class FirstBufferGate: @unchecked Sendable {
+        private let lock = NSLock()
+        private var open = true
+        func fireOnce() -> Bool { lock.lock(); defer { lock.unlock() }; guard open else { return false }; open = false; return true }
+        func invalidate() { lock.lock(); open = false; lock.unlock() }
+    }
 
     static func permission() -> AVAuthorizationStatus { AVCaptureDevice.authorizationStatus(for: .audio) }
 
@@ -40,7 +53,11 @@ final class AudioRecorder: @unchecked Sendable {
         }
         let conv = PCM16Converter(inputRate: Int(format.sampleRate.rounded()))
         queue.sync { converter = conv; samples = []; samples.reserveCapacity(16_000 * 30) }
+        firstBufferGate?.invalidate()
+        let gate = FirstBufferGate()
+        firstBufferGate = gate
         input.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, _ in
+            let arrivedAt = ProcessInfo.processInfo.systemUptime
             guard let self, let data = buffer.floatChannelData else { return }
             let n = Int(buffer.frameLength)
             let chans = Int(buffer.format.channelCount)
@@ -51,6 +68,7 @@ final class AudioRecorder: @unchecked Sendable {
             let level = AudioMath.level(mono)
             self.queue.async {
                 if let out = self.converter?.process(mono) { self.samples.append(contentsOf: out) }
+                if gate.fireOnce() { self.onFirstBuffer?(arrivedAt) }
             }
             Task { @MainActor in self.onLevel?(level) }
         }
@@ -63,6 +81,7 @@ final class AudioRecorder: @unchecked Sendable {
             try engine.start()
         } catch {
             input.removeTap(onBus: 0)
+            gate.invalidate()
             throw ClientError.micUnavailable(error.localizedDescription)
         }
         self.engine = engine
@@ -99,6 +118,8 @@ final class AudioRecorder: @unchecked Sendable {
     private func teardown() {
         if let o = configObserver { NotificationCenter.default.removeObserver(o) }
         configObserver = nil
+        firstBufferGate?.invalidate() // khung muộn của lượt này không được tính cho lượt sau
+        firstBufferGate = nil
         guard let engine else { return }
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()

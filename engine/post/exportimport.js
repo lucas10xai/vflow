@@ -10,6 +10,8 @@ export const EXPORT_VERSION = 1;
 export const MAX_IMPORT_BYTES = 20 * 1024 * 1024;
 /** Khoá không bao giờ được nhập từ gói, dù xuất hiện trong settings — bị bỏ qua và báo `ignored`. */
 const SECRET_SETTINGS_KEYS = ['token', 'key', 'api_key', 'apikey', 'rewrite_key', 'llm_api_key', 'rewrite', 'secret', 'password'];
+/** Khoá cài đặt đã gỡ khỏi engine (gói xuất từ bản cũ vẫn chứa): bỏ qua và báo `ignored` thay vì từ chối cả gói. */
+const RETIRED_SETTINGS_KEYS = ['vocab_boost'];
 
 export class ImportError extends Error {
   /** @param {string} message */
@@ -111,11 +113,17 @@ export function validateImportPackage(pkg) {
       throw new ImportError('settings phải là object');
     }
     settings = { .../** @type {object} */ (p.settings) };
-    for (const secret of SECRET_SETTINGS_KEYS) {
+    for (const secret of [...SECRET_SETTINGS_KEYS, ...RETIRED_SETTINGS_KEYS]) {
       if (Object.hasOwn(settings, secret)) {
         delete settings[secret];
         ignoredSettingsKeys.push(secret);
       }
+    }
+    // Quyền riêng tư: một TỆP không được tự BẬT ghi âm lịch sử (chỉ người dùng bật qua PUT /v1/settings).
+    // Gói nói `audio_history:false` thì áp dụng bình thường (tắt là hướng an toàn).
+    if (settings.audio_history === true) {
+      delete settings.audio_history;
+      ignoredSettingsKeys.push('audio_history');
     }
   }
 

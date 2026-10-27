@@ -50,7 +50,7 @@ struct ModeSection: View {
             Text(mode.subtitle).font(.footnote).foregroundStyle(.secondary)
             Text(ModeCloudLabel.text(mode))
                 .font(.caption)
-                .foregroundStyle(mode.sendsTextToCloud ? Color.orange : Color.secondary)
+                .foregroundStyle(mode.sendsTextToCloud ? Theme.warningText : Color.secondary)
         }
     }
 }
@@ -62,6 +62,9 @@ struct GeneralSettingsTab: View {
 
     @AppStorage("showWindowOnLaunch") private var showWindowOnLaunch = ShowWindowPreference.defaultValue
     @AppStorage("showMenuBarIcon") private var showMenuBarIcon = true
+    @ObservedObject private var appearance = AppearanceStore.shared
+    @AppStorage(OverlayPreferences.positionKey) private var overlayPosition: OverlayPosition = OverlayPreferences.defaultPosition
+    @AppStorage(OverlayPreferences.sizeKey) private var overlaySize: OverlaySize = OverlayPreferences.defaultSize
 
     var body: some View {
         Form {
@@ -77,6 +80,25 @@ struct GeneralSettingsTab: View {
                     get: { showMenuBarIcon },
                     set: { controller.showMenuBarIcon = $0; showMenuBarIcon = $0 }))
                     .help("Biểu tượng thanh menu chỉ là phụ — cách điều khiển chính là cửa sổ \"vflow\" (Dock, ⌘-Tab).")
+            }
+            Section("Giao diện") {
+                Picker("Giao diện", selection: Binding(get: { appearance.preference }, set: { appearance.set($0) })) {
+                    ForEach(AppearancePreference.allCases, id: \.self) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                Text("Áp dụng ngay cho mọi cửa sổ vflow. \"Hệ thống\" theo cài đặt Sáng/Tối của macOS.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+            Section("Thanh ghi âm") {
+                Picker("Vị trí", selection: $overlayPosition) {
+                    ForEach(OverlayPosition.allCases, id: \.self) { Text($0.title).tag($0) }
+                }
+                Picker("Cỡ", selection: $overlaySize) {
+                    ForEach(OverlaySize.allCases, id: \.self) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                Text("Gọn: chỉ trạng thái và sóng âm. Vừa: thêm 2 dòng chữ chạy trực tiếp. Lớn: 4 dòng, rộng hơn. \"Cạnh notch\" đặt ở giữa cạnh trên, dưới thanh menu. Có hiệu lực ở lần ghi kế tiếp.")
+                    .font(.footnote).foregroundStyle(.secondary)
             }
             Section("Micro") {
                 MicrophonePickerSection(controller: controller)
@@ -252,6 +274,7 @@ struct HistoryPrivacySettingsTab: View {
 /// Mục "Nâng cao": thư mục dữ liệu, phiên bản.
 struct AdvancedSettingsTab: View {
     let controller: AppController
+    @State private var latencyLog = RecordingLatencyStore.shared.snapshot
 
     var body: some View {
         Form {
@@ -261,11 +284,22 @@ struct AdvancedSettingsTab: View {
                 }
                 Button("Mở thư mục dữ liệu") { controller.openDataFolder() }
             }
+            Section("Độ trễ bắt đầu ghi") {
+                LabeledContent("Từ nhấn phím tới khối âm thanh đầu") {
+                    Text(RecordingLatencyText.summary(log: latencyLog)).textSelection(.enabled)
+                }
+                Text("Đo trong phiên này, chỉ giữ trong bộ nhớ (50 lượt gần nhất) — không ghi đĩa, không chứa nội dung giọng nói. Mở lại app là xoá.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
             Section("Phiên bản") {
                 LabeledContent("Phiên bản vflow", value: AppVersion.current)
             }
         }
         .formStyle(.grouped)
+        .onAppear { latencyLog = RecordingLatencyStore.shared.snapshot }
+        .onReceive(NotificationCenter.default.publisher(for: RecordingLatencyStore.didRecord).receive(on: DispatchQueue.main)) { _ in
+            latencyLog = RecordingLatencyStore.shared.snapshot
+        }
     }
 }
 
@@ -335,7 +369,7 @@ struct CloudSettingsSection: View {
                 }
                 if llmModelText.isEmpty {
                     Text("Chưa đặt model: Gọn/Thư/Command Mode sẽ không chạy được.")
-                        .font(.footnote).foregroundStyle(Color.orange)
+                        .font(.footnote).foregroundStyle(Theme.warningText)
                 } else {
                     Text("Đang dùng: \(llmModelText)").font(.footnote).foregroundStyle(.secondary)
                 }

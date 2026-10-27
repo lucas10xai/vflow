@@ -124,6 +124,9 @@ public struct TranscribeResult: Equatable, Sendable {
     /// cho đám mây đã định — xem `DegradedText`.
     public var degraded: Bool = false
     public var degradedReason: String?
+    /// `audio_id` (V3): có mặt CHỈ khi "Lưu âm thanh để nghe lại" đang bật ở engine lúc xử lý yêu
+    /// cầu này và việc ghi thành công — dùng để `GET/DELETE /v1/audio/<id>` (xem `HistoryEntry.audioId`).
+    public var audioId: String?
 }
 
 public struct ModelStatus: Equatable, Sendable {
@@ -208,7 +211,8 @@ public enum EngineAPI {
             audioMs: obj["audio_ms"] as? Int,
             actions: (post?["actions"] as? [String]) ?? [],
             degraded: post?["degraded"] as? Bool ?? false,
-            degradedReason: post?["degraded_reason"] as? String))
+            degradedReason: post?["degraded_reason"] as? String,
+            audioId: obj["audio_id"] as? String))
     }
 
     // MARK: từ điển + gợi ý sửa
@@ -332,11 +336,16 @@ public enum EngineAPI {
         let whisperMode = obj["whisper_mode"] as? Bool ?? false
         let learnFromEdits = obj["learn_from_edits"] as? Bool ?? true
         let livePreview = obj["live_preview"] as? Bool ?? true
+        let contextSymbols = obj["context_symbols"] as? Bool ?? true
+        let audioHistory = obj["audio_history"] as? Bool ?? false
+        let audioHistoryMb = obj["audio_history_mb"] as? Int ?? 200
+        let audioHistoryDays = obj["audio_history_days"] as? Int ?? 7
         return AppSettings(cloudLlm: cloudLlm, llmModel: llmModel, llmTimeoutMs: llmTimeoutMs,
                            actionsEnabled: actionsEnabled, silenceStopSeconds: silenceStopSeconds,
                            statsEnabled: statsEnabled, appRules: appRules, voicePunctuation: voicePunctuation,
                            tone: tone, whisperMode: whisperMode, learnFromEdits: learnFromEdits,
-                           livePreview: livePreview)
+                           livePreview: livePreview, contextSymbols: contextSymbols,
+                           audioHistory: audioHistory, audioHistoryMb: audioHistoryMb, audioHistoryDays: audioHistoryDays)
     }
 
     // MARK: Command Mode

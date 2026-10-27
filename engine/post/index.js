@@ -6,6 +6,7 @@ import { loadFillerRules, removeFillers, normalizeText } from './clean.js';
 import { applyDevspeech } from './devspeech.js';
 import { extractEnterAction } from './actions.js';
 import { applyVoicePunctuation } from './punctuation.js';
+import { applyContextSymbols } from './contextsymbols.js';
 import { rewriteEmail } from './rewrite.js';
 import { tidyText } from './tidy.js';
 import { runCommand } from './command.js';
@@ -98,6 +99,7 @@ export function createPostProcessor({
       actions_enabled: s.actions_enabled ?? true,
       app_rules: s.app_rules ?? {},
       voice_punctuation: s.voice_punctuation ?? true,
+      context_symbols: s.context_symbols ?? true,
       tone: s.tone ?? 'neutral',
       learn_from_edits: s.learn_from_edits ?? true,
     };
@@ -144,23 +146,31 @@ export function createPostProcessor({
       // 3) Từ điển.
       const d = dict.apply(act.text);
 
+      // 3b) Ký hiệu theo ngữ cảnh (A4): MỌI chế độ, chạy TRƯỚC devspeech/dấu câu (cụm dài như "hai
+      // chấm hai gạch chéo" ⇒ "://" phải được bắt trước khi devspeech cắt "hai chấm" ⇒ "https:hai/").
+      // Chỉ có hiệu lực khi `app` thuộc danh sách cho phép (terminal/IDE/chat/AI) và context_symbols
+      // bật. Terminal/IDE ở chế độ auto ⇒ dev, nên dev PHẢI chạy bước này, nếu không tính năng gần
+      // như vô hiệu đúng ở những app nó dành cho.
+      const symbolsEnabled = s.context_symbols !== false;
+      const cs = symbolsEnabled ? applyContextSymbols(d.text, { app }) : { text: d.text, applied: [] };
+
       // 4) Dấu câu bằng giọng (item 5): mọi chế độ TRỪ dev, trừ khi bị tắt.
       const voiceEnabled = effective !== 'dev' && s.voice_punctuation !== false;
-      const vp = voiceEnabled ? applyVoicePunctuation(d.text) : { text: d.text, applied: [] };
+      const vp = voiceEnabled ? applyVoicePunctuation(cs.text) : { text: cs.text, applied: [] };
 
       if (effective === 'normal') {
-        return { text: vp.text, mode: effective, applied: [...d.applied, ...vp.applied], rewrite, actions: act.actions, degraded: false, degraded_reason: null };
+        return { text: vp.text, mode: effective, applied: [...d.applied, ...cs.applied, ...vp.applied], rewrite, actions: act.actions, degraded: false, degraded_reason: null };
       }
 
       if (effective === 'clean') {
         const c = cleanRules(vp.text);
-        return { text: c.text, mode: effective, applied: [...d.applied, ...vp.applied, ...c.applied], rewrite, actions: act.actions, ...degradedBase };
+        return { text: c.text, mode: effective, applied: [...d.applied, ...cs.applied, ...vp.applied, ...c.applied], rewrite, actions: act.actions, ...degradedBase };
       }
 
       if (effective === 'dev') {
-        const c = cleanRules(d.text);
+        const c = cleanRules(cs.text);
         const ds = applyDevspeech(c.text);
-        return { text: ds.text, mode: effective, applied: [...d.applied, ...c.applied, ...ds.applied], rewrite, actions: act.actions, degraded: false, degraded_reason: null };
+        return { text: ds.text, mode: effective, applied: [...d.applied, ...cs.applied, ...c.applied, ...ds.applied], rewrite, actions: act.actions, degraded: false, degraded_reason: null };
       }
 
       if (effective === 'tidy') {
@@ -168,10 +178,10 @@ export function createPostProcessor({
         // vuông/nhọn/tròn"…), dấu câu bằng giọng sau (bắt phần devspeech không biết: "dấu chấm",
         // "chấm than", "xuống dòng"…). Biết hạn chế: "dấu hai chấm" trong tidy có thể bị quy tắc
         // devspeech "hai chấm" bắt một phần trước — xem contract/engine-api.md.
-        const ds = applyDevspeech(d.text);
+        const ds = applyDevspeech(cs.text);
         const vp2 = voiceEnabled ? applyVoicePunctuation(ds.text) : { text: ds.text, applied: [] };
         const c = cleanRules(vp2.text);
-        const fallbackApplied = [...d.applied, ...ds.applied, ...vp2.applied, ...c.applied];
+        const fallbackApplied = [...d.applied, ...cs.applied, ...ds.applied, ...vp2.applied, ...c.applied];
         const r = await tidyText({ text: c.text, rewrite: cfg.rewrite, settings: s, guard: cfg.tidy.guard, fetchImpl });
         if (r.error !== null) {
           log({ event: 'tidy_failed', code: r.error });
@@ -184,9 +194,9 @@ export function createPostProcessor({
       const r = await rewriteEmail({ text: vp.text, rewrite: cfg.rewrite, settings: s, fetchImpl });
       if (r.error !== null) {
         log({ event: 'rewrite_failed', code: r.error });
-        return { text: vp.text, mode: effective, applied: [...d.applied, ...vp.applied], rewrite: { used: false, error: r.error }, actions: act.actions, degraded: true, degraded_reason: mapDegradedReason(r.error) };
+        return { text: vp.text, mode: effective, applied: [...d.applied, ...cs.applied, ...vp.applied], rewrite: { used: false, error: r.error }, actions: act.actions, degraded: true, degraded_reason: mapDegradedReason(r.error) };
       }
-      return { text: r.text, mode: effective, applied: [...d.applied, ...vp.applied], rewrite: { used: true, error: null }, actions: act.actions, degraded: false, degraded_reason: null };
+      return { text: r.text, mode: effective, applied: [...d.applied, ...cs.applied, ...vp.applied], rewrite: { used: true, error: null }, actions: act.actions, degraded: false, degraded_reason: null };
     },
 
     /**

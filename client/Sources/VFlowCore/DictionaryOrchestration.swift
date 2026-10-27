@@ -33,4 +33,22 @@ public enum DictionaryOrchestration {
             }
         }
     }
+
+    /// "Dạy từ bằng giọng" (V3, tab Từ điển): đọc-sửa-ghi giống `applyChange`, nhưng dùng
+    /// `TeachWordVariants.apply` (gộp biến thể vào mục có sẵn, hoặc tạo mục mới) thay vì
+    /// `DictionaryPlanner` — xem `TeachWordSheet`.
+    public static func applyTeachWord(
+        term: String, selectedVariants: [String],
+        get: @Sendable () async -> Result<[DictionaryEntry], ClientError>,
+        put: @Sendable ([DictionaryEntry]) async -> Result<[DictionaryEntry], ClientError>
+    ) async -> Result<[DictionaryEntry], ClientError> {
+        switch await get() {
+        case .failure(let e): return .failure(e)
+        case .success(let current):
+            switch TeachWordVariants.apply(term: term, selectedVariants: selectedVariants, to: current) {
+            case .failure(let e): return .failure(.dictionaryInvalid(e.message))
+            case .success(let next): return await put(next)
+            }
+        }
+    }
 }

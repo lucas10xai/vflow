@@ -19,6 +19,14 @@ enum Theme {
         }
     }()
 
+    /// Chữ cảnh báo màu cam, TỰ ĐỔI theo giao diện: cam đậm (`BrandColor.warningTextOnLightHex`, đạt AA
+    /// trên nền sáng) ở giao diện sáng, cam hệ thống ở giao diện tối. `Color.orange` trần chỉ ~2,2:1 trên
+    /// nền trắng nên chữ gần như mất ở giao diện sáng.
+    static let warningText = Color(nsColor: NSColor(name: nil) { appearance in
+        if appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua { return .systemOrange }
+        return NSColor(srgbHex: BrandColor.warningTextOnLightHex)
+    })
+
     /// Lưới khoảng cách 4/8pt dùng trong các thẻ Tổng quan/Cài đặt.
     enum Spacing {
         static let xs: CGFloat = 4
@@ -40,6 +48,16 @@ extension Color {
         let g = Double((value >> 8) & 0xFF) / 255
         let b = Double(value & 0xFF) / 255
         self.init(red: r, green: g, blue: b)
+    }
+}
+
+extension NSColor {
+    /// `hex`: 6 ký tự RRGGBB, không dấu `#`.
+    convenience init(srgbHex hex: String) {
+        var value: UInt64 = 0
+        Scanner(string: hex).scanHexInt64(&value)
+        self.init(srgbRed: CGFloat((value >> 16) & 0xFF) / 255, green: CGFloat((value >> 8) & 0xFF) / 255,
+                  blue: CGFloat(value & 0xFF) / 255, alpha: 1)
     }
 }
 

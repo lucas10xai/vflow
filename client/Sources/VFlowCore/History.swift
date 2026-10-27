@@ -3,8 +3,9 @@ import Foundation
 import Darwin
 #endif
 
-/// Một câu đã đọc chính tả. CHỈ văn bản — tuyệt đối không có âm thanh (xem contract/engine-api.md,
-/// bất biến 1: âm thanh không bao giờ ghi xuống đĩa).
+/// Một câu đã đọc chính tả. Tệp `history.jsonl` CHỈ chứa văn bản và (nếu người dùng bật "Lưu âm
+/// thanh để nghe lại", mặc định TẮT) một chuỗi `audio_id` — KHÔNG BAO GIỜ chứa âm thanh. Bản ghi âm
+/// (nếu có) do engine giữ riêng trong `~/.vflow/audio` (0600), xem `contract/engine-api.md`.
 public struct HistoryEntry: Equatable, Sendable, Identifiable {
     public var id: String
     public var at: Date
@@ -17,10 +18,17 @@ public struct HistoryEntry: Equatable, Sendable, Identifiable {
     public var totalMs: Int?
     /// `post.degraded_reason` lúc ghi (nếu có) — xem `DegradedText`; `nil` = không suy giảm.
     public var degradedReason: String?
+    /// `audio_id` trả về trong `/v1/transcribe` (V3, chỉ khi "Lưu âm thanh để nghe lại" đang bật ở
+    /// engine lúc đó) — CHỈ một chuỗi id để gọi lại `GET/DELETE /v1/audio/<id>`, KHÔNG phải âm
+    /// thanh; `nil` = mục này không có bản ghi âm đi kèm (tắt tính năng, hoặc ghi lỗi phía engine).
+    public var audioId: String?
+
+    /// `true` ⇒ có bản ghi âm nghe lại đi kèm (xem `audioId`) — dùng để hiện/ẩn nút phát ở Lịch sử.
+    public var hasAudio: Bool { audioId != nil }
 
     public init(id: String = HistoryEntry.newId(), at: Date, appBundleId: String? = nil, mode: String,
                 model: String, textRaw: String, text: String, audioMs: Int? = nil, totalMs: Int? = nil,
-                degradedReason: String? = nil) {
+                degradedReason: String? = nil, audioId: String? = nil) {
         self.id = id
         self.at = at
         self.appBundleId = appBundleId
@@ -31,6 +39,7 @@ public struct HistoryEntry: Equatable, Sendable, Identifiable {
         self.audioMs = audioMs
         self.totalMs = totalMs
         self.degradedReason = degradedReason
+        self.audioId = audioId
     }
 
     public static func newId() -> String { "h_" + UUID().uuidString.lowercased() }
@@ -48,6 +57,17 @@ public final class HistoryStore: @unchecked Sendable {
     public struct ReadResult: Equatable, Sendable {
         public var entries: [HistoryEntry]
         public var corruptLines: Int
+        /// Mục CÓ `audioId` vừa bị loại khỏi lịch sử vì hết hạn (`maxAgeDays`) hoặc vượt `maxEntries`
+        /// (từ chính lần đọc này hoặc từ lần ghi/xoá trước). Mỗi mục chỉ báo MỘT lần — gọi phía trên
+        /// dùng `audioId` để `DELETE /v1/audio/<id>` best-effort (xem `HistoryView.load`).
+        public var evicted: [HistoryEntry] = []
+    }
+
+    /// Kết quả đọc đầy đủ: ngoài phần giữ lại còn có phần bị loại (quá hạn/vượt số mục).
+    private struct Loaded {
+        var kept: [HistoryEntry]
+        var dropped: [HistoryEntry]
+        var corrupt: Int
     }
 
     public let path: String
@@ -71,19 +91,27 @@ public final class HistoryStore: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         try Self.ensureDirectory(for: path)
         try Self.appendLineAtomically(Self.encode(entry) + "\n", to: path)
-        let kept = try readAllLocked()
+        let loaded = try loadLocked()
         let rawLines = (FileManager.default.contents(atPath: path).map { String(decoding: $0, as: UTF8.self) } ?? "")
             .split(separator: "\n", omittingEmptySubsequences: true).count
         if rawLines > maxEntries {
-            try Self.rewrite(kept.entries, path: path)
+            try Self.rewrite(loaded.kept, path: path)
+            stashLocked(loaded.dropped)
         }
-        return kept
+        return ReadResult(entries: loaded.kept, corruptLines: loaded.corrupt)
     }
 
-    /// Đọc toàn bộ (đã lọc tuổi + giới hạn số mục + lọc tìm kiếm), mới nhất trước.
+    /// Đọc toàn bộ (đã lọc tuổi + giới hạn số mục + lọc tìm kiếm), mới nhất trước. Mục có âm thanh
+    /// mà đã hết hạn/vượt số mục được gỡ khỏi tệp và báo trong `evicted` (một lần) để dọn âm thanh.
     public func list(query: String? = nil) throws -> ReadResult {
         lock.lock(); defer { lock.unlock() }
-        var r = try readAllLocked()
+        let loaded = try loadLocked()
+        if loaded.dropped.contains(where: { $0.audioId != nil }) {
+            try Self.rewrite(loaded.kept, path: path)
+            stashLocked(loaded.dropped)
+        }
+        var r = ReadResult(entries: loaded.kept, corruptLines: loaded.corrupt, evicted: pendingEvicted)
+        pendingEvicted = []
         if let q = query, !q.trimmingCharacters(in: .whitespaces).isEmpty {
             let needle = q.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: nil)
             r.entries = r.entries.filter {
@@ -94,25 +122,44 @@ public final class HistoryStore: @unchecked Sendable {
         return r
     }
 
+    /// Xoá một mục, trả về CHÍNH mục đã xoá (nếu có) — gọi phía trên dùng `audioId` của nó để dọn
+    /// âm thanh lịch sử tương ứng phía engine (best-effort, xem `AppController.deleteHistory`).
     @discardableResult
-    public func delete(id: String) throws -> ReadResult {
+    public func delete(id: String) throws -> HistoryEntry? {
         lock.lock(); defer { lock.unlock() }
-        let r = try readAllLocked()
-        let kept = r.entries.filter { $0.id != id }
+        let loaded = try loadLocked()
+        guard let removed = loaded.kept.first(where: { $0.id == id }) else { return nil }
+        let kept = loaded.kept.filter { $0.id != id }
         try Self.rewrite(kept, path: path)
-        return ReadResult(entries: kept, corruptLines: r.corruptLines)
+        stashLocked(loaded.dropped) // mục quá hạn bị cuốn theo lần ghi đè này — vẫn phải dọn âm thanh của chúng
+        return removed
     }
 
-    public func clearAll() throws {
+    /// Xoá toàn bộ, trả về MỌI mục có trong tệp TRƯỚC khi xoá (kể cả mục quá hạn chưa bị dọn và mục
+    /// đang chờ báo `evicted`) — gọi phía trên dùng `audioId` của từng mục để dọn âm thanh lịch sử
+    /// tương ứng phía engine (best-effort).
+    @discardableResult
+    public func clearAll() throws -> [HistoryEntry] {
         lock.lock(); defer { lock.unlock() }
+        let loaded = try loadLocked()
         try Self.rewrite([], path: path)
+        let all = loaded.kept + loaded.dropped + pendingEvicted
+        pendingEvicted = []
+        return all
+    }
+
+    /// Mục có âm thanh bị loại, chờ báo ở lần `list()` kế tiếp (giữ dưới khoá).
+    private var pendingEvicted: [HistoryEntry] = []
+
+    private func stashLocked(_ dropped: [HistoryEntry]) {
+        pendingEvicted.append(contentsOf: dropped.filter { $0.audioId != nil })
     }
 
     // MARK: đọc + lọc (gọi trong khi đã giữ khoá)
 
-    private func readAllLocked() throws -> ReadResult {
+    private func loadLocked() throws -> Loaded {
         guard let data = FileManager.default.contents(atPath: path) else {
-            return ReadResult(entries: [], corruptLines: 0)
+            return Loaded(kept: [], dropped: [], corrupt: 0)
         }
         let text = String(decoding: data, as: UTF8.self)
         var entries: [HistoryEntry] = []
@@ -123,10 +170,14 @@ public final class HistoryStore: @unchecked Sendable {
             if let e = Self.decode(line) { entries.append(e) } else { corrupt += 1 }
         }
         let cutoff = clock().addingTimeInterval(-Double(maxAgeDays) * 86400)
+        var dropped = entries.filter { $0.at < cutoff }
         entries = entries.filter { $0.at >= cutoff }
         entries.sort { $0.at > $1.at }
-        if entries.count > maxEntries { entries = Array(entries.prefix(maxEntries)) }
-        return ReadResult(entries: entries, corruptLines: corrupt)
+        if entries.count > maxEntries {
+            dropped.append(contentsOf: entries.suffix(from: maxEntries))
+            entries = Array(entries.prefix(maxEntries))
+        }
+        return Loaded(kept: entries, dropped: dropped, corrupt: corrupt)
     }
 
     // MARK: I/O cấp thấp
@@ -192,6 +243,7 @@ public final class HistoryStore: @unchecked Sendable {
         if let a = e.audioMs { obj["audio_ms"] = a }
         if let t = e.totalMs { obj["total_ms"] = t }
         if let d = e.degradedReason { obj["degraded_reason"] = d }
+        if let a = e.audioId { obj["audio_id"] = a }
         guard let data = try? JSONSerialization.data(withJSONObject: obj) else { return "{}" }
         return String(decoding: data, as: UTF8.self)
     }
@@ -210,7 +262,19 @@ public final class HistoryStore: @unchecked Sendable {
         else { return nil }
         return HistoryEntry(id: id, at: at, appBundleId: obj["app"] as? String, mode: mode, model: model,
                             textRaw: textRaw, text: text, audioMs: obj["audio_ms"] as? Int, totalMs: obj["total_ms"] as? Int,
-                            degradedReason: obj["degraded_reason"] as? String)
+                            degradedReason: obj["degraded_reason"] as? String, audioId: obj["audio_id"] as? String)
+    }
+
+    /// Xoá CHỈ `audioId` của một mục (vd. phát gặp 404 — bản ghi âm không còn phía engine, xem
+    /// `AppController`) — đọc-sửa-ghi như `delete`/`clearAll`, KHÔNG đổi gì khác của mục.
+    public func clearAudioId(id: String) throws {
+        lock.lock(); defer { lock.unlock() }
+        let loaded = try loadLocked()
+        var entries = loaded.kept
+        guard let idx = entries.firstIndex(where: { $0.id == id }), entries[idx].audioId != nil else { return }
+        entries[idx].audioId = nil
+        try Self.rewrite(entries, path: path)
+        stashLocked(loaded.dropped)
     }
 }
 

@@ -40,6 +40,7 @@ struct DictionaryView: View {
     @State private var editorSpokenText = ""
     @State private var saveError: String?
     @State private var confirmDelete: DictionaryEntry?
+    @State private var showTeachSheet = false
     /// "Gợi ý từ lần anh sửa" (V2, `GET /v1/dictionary/suggestions`) — chỉ hiện khi có gợi ý.
     @State private var suggestions: [DictionarySuggestion] = []
     @State private var suggestionError: String?
@@ -86,6 +87,12 @@ struct DictionaryView: View {
         }
         .searchable(text: $query, placement: .toolbar, prompt: "Tìm thuật ngữ hoặc cách nói…")
         .sheet(isPresented: $showEditor) { editorSheet }
+        .sheet(isPresented: $showTeachSheet) {
+            TeachWordSheet(model: model, controller: controller, onSaved: { next in
+                entries = next
+                showTeachSheet = false
+            }, onCancel: { showTeachSheet = false })
+        }
         .confirmationDialog(
             "Xoá mục \"\(confirmDelete?.term ?? "")\"?",
             isPresented: Binding(get: { confirmDelete != nil }, set: { if !$0 { confirmDelete = nil } }),
@@ -108,6 +115,8 @@ struct DictionaryView: View {
             .frame(width: 130)
             Button { Task { await load() } } label: { Image(systemName: "arrow.clockwise") }
                 .help("Làm mới").disabled(!model.engineReady)
+            Button("Dạy từ bằng giọng…") { showTeachSheet = true }
+                .disabled(!model.engineReady)
             Button { beginAdd() } label: { Image(systemName: "plus") }
                 .help("Thêm mục…").disabled(!model.engineReady)
         }
@@ -346,5 +355,240 @@ private struct SuggestionRow: View {
         .padding(.vertical, 4)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Gợi ý: \(suggestion.term), gặp \(suggestion.count) lần")
+    }
+}
+
+/// "Dạy từ bằng giọng…" (V3): nhập từ đúng, nói 3–5 lần (mỗi lần tối đa 10 giây), mỗi lần gọi
+/// `POST /v1/teach` và hiện "Nghe ra: …"; gom các cách nghe khác nhau bằng
+/// `VFlowCore.TeachWordVariants` (logic thuần, có test) rồi lưu vào từ điển (gộp, không tạo trùng).
+/// Âm thanh chỉ nằm trong RAM (`AudioRecorder` riêng của sheet, bỏ khi gửi xong/đóng sheet): KHÔNG
+/// ghi đĩa, KHÔNG vào lịch sử/thống kê (engine `/v1/teach` cũng không ghi gì).
+struct TeachWordSheet: View {
+    let model: StatusModel
+    let controller: AppController
+    let onSaved: ([DictionaryEntry]) -> Void
+    let onCancel: () -> Void
+
+    @State private var term = ""
+    @State private var heardList: [TeachWordVariants.Heard] = []
+    @State private var nextHeardId = 1
+    /// Khoá chuẩn hoá của các cách nói người dùng ĐÃ BỎ CHỌN (mặc định mọi cách nói đều chọn).
+    @State private var deselected: Set<String> = []
+    @State private var isRecording = false
+    @State private var level: Float = 0
+    @State private var busy = false
+    @State private var saving = false
+    @State private var errorMessage: String?
+    @State private var saveError: String?
+    @State private var recordTimeoutTimer: Timer?
+
+    private let recorder = AudioRecorder()
+
+    private var trimmedTerm: String { term.trimmingCharacters(in: .whitespaces) }
+    private var termError: String? { TeachWordVariants.termError(term) }
+    private var candidates: [String] { TeachWordVariants.candidates(from: heardList.map(\.text), correctTerm: trimmedTerm) }
+    private var selectedVariants: [String] { TeachWordVariants.selected(candidates: candidates, deselected: deselected) }
+    private var attemptsFull: Bool { heardList.count >= TeachWordVariants.maxAttempts }
+    private var canRecord: Bool { model.engineReady && !busy && !saving && termError == nil && !attemptsFull }
+    private var canSave: Bool { termError == nil && !selectedVariants.isEmpty && !busy && !isRecording && !saving }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Dạy từ bằng giọng").font(.system(size: 15, weight: .semibold))
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Từ đúng").font(.system(size: 12)).foregroundStyle(.secondary)
+                TextField("vd. Lan, Supabase, deploy", text: $term).textFieldStyle(.roundedBorder)
+                    .accessibilityLabel("Từ đúng cần dạy")
+                    .disabled(isRecording)
+                if !trimmedTerm.isEmpty, let termError {
+                    Text(termError).font(.system(size: 12)).foregroundStyle(Color.red)
+                }
+            }
+            recordSection
+            if !heardList.isEmpty { heardSection }
+            if !model.engineReady {
+                Text("Engine chưa sẵn sàng — chờ engine khởi động rồi ghi âm.").font(.system(size: 12)).foregroundStyle(.secondary)
+            }
+            if let errorMessage {
+                Text(errorMessage).font(.system(size: 13)).foregroundStyle(Color.red)
+                    .accessibilityLabel("Lỗi: \(errorMessage)")
+            }
+            if let saveError {
+                Text(saveError).font(.system(size: 13)).foregroundStyle(Color.red)
+                    .accessibilityLabel("Lỗi khi lưu: \(saveError)")
+            }
+            HStack {
+                Button("Huỷ") { cleanupAndCancel() }
+                Spacer()
+                Button("Lưu vào từ điển") { Task { await save() } }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(!canSave)
+            }
+        }
+        .padding(20)
+        .frame(minWidth: 480, minHeight: 360)
+        .onDisappear { teardownRecording() }
+    }
+
+    @ViewBuilder private var recordSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 10) {
+                Button(isRecording ? "Dừng ghi" : "Bắt đầu ghi") { toggleRecording() }
+                    .disabled(isRecording ? false : !canRecord)
+                    .accessibilityLabel(isRecording ? "Dừng ghi và gửi" : "Bắt đầu ghi lần \(heardList.count + 1)")
+                if isRecording {
+                    LevelMeter(level: level, animated: true).frame(width: 60)
+                        .accessibilityHidden(true)
+                    Text("Tối đa \(TeachWordVariants.maxSecondsPerAttempt) giây").font(.caption).foregroundStyle(.secondary)
+                } else if busy {
+                    ProgressView().controlSize(.small)
+                    Text("Đang nghe…").font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text("Đã nói \(heardList.count)/\(TeachWordVariants.maxAttempts) lần").font(.caption).foregroundStyle(.secondary)
+            }
+            if attemptsFull {
+                Text("Đã đủ \(TeachWordVariants.maxAttempts) lần — xoá bớt một dòng \"Nghe ra\" nếu muốn ghi lại.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            } else {
+                Text("Nói rõ \"\(trimmedTerm.isEmpty ? "từ cần dạy" : trimmedTerm)\" — lặp lại \(TeachWordVariants.minAttempts)–\(TeachWordVariants.maxAttempts) lần để gom đủ cách nghe khác nhau.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    @ViewBuilder private var heardSection: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(heardList) { h in
+                        HStack {
+                            Text("\(h.id). Nghe ra: \(h.text)").font(.system(size: 13))
+                            Spacer()
+                            Button(action: { heardList.removeAll { $0.id == h.id } }) { Image(systemName: "xmark.circle") }
+                                .buttonStyle(.plain).accessibilityLabel("Xoá dòng nghe ra số \(h.id)")
+                        }
+                        .accessibilityElement(children: .combine)
+                    }
+                }
+            }
+            .frame(maxHeight: 90)
+            if !candidates.isEmpty {
+                Text("Cách nói sẽ lưu vào từ điển (bỏ chọn nếu không muốn):").font(.system(size: 12, weight: .semibold))
+                ForEach(candidates, id: \.self) { c in
+                    Toggle(c, isOn: Binding(
+                        get: { !deselected.contains(TeachWordVariants.normalize(c)) },
+                        set: { on in
+                            let key = TeachWordVariants.normalize(c)
+                            if on { deselected.remove(key) } else { deselected.insert(key) }
+                        }))
+                        .font(.system(size: 13))
+                }
+            } else {
+                Text("Engine nghe ra đúng như từ đã nhập — không có cách nói nào cần dạy thêm.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func toggleRecording() {
+        if isRecording { stopRecordingAndSend() } else { startRecording() }
+    }
+
+    private func startRecording() {
+        errorMessage = nil
+        saveError = nil
+        switch AudioRecorder.permission() {
+        case .authorized: break
+        case .notDetermined:
+            Task {
+                let granted = await AudioRecorder.requestPermission()
+                if granted { startRecordingAfterPermission() } else { errorMessage = TeachErrorText.message(.micDenied) }
+            }
+            return
+        default:
+            errorMessage = TeachErrorText.message(.micDenied)
+            return
+        }
+        startRecordingAfterPermission()
+    }
+
+    private func startRecordingAfterPermission() {
+        recorder.onLevel = { l in level = l }
+        recorder.onInterrupted = { why in
+            teardownRecording()
+            errorMessage = "Micro bị ngắt (\(why)) — ghi lại."
+        }
+        do {
+            try recorder.start(deviceUID: controller.micDeviceUID)
+        } catch let e as ClientError {
+            errorMessage = TeachErrorText.message(e)
+            return
+        } catch {
+            errorMessage = "Không mở được micro: \(error.localizedDescription)"
+            return
+        }
+        isRecording = true
+        level = 0
+        recordTimeoutTimer?.invalidate()
+        recordTimeoutTimer = Timer.scheduledTimer(withTimeInterval: TimeInterval(TeachWordVariants.maxSecondsPerAttempt), repeats: false) { _ in
+            MainActor.assumeIsolated { stopRecordingAndSend() }
+        }
+    }
+
+    private func stopRecordingAndSend() {
+        guard isRecording else { return }
+        recordTimeoutTimer?.invalidate()
+        recordTimeoutTimer = nil
+        isRecording = false
+        let pcm = recorder.stop()
+        guard !pcm.isEmpty else {
+            errorMessage = "Không thu được âm thanh từ micro — kiểm tra micro rồi ghi lại."
+            return
+        }
+        busy = true
+        Task {
+            let result = await controller.teach(pcm: pcm)
+            busy = false
+            switch result {
+            case .success(let r):
+                if let heard = TeachWordVariants.acceptHeard(r.heard) {
+                    heardList.append(.init(id: nextHeardId, text: heard))
+                    nextHeardId += 1
+                } else {
+                    errorMessage = TeachErrorText.nothingHeard
+                }
+            case .failure(let e):
+                errorMessage = TeachErrorText.message(e)
+            }
+        }
+    }
+
+    private func teardownRecording() {
+        recordTimeoutTimer?.invalidate()
+        recordTimeoutTimer = nil
+        recorder.onLevel = nil
+        recorder.onInterrupted = nil
+        if isRecording { _ = recorder.stop() }
+        isRecording = false
+    }
+
+    private func cleanupAndCancel() {
+        teardownRecording()
+        onCancel()
+    }
+
+    private func save() async {
+        saveError = nil
+        saving = true
+        let result = await controller.applyTeachWord(term: trimmedTerm, selectedVariants: selectedVariants)
+        saving = false
+        switch result {
+        case .success(let next):
+            teardownRecording()
+            onSaved(next)
+        case .failure(let e):
+            saveError = ErrorText.message(e)
+        }
     }
 }

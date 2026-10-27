@@ -4,18 +4,21 @@
  * - Âm thanh chỉ nằm trong RAM; log chỉ có id, thời lượng, thời gian, mã lỗi.
  */
 import http from 'node:http';
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, createReadStream } from 'node:fs';
 import { basename, join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
-import { decodeAudio, durationMs, isSilence } from '../stt/audio.js';
+import { decodeAudio, durationMs, isSilence, resample, encodeWav } from '../stt/audio.js';
 import { applyAutoGain } from '../stt/gain.js';
+import { normalizeModelText } from '../stt/local.js';
 import { tokenMatches } from './token.js';
 import {
   buildExport, validateImportPackage, mergeDictionary, mergeSnippets, mergeHistory,
   MAX_IMPORT_BYTES,
 } from '../post/exportimport.js';
 import { buildDiagnostics } from '../post/diagnostics.js';
+import { createZipWriter } from '../post/zip.js';
+import { ID_RE as AUDIO_ID_RE } from '../post/audiostore.js';
 
 export const VERSION = '0.1.0';
 export const DEFAULT_PORT = 7611;
@@ -27,6 +30,8 @@ export const MAX_AUDIO_SECONDS = 1200;
 export const MAX_AUDIO_BYTES = 48 * 1024 * 1024;
 const MAX_RECENT_ERRORS = 50;
 const MAX_PARTIAL_AUDIO_SECONDS = 30;
+/** A1 (/v1/teach): tối đa 15 giây, KHÔNG cắt — vượt quá ⇒ 413 too_long. */
+const MAX_TEACH_AUDIO_SECONDS = 15;
 const MAX_JSON_BYTES = 4 * 1024 * 1024;
 /** Trần JSON cho các route cài đặt/snippets/command (nhỏ hơn: không mang âm thanh hay danh sách lớn). */
 const MAX_SETTINGS_JSON_BYTES = 1 * 1024 * 1024;
@@ -47,6 +52,8 @@ const STATUS = {
   timeout: 504, payload_too_large: 413, internal: 500,
   rewrite_unavailable: 503, cloud_disabled: 503,
   busy: 429,
+  too_long: 413, // A1 (/v1/teach): audio > 15s, KHÔNG cắt (khác payload_too_large, báo lý do riêng)
+  not_found: 404, // A6 (/v1/audio/<id>)
 };
 
 class HttpError extends Error {
@@ -176,10 +183,20 @@ const NOOP_SNIPPETS = {
 const NOOP_SETTINGS = {
   get: () => ({
     cloud_llm: true, llm_model: null, llm_timeout_ms: 3500, actions_enabled: true,
-    stats_enabled: true, app_rules: {}, voice_punctuation: true, tone: 'neutral',
+    stats_enabled: true, app_rules: {}, voice_punctuation: true, context_symbols: true, tone: 'neutral',
     whisper_mode: false, learn_from_edits: true, live_preview: true, silence_stop_seconds: 0,
+    audio_history: false, audio_history_mb: 200, audio_history_days: 7,
   }),
   update: () => { throw new HttpError('internal', 'Chưa cấu hình settings cho engine này.'); },
+};
+/** Dùng khi chưa truyền audio store (A6) — /v1/audio* báo lỗi rõ thay vì 404 mù mờ. */
+const NOOP_AUDIO = {
+  write: () => false,
+  list: () => ({ enabled: false, count: 0, bytes: 0, budget_bytes: 0, days: 0, items: [] }),
+  pathFor: () => null,
+  remove: () => ({ ok: false }),
+  removeAll: () => ({ ok: true, deleted: 0 }),
+  exportEntries: () => [],
 };
 /** Dùng khi chưa truyền stats (ví dụ test cũ chưa cần route /v1/stats). */
 const NOOP_STATS = {
@@ -216,18 +233,22 @@ const NOOP_STATS = {
  *   Vắng mặt ⇒ các phần liên quan tới history trong export/import/diagnostics coi như rỗng.
  */
 export function createServer({
-  stt, post, token, snippets = NOOP_SNIPPETS, settings = NOOP_SETTINGS, stats = NOOP_STATS, home,
+  stt, post, token, snippets = NOOP_SNIPPETS, settings = NOOP_SETTINGS, stats = NOOP_STATS,
+  audio = NOOP_AUDIO, home,
   log = () => {}, maxAudioSeconds = MAX_AUDIO_SECONDS, requestTimeoutMs = 60000,
 }) {
   if (!token) throw new Error('createServer cần token');
   const enqueue = serialQueue();
   const startedAt = Date.now();
+  let teachBusy = false;
   /** @type {{ at: string, route: string, status: number, code: string }[]} */
   const recentErrors = [];
   /** @param {Record<string, unknown>} entry */
   function recordRecentError(entry) {
     if (!entry.code) return;
-    recentErrors.push({ at: new Date().toISOString(), route: String(entry.route ?? ''), status: Number(entry.status), code: String(entry.code) });
+    // /v1/audio/<id>: id là khoá tới âm thanh của người dùng ⇒ không để lại trong chẩn đoán.
+    const route = String(entry.route ?? '').replace(/^(\/v1\/audio\/)(?!export$).+$/, '$1:id');
+    recentErrors.push({ at: new Date().toISOString(), route, status: Number(entry.status), code: String(entry.code) });
     if (recentErrors.length > MAX_RECENT_ERRORS) recentErrors.shift();
   }
   let partialBusy = false;
@@ -394,6 +415,41 @@ export function createServer({
         await partial(req, res, url, entry);
         return;
       }
+      if (url.pathname === '/v1/teach') {
+        if (req.method !== 'POST') throw new HttpError('bad_request', 'Chỉ hỗ trợ POST.', 405);
+        await teach(req, res, url, entry);
+        return;
+      }
+      if (url.pathname === '/v1/audio' || url.pathname === '/v1/audio/') {
+        if (req.method === 'GET') {
+          sendJson(res, 200, audio.list());
+        } else if (req.method === 'DELETE') {
+          sendJson(res, 200, audio.removeAll());
+        } else {
+          throw new HttpError('bad_request', 'Chỉ hỗ trợ GET hoặc DELETE.', 405);
+        }
+        entry.status = 200;
+        return;
+      }
+      if (url.pathname === '/v1/audio/export') {
+        if (req.method !== 'GET') throw new HttpError('bad_request', 'Chỉ hỗ trợ GET.', 405);
+        await audioExport(res, entry);
+        return;
+      }
+      if (url.pathname.startsWith('/v1/audio/')) {
+        const id = url.pathname.slice('/v1/audio/'.length);
+        if (req.method === 'GET') {
+          await audioGet(res, id, entry);
+        } else if (req.method === 'DELETE') {
+          const r = AUDIO_ID_RE.test(id) ? audio.remove(id) : { ok: false };
+          if (!r.ok) throw new HttpError('not_found', 'Không có tệp âm thanh này.');
+          sendJson(res, 200, { ok: true, deleted: 1 });
+          entry.status = 200;
+        } else {
+          throw new HttpError('bad_request', 'Chỉ hỗ trợ GET hoặc DELETE.', 405);
+        }
+        return;
+      }
       throw new HttpError('bad_request', 'Không có đường dẫn này.', 404);
     } catch (err) {
       const e = toHttpError(err);
@@ -490,6 +546,11 @@ export function createServer({
       throw new HttpError('payload_too_large', `Âm thanh dài ${(audioMs / 1000).toFixed(1)} s, vượt giới hạn ${maxAudioSeconds} s.`);
     }
 
+    // A6 (audio_history): giữ bản 16kHz mono để có thể ghi WAV SAU KHI hậu xử lý thành công — chỉ
+    // tính khi cài đặt đang bật (tránh resample tốn CPU vô ích khi tắt, mặc định).
+    const audioHistoryOn = settings.get().audio_history === true;
+    const wavForHistory = audioHistoryOn ? () => encodeWav(resample(wave.samples, wave.sampleRate, 16000), 16000) : null;
+
     const work = enqueue(async () => {
       // Kiểm model trước cả khi im lặng: model hỏng phải báo lỗi, không trả "im lặng" giả.
       await stt.ensure(model);
@@ -502,6 +563,7 @@ export function createServer({
       return { silent: r.text === '', sttMs: r.stt_ms, textRaw: r.text };
     });
     const r = await withTimeout(work, requestTimeoutMs, 'Nhận dạng quá thời gian.');
+    const wavBuffer = r.silent || !wavForHistory ? null : Buffer.from(wavForHistory());
     wave = { samples: new Float32Array(0), sampleRate: wave.sampleRate };
     entry.stt_ms = r.sttMs;
 
@@ -536,10 +598,16 @@ export function createServer({
       },
     };
     if (r.silent) body.silence = true;
+    const success = !r.silent && typeof body.text === 'string' && body.text.trim() !== '';
     // Thống kê (item 1): mỗi dictation THÀNH CÔNG (không rỗng, không Command Mode — route này
     // không phải Command Mode) cộng bộ đếm, nếu stats_enabled (mặc định true).
-    if (!r.silent && typeof body.text === 'string' && body.text.trim() !== '' && settings.get().stats_enabled !== false) {
+    if (success && settings.get().stats_enabled !== false) {
       stats.record({ text: /** @type {string} */ (body.text), audioMs, app: app ?? null });
+    }
+    // A6 (audio_history): ghi WAV CHỈ khi dictation thành công; audio_id vắng mặt nếu không ghi
+    // (tắt cài đặt, lỗi ghi, hoặc im lặng/rỗng) — client dùng audio_id để liên kết lịch sử của nó.
+    if (success && wavBuffer && audio.write({ id, wav: wavBuffer, audioMs, app: app ?? null, mode: body.mode })) {
+      body.audio_id = id;
     }
     sendJson(res, 200, body);
     entry.status = 200;
@@ -706,6 +774,84 @@ export function createServer({
     } finally {
       partialBusy = false;
     }
+  }
+
+  /**
+   * POST /v1/teach (A1): nghe thử để dạy từ — trả CHỮ THÔ của STT (chữ thường, cắt khoảng trắng),
+   * KHÔNG qua từ điển/làm sạch/dấu câu/snippet/LLM (mục đích là thấy model nghe sai ra sao), KHÔNG
+   * ghi history/thống kê/âm thanh. Tối đa 1 yêu cầu đồng thời (bận ⇒ 429 busy), audio tối đa
+   * {@link MAX_TEACH_AUDIO_SECONDS}s (dài hơn ⇒ 413 too_long, KHÔNG cắt).
+   * @param {http.IncomingMessage} req @param {http.ServerResponse} res @param {URL} url @param {Record<string, unknown>} entry
+   */
+  async function teach(req, res, url, entry) {
+    if (teachBusy) throw new HttpError('busy', 'Engine đang xử lý một yêu cầu dạy từ khác.');
+    teachBusy = true;
+    try {
+      const model = url.searchParams.get('model') || stt.defaultModel;
+      if (!stt.isKnown(model)) throw new HttpError('bad_request', `Không có model "${model}".`);
+      const bytes = await readBody(req, MAX_AUDIO_BYTES);
+      const wave = decodeAudio(bytes, req.headers['content-type']);
+      const audioMs = durationMs(wave.samples.length, wave.sampleRate);
+      entry.audio_ms = audioMs;
+      if (audioMs > MAX_TEACH_AUDIO_SECONDS * 1000) {
+        throw new HttpError('too_long', `Âm thanh dài ${(audioMs / 1000).toFixed(1)} s, vượt giới hạn ${MAX_TEACH_AUDIO_SECONDS} s (không tự cắt).`);
+      }
+      await stt.ensure(model);
+      let heard = '';
+      let sttMs = 0;
+      if (!isSilence(wave.samples, wave.sampleRate)) {
+        const r = await stt.transcribe(model, { pcm: wave.samples, sampleRate: wave.sampleRate });
+        heard = normalizeModelText(r.text);
+        sttMs = r.stt_ms;
+      }
+      entry.stt_ms = sttMs;
+      sendJson(res, 200, { heard, audio_ms: audioMs, stt_ms: sttMs });
+      entry.status = 200;
+    } finally {
+      teachBusy = false;
+    }
+  }
+
+  /**
+   * GET /v1/audio/<id> (A6): stream tệp WAV từ đĩa (không nạp hết vào RAM). id sai định dạng/không
+   * có ⇒ not_found (KHÔNG phân biệt "sai định dạng" và "không tồn tại" — tránh dò id bằng timing/4xx).
+   * @param {http.ServerResponse} res @param {string} id @param {Record<string, unknown>} entry
+   */
+  async function audioGet(res, id, entry) {
+    const p = audio.pathFor(id);
+    if (!p) throw new HttpError('not_found', 'Không có tệp âm thanh này.');
+    await new Promise((resolve, reject) => {
+      const rs = createReadStream(p);
+      rs.on('error', (err) => reject(toHttpError(err)));
+      rs.once('open', () => {
+        res.writeHead(200, { 'content-type': 'audio/wav', 'cache-control': 'no-store' });
+        rs.pipe(res);
+      });
+      rs.on('end', resolve);
+      res.on('close', resolve);
+    });
+    entry.status = 200;
+  }
+
+  /**
+   * GET /v1/audio/export (A6): ZIP kiểu "store" (WAV + index.json, KHÔNG có text — xem
+   * engine/post/audiostore.js), stream từng tệp. Chưa bật/chưa có mục nào ⇒ ZIP rỗng hợp lệ (chỉ
+   * index.json rỗng) — LỰA CHỌN trong hai phương án hợp đồng cho phép (xem contract/engine-api.md).
+   * @param {http.ServerResponse} res @param {Record<string, unknown>} entry
+   */
+  async function audioExport(res, entry) {
+    const entries = audio.exportEntries();
+    res.writeHead(200, { 'content-type': 'application/zip', 'cache-control': 'no-store' });
+    const zip = createZipWriter(res);
+    const index = entries.map(({ id, at, audio_ms, app, mode }) => ({ id, at, audio_ms, app, mode }));
+    zip.addBuffer('index.json', Buffer.from(`${JSON.stringify(index, null, 2)}\n`));
+    for (const e of entries) {
+      // eslint-disable-next-line no-await-in-loop -- stream TUẦN TỰ từng tệp, không nạp hết vào RAM.
+      await zip.addFile(`${e.id}.wav`, e.path, new Date(e.at));
+    }
+    zip.finish();
+    res.end();
+    entry.status = 200;
   }
 
   return server;

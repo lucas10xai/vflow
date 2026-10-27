@@ -79,10 +79,20 @@ public struct AppSettings: Equatable, Sendable {
     /// Xem chữ chạy trực tiếp (`POST /v1/partial`) — mặc định MỚI `true` (đo thật p95 111 ms, xem
     /// contract/engine-api.md).
     public var livePreview: Bool
+    /// Ký hiệu theo ngữ cảnh ("gạch chéo", "a còng"… chỉ có hiệu lực trong app code/terminal/AI/
+    /// Slack/Discord/Teams) — mặc định `true`, luôn có mặt theo hợp đồng.
+    public var contextSymbols: Bool
+    /// "Lưu âm thanh để nghe lại" (V3, Cài đặt › Dữ liệu) — mặc định TẮT; bật ⇒ engine lưu WAV ở
+    /// `~/.vflow/audio`. Đây là công tắc phía engine; client chỉ đọc/đổi qua `PUT /v1/settings`
+    /// (khi nghe lại, client chỉ giữ một tệp tạm 0600 trong thời gian phát rồi xoá — xem `AudioPlaybackController`).
+    public var audioHistory: Bool
+    public var audioHistoryMb: Int
+    public var audioHistoryDays: Int
 
     public init(cloudLlm: Bool, llmModel: String?, llmTimeoutMs: Int, actionsEnabled: Bool, silenceStopSeconds: Int = 0,
                 statsEnabled: Bool = true, appRules: [AppRule] = [], voicePunctuation: Bool = true, tone: Tone = .neutral,
-                whisperMode: Bool = false, learnFromEdits: Bool = true, livePreview: Bool = true) {
+                whisperMode: Bool = false, learnFromEdits: Bool = true, livePreview: Bool = true,
+                contextSymbols: Bool = true, audioHistory: Bool = false, audioHistoryMb: Int = 200, audioHistoryDays: Int = 7) {
         self.cloudLlm = cloudLlm
         self.llmModel = llmModel
         self.llmTimeoutMs = llmTimeoutMs
@@ -94,7 +104,11 @@ public struct AppSettings: Equatable, Sendable {
         self.tone = tone
         self.whisperMode = whisperMode
         self.learnFromEdits = learnFromEdits
+        self.audioHistory = audioHistory
+        self.audioHistoryMb = audioHistoryMb
+        self.audioHistoryDays = audioHistoryDays
         self.livePreview = livePreview
+        self.contextSymbols = contextSymbols
     }
 }
 
@@ -112,11 +126,16 @@ public struct SettingsPatch: Sendable {
     public var whisperMode: Bool?
     public var learnFromEdits: Bool?
     public var livePreview: Bool?
+    public var contextSymbols: Bool?
+    public var audioHistory: Bool?
+    public var audioHistoryMb: Int?
+    public var audioHistoryDays: Int?
 
     public init(cloudLlm: Bool? = nil, llmModel: String?? = nil, llmTimeoutMs: Int? = nil, actionsEnabled: Bool? = nil,
                 silenceStopSeconds: Int? = nil, statsEnabled: Bool? = nil, appRules: [AppRule]? = nil,
                 voicePunctuation: Bool? = nil, tone: Tone? = nil, whisperMode: Bool? = nil, learnFromEdits: Bool? = nil,
-                livePreview: Bool? = nil) {
+                livePreview: Bool? = nil, contextSymbols: Bool? = nil,
+                audioHistory: Bool? = nil, audioHistoryMb: Int? = nil, audioHistoryDays: Int? = nil) {
         self.cloudLlm = cloudLlm
         self.llmModel = llmModel
         self.llmTimeoutMs = llmTimeoutMs
@@ -129,6 +148,10 @@ public struct SettingsPatch: Sendable {
         self.whisperMode = whisperMode
         self.learnFromEdits = learnFromEdits
         self.livePreview = livePreview
+        self.contextSymbols = contextSymbols
+        self.audioHistory = audioHistory
+        self.audioHistoryMb = audioHistoryMb
+        self.audioHistoryDays = audioHistoryDays
     }
 
     public var jsonObject: [String: Any] {
@@ -145,7 +168,34 @@ public struct SettingsPatch: Sendable {
         if let v = whisperMode { obj["whisper_mode"] = v }
         if let v = learnFromEdits { obj["learn_from_edits"] = v }
         if let v = livePreview { obj["live_preview"] = v }
+        if let v = contextSymbols { obj["context_symbols"] = v }
+        if let v = audioHistory { obj["audio_history"] = v }
+        if let v = audioHistoryMb { obj["audio_history_mb"] = v }
+        if let v = audioHistoryDays { obj["audio_history_days"] = v }
         return obj
+    }
+}
+
+/// Kiểm hợp lệ phía client cho khu "Lưu âm thanh để nghe lại" (Cài đặt › Dữ liệu, V3), khớp hợp
+/// đồng engine: `audio_history_mb` 50–2000, `audio_history_days` 1–90.
+public enum AudioHistoryValidation {
+    public static let minMb = 50
+    public static let maxMb = 2000
+    public static let minDays = 1
+    public static let maxDays = 90
+
+    public static func validateMb(_ mb: Int) -> Result<Void, SettingsValidationError> {
+        guard mb >= minMb, mb <= maxMb else {
+            return .failure(.init("Giới hạn dung lượng phải từ \(minMb)–\(maxMb) MB"))
+        }
+        return .success(())
+    }
+
+    public static func validateDays(_ days: Int) -> Result<Void, SettingsValidationError> {
+        guard days >= minDays, days <= maxDays else {
+            return .failure(.init("Số ngày giữ phải từ \(minDays)–\(maxDays) ngày"))
+        }
+        return .success(())
     }
 }
 

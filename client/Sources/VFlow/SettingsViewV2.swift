@@ -15,6 +15,7 @@ struct VoiceSettingsTab: View {
     @State private var livePreview = true
     @State private var tone: Tone = .neutral
     @State private var cloudLlm = true
+    @State private var contextSymbols = true
     @State private var saveError: String?
 
     var body: some View {
@@ -71,6 +72,13 @@ struct VoiceSettingsTab: View {
                 .font(.footnote).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
+        Section("Ký hiệu theo ngữ cảnh") {
+            Toggle("Hiểu ký hiệu theo ngữ cảnh", isOn: $contextSymbols)
+                .onChange(of: contextSymbols) { _, v in Task { await save(.init(contextSymbols: v)) } }
+            Text("Ví dụ: \u{201C}gạch chéo\u{201D} ⇒ \u{201C}/\u{201D}, \u{201C}a còng\u{201D} ⇒ \u{201C}@\u{201D} — CHỈ có hiệu lực trong app lập trình/terminal/AI (vd. VS Code, Terminal, Claude) và Slack/Discord/Teams. Ở các app khác (soạn email, ghi chú…), vẫn ra đúng chữ bình thường (\u{201C}gạch chéo\u{201D}, \u{201C}a còng\u{201D}).")
+                .font(.footnote).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
         SilenceStopSection(model: model, controller: controller)
         Section("Giọng điệu") {
             Picker("Giọng điệu", selection: $tone) {
@@ -106,6 +114,7 @@ struct VoiceSettingsTab: View {
         livePreview = s.livePreview
         tone = s.tone
         cloudLlm = s.cloudLlm
+        contextSymbols = s.contextSymbols
     }
 
     private func save(_ patch: SettingsPatch) async {
@@ -305,6 +314,23 @@ struct DataSettingsTab: View {
     @State private var importResultText: String?
     @State private var diagnosticsCopiedAt: Date?
     @State private var diagnosticsError: String?
+    // Lưu âm thanh để nghe lại (V3)
+    /// Cùng khoá/kho với `AppController.historyEnabled` (công tắc "Lưu lịch sử" ở tab Lịch sử & riêng tư).
+    @AppStorage("historyEnabled", store: VFlowDefaults.resolve()) private var historyEnabled = true
+    @State private var audioHistory = false
+    @State private var audioMb = 200
+    @State private var audioDays = 7
+    /// Giá trị engine đang giữ (để không gửi lại giới hạn y hệt sau khi nhận phản hồi).
+    @State private var serverAudioMb = 200
+    @State private var serverAudioDays = 7
+    @State private var audioSummary: AudioHistorySummary?
+    @State private var audioSummaryError: String?
+    @State private var confirmEnableAudio = false
+    @State private var confirmDeleteAudio = false
+    @State private var audioError: String?
+    @State private var audioNotice: String?
+    @State private var audioLimitTask: Task<Void, Never>?
+    @State private var audioExporting = false
 
     var body: some View {
         Form {
@@ -320,6 +346,26 @@ struct DataSettingsTab: View {
             Button("Huỷ", role: .cancel) {}
         } message: {
             Text("Không thể hoàn tác — không ảnh hưởng lịch sử, từ điển hay snippets.")
+        }
+        .onChange(of: historyEnabled) { _, now in
+            // Lịch sử vừa TẮT ⇒ tắt luôn lưu âm thanh (không có mục lịch sử nào để gắn bản ghi). Bật lại
+            // Lịch sử KHÔNG tự bật lưu âm thanh: `reconcilePatch` không bao giờ trả `true`.
+            if let patch = AudioHistoryPolicy.reconcilePatch(historyEnabled: now, engineAudioHistory: audioHistory) {
+                audioNotice = "Đã tự tắt lưu âm thanh vì Lịch sử đang tắt."
+                Task { await save(patch) }
+            }
+        }
+        .alert("Bật lưu âm thanh để nghe lại?", isPresented: $confirmEnableAudio) {
+            Button("Bật lưu âm thanh") { Task { await save(.init(audioHistory: true, audioHistoryMb: audioMb, audioHistoryDays: audioDays)) } }
+            Button("Huỷ", role: .cancel) {}
+        } message: {
+            Text("vflow sẽ lưu giọng nói của từng câu bạn đọc chính tả vào thư mục ~/.vflow/audio trên máy này. Âm thanh không gửi đi đâu. Chỉ lưu khi Lịch sử đang bật.\n\nGiới hạn: tối đa \(audioMb) MB (chỉnh được 50–2000 MB) và giữ \(audioDays) ngày (chỉnh được 1–90 ngày) — vượt thì bản cũ nhất bị xoá trước. Tệp quyền 0600: chỉ tài khoản của bạn đọc được. Bạn xoá được bất cứ lúc nào ở đây hoặc trong tab Lịch sử.")
+        }
+        .alert("Xoá toàn bộ âm thanh?", isPresented: $confirmDeleteAudio) {
+            Button("Xoá", role: .destructive) { Task { await deleteAllAudio() } }
+            Button("Huỷ", role: .cancel) {}
+        } message: {
+            Text("Xoá mọi bản ghi giọng nói đã lưu trong ~/.vflow/audio. Câu chữ trong Lịch sử vẫn còn, chỉ mất nút nghe lại. Không thể hoàn tác.")
         }
     }
 
@@ -349,6 +395,7 @@ struct DataSettingsTab: View {
             Button("Xoá thống kê…", role: .destructive) { confirmClearStats = true }
             if let clearStatsError { Text(clearStatsError).font(.footnote).foregroundStyle(Color.red) }
         }
+        audioSection
         Section("Xuất/nhập dữ liệu") {
             Toggle("Gồm lịch sử khi xuất", isOn: $includeHistoryOnExport)
             Button("Xuất dữ liệu…") { exportData() }
@@ -375,16 +422,148 @@ struct DataSettingsTab: View {
 
     private func load() async {
         switch await controller.fetchSettings() {
-        case .success(let s): statsEnabled = s.statsEnabled; learnFromEdits = s.learnFromEdits; loadError = nil
+        case .success(let s):
+            applySettings(s)
+            loadError = nil
+            // Lịch sử đang tắt mà engine còn nhớ audio_history=true (vd. tắt Lịch sử khi tab này không mở) ⇒ sửa ngay.
+            if let patch = AudioHistoryPolicy.reconcilePatch(historyEnabled: controller.historyEnabled, engineAudioHistory: s.audioHistory) {
+                audioNotice = "Đã tự tắt lưu âm thanh vì Lịch sử đang tắt."
+                await save(patch)
+            }
         case .failure(let e): loadError = e
         }
         loaded = true
+        await refreshAudioSummary()
+    }
+
+    private func applySettings(_ s: AppSettings) {
+        statsEnabled = s.statsEnabled
+        learnFromEdits = s.learnFromEdits
+        audioHistory = s.audioHistory
+        audioMb = s.audioHistoryMb
+        audioDays = s.audioHistoryDays
+        serverAudioMb = s.audioHistoryMb
+        serverAudioDays = s.audioHistoryDays
     }
 
     private func save(_ patch: SettingsPatch) async {
         switch await controller.applySettingsPatch(patch) {
-        case .success(let s): statsEnabled = s.statsEnabled; learnFromEdits = s.learnFromEdits; saveError = nil
-        case .failure(let e): saveError = ErrorText.message(e)
+        case .success(let s):
+            applySettings(s)
+            saveError = nil
+            if patch.audioHistory != nil || patch.audioHistoryMb != nil || patch.audioHistoryDays != nil {
+                await refreshAudioSummary()
+            }
+        case .failure(let e):
+            saveError = ErrorText.message(e)
+            // Gửi lỗi thì công tắc/giới hạn phải trở về giá trị engine thật, không giữ giá trị người dùng vừa chỉnh.
+            audioMb = serverAudioMb
+            audioDays = serverAudioDays
+        }
+    }
+
+    // MARK: lưu âm thanh để nghe lại
+
+    @ViewBuilder private var audioSection: some View {
+        let canEnable = AudioHistoryPolicy.canEnable(historyEnabled: historyEnabled)
+        let on = AudioHistoryPolicy.effectiveToggle(historyEnabled: historyEnabled, engineAudioHistory: audioHistory)
+        Section("Lưu âm thanh để nghe lại") {
+            Toggle("Lưu giọng nói của từng câu để nghe lại trong Lịch sử", isOn: Binding(
+                get: { on },
+                set: { v in
+                    audioNotice = nil
+                    if v { confirmEnableAudio = true } else { Task { await save(.init(audioHistory: false)) } }
+                }))
+                .disabled(!canEnable)
+            if let reason = AudioHistoryPolicy.disabledReason(historyEnabled: historyEnabled) {
+                Text(reason).font(.footnote).foregroundStyle(.secondary)
+            }
+            Text("Tắt mặc định. Khi bật, giọng nói lưu trong ~/.vflow/audio trên máy này (quyền 0600), không gửi đi đâu.")
+                .font(.footnote).foregroundStyle(.secondary)
+            if on {
+                Stepper(value: $audioMb, in: AudioHistoryValidation.minMb...AudioHistoryValidation.maxMb, step: 50) {
+                    Text("Giới hạn dung lượng: \(audioMb) MB")
+                }
+                .onChange(of: audioMb) { _, _ in scheduleAudioLimitSave() }
+                Stepper(value: $audioDays, in: AudioHistoryValidation.minDays...AudioHistoryValidation.maxDays) {
+                    Text("Giữ tối đa \(audioDays) ngày")
+                }
+                .onChange(of: audioDays) { _, _ in scheduleAudioLimitSave() }
+            }
+            if let s = audioSummary {
+                Text(AudioHistoryFormat.usageText(s)).font(.footnote).foregroundStyle(.secondary)
+                    .accessibilityLabel("Âm thanh đã lưu: \(AudioHistoryFormat.usageText(s))")
+            } else if let audioSummaryError {
+                Text(audioSummaryError).font(.footnote).foregroundStyle(Color.red)
+            }
+            Button("Xoá toàn bộ âm thanh…", role: .destructive) { confirmDeleteAudio = true }
+                .disabled((audioSummary?.count ?? 0) == 0)
+            Button(audioExporting ? "Đang xuất…" : "Xuất ZIP…") { exportAudioZip() }
+                .disabled((audioSummary?.count ?? 0) == 0 || audioExporting)
+            if let audioError { Text(audioError).font(.footnote).foregroundStyle(Color.red) }
+            if let audioNotice { Text(audioNotice).font(.footnote).foregroundStyle(.secondary) }
+        }
+    }
+
+    private func refreshAudioSummary() async {
+        switch await controller.fetchAudioHistory() {
+        case .success(let s):
+            audioSummary = s
+            audioSummaryError = nil
+        case .failure(let e):
+            audioSummary = nil
+            audioSummaryError = "Không đọc được thông tin âm thanh đã lưu: \(ErrorText.message(e))"
+        }
+    }
+
+    /// Gom các lần bấm Stepper (mỗi lần bấm đổi 1 đơn vị) thành MỘT lần `PUT /v1/settings` sau 0,6 giây.
+    private func scheduleAudioLimitSave() {
+        guard audioMb != serverAudioMb || audioDays != serverAudioDays else { return }
+        audioLimitTask?.cancel()
+        audioLimitTask = Task {
+            try? await Task.sleep(nanoseconds: 600_000_000)
+            guard !Task.isCancelled else { return }
+            if case .failure(let e) = AudioHistoryValidation.validateMb(audioMb) { saveError = e.message; return }
+            if case .failure(let e) = AudioHistoryValidation.validateDays(audioDays) { saveError = e.message; return }
+            await save(.init(audioHistoryMb: audioMb, audioHistoryDays: audioDays))
+        }
+    }
+
+    private func deleteAllAudio() async {
+        switch await controller.deleteAllAudioHistory() {
+        case .success(let n):
+            audioError = nil
+            audioNotice = "Đã xoá \(n) tệp âm thanh."
+        case .failure(let e):
+            audioError = "Không xoá được âm thanh: \(ErrorText.message(e))"
+        }
+        await refreshAudioSummary()
+    }
+
+    private func exportAudioZip() {
+        if let s = audioSummary, s.bytes > AudioHistoryFormat.maxExportBytes {
+            audioError = "Âm thanh đang chiếm \(AudioHistoryFormat.sizeText(bytes: s.bytes)) — quá lớn để xuất một lần (tối đa \(AudioHistoryFormat.sizeText(bytes: AudioHistoryFormat.maxExportBytes))). Giảm giới hạn dung lượng hoặc xoá bớt rồi xuất lại."
+            return
+        }
+        audioExporting = true
+        Task {
+            defer { audioExporting = false }
+            switch await controller.fetchAudioExport() {
+            case .failure(let e):
+                audioError = "Không xuất được âm thanh: \(ErrorText.message(e))"
+            case .success(let data):
+                let panel = NSSavePanel()
+                panel.allowedContentTypes = [.zip]
+                panel.nameFieldStringValue = "vflow-audio.zip"
+                guard panel.runModal() == .OK, let url = panel.url else { return }
+                do {
+                    try AudioExportWriter.write(data, to: url)
+                    audioError = nil
+                    audioNotice = "Đã lưu \(url.lastPathComponent) (quyền 0600)."
+                } catch {
+                    audioError = "Không lưu được tệp ZIP: \(error)"
+                }
+            }
         }
     }
 

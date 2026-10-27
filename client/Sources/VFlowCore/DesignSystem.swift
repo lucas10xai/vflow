@@ -158,3 +158,28 @@ public enum TodayStats {
         text.split(whereSeparator: { $0.isWhitespace || $0.isNewline }).count
     }
 }
+
+/// Viên "Hôm nay" trên thanh công cụ cửa sổ chính — số từ đã nói trong NGÀY HIỆN TẠI theo
+/// `GET /v1/stats` (`days[date == today].words`). Chỉ hiện khi có số THẬT lớn hơn 0: chưa tải được
+/// thống kê (`nil`), thống kê đang tắt, hôm nay chưa có dòng nào hoặc 0 từ ⇒ ẨN (`nil`) — không bao
+/// giờ hiện "0 từ" giả cho trường hợp "không biết".
+public enum TodayPill {
+    public static func words(from stats: StatsSummary?) -> Int? {
+        guard let stats, stats.enabled else { return nil }
+        guard let day = stats.days.first(where: { $0.date == stats.today }), day.words > 0 else { return nil }
+        return day.words
+    }
+
+    /// Chữ trên viên, số kiểu vi_VN (dấu chấm ngăn nghìn), vd. "Hôm nay: 1.234 từ". `nil` = ẩn viên.
+    public static func text(from stats: StatsSummary?) -> String? {
+        guard let n = words(from: stats) else { return nil }
+        return "Hôm nay: \(VFlowNumberFormat.grouped(n)) từ"
+    }
+}
+
+public extension BrandColor {
+    /// Cam đậm dùng cho CHỮ cảnh báo/nhấn trên nền SÁNG (cam hệ thống #FF9500 chỉ đạt ~2,2:1 trên nền
+    /// trắng, không đạt AA). Ở giao diện tối dùng cam hệ thống (đủ sáng trên nền tối) — xem
+    /// `Theme.warningText`.
+    static let warningTextOnLightHex = "A84F00"
+}

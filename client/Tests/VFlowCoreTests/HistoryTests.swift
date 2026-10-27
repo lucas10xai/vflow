@@ -95,6 +95,83 @@ import Testing
         #expect(try store.list().entries.isEmpty)
     }
 
+    // MARK: audio_id (V3, Lịch sử âm thanh)
+
+    @Test func audioIdRoundTripsThroughEncodeDecode() throws {
+        let store = HistoryStore(path: tempPath())
+        var e = entry("có âm thanh")
+        e.audioId = "au_123"
+        try store.append(e)
+        let r = try store.list()
+        #expect(r.entries.first?.audioId == "au_123")
+        #expect(r.entries.first?.hasAudio == true)
+    }
+
+    @Test func missingAudioIdMeansHasAudioFalse() throws {
+        let store = HistoryStore(path: tempPath())
+        try store.append(entry("không âm thanh"))
+        let r = try store.list()
+        #expect(r.entries.first?.audioId == nil)
+        #expect(r.entries.first?.hasAudio == false)
+    }
+
+    /// Dòng JSONL cũ (trước V3) không có `audio_id` phải vẫn đọc được, `hasAudio` = false — không
+    /// được coi dòng hỏng chỉ vì thiếu trường mới.
+    @Test func oldLineWithoutAudioIdFieldStillDecodes() throws {
+        let path = tempPath()
+        let store = HistoryStore(path: path)
+        try store.append(entry("trước khi có audio_id"))
+        let r = try store.list()
+        #expect(r.corruptLines == 0)
+        #expect(r.entries.first?.hasAudio == false)
+    }
+
+    @Test func deleteReturnsTheRemovedEntryWithItsAudioId() throws {
+        let store = HistoryStore(path: tempPath())
+        var e = entry("x")
+        e.audioId = "au_x"
+        try store.append(e)
+        let removed = try store.delete(id: e.id)
+        #expect(removed?.audioId == "au_x")
+    }
+
+    @Test func deleteOfMissingIdReturnsNil() throws {
+        let store = HistoryStore(path: tempPath())
+        try store.append(entry("a"))
+        let removed = try store.delete(id: "không tồn tại")
+        #expect(removed == nil)
+        #expect(try store.list().entries.count == 1) // không đụng tới mục còn lại
+    }
+
+    @Test func clearAllReturnsEntriesThatExistedBeforeClearing() throws {
+        let store = HistoryStore(path: tempPath())
+        var a = entry("a"); a.audioId = "au_a"
+        var b = entry("b"); b.audioId = "au_b"
+        try store.append(a)
+        try store.append(b)
+        let removed = try store.clearAll()
+        #expect(Set(removed.map { $0.audioId ?? "" }) == ["au_a", "au_b"])
+        #expect(try store.list().entries.isEmpty)
+    }
+
+    @Test func clearAudioIdOnlyClearsThatFieldKeepingRestOfEntry() throws {
+        let store = HistoryStore(path: tempPath())
+        var e = entry("x")
+        e.audioId = "au_x"
+        try store.append(e)
+        try store.clearAudioId(id: e.id)
+        let r = try store.list()
+        #expect(r.entries.first?.audioId == nil)
+        #expect(r.entries.first?.text == "x") // phần còn lại của mục không đổi
+    }
+
+    @Test func clearAudioIdOnMissingEntryIsNoopNotError() throws {
+        let store = HistoryStore(path: tempPath())
+        try store.append(entry("a"))
+        try store.clearAudioId(id: "không tồn tại") // không được ném lỗi
+        #expect(try store.list().entries.count == 1)
+    }
+
     @Test func concurrentAppendsDoNotCorruptLines() async throws {
         let store = HistoryStore(path: tempPath())
         await withTaskGroup(of: Void.self) { group in

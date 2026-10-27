@@ -342,3 +342,39 @@ KHÔNG đổi; ghi vào lịch sử qua `HistoryEntry.degradedReason` (trường
 `live_preview` đổi `false`→`true` (đo thật p95 `/v1/partial` ở 10 s audio = 111 ms, dưới ngưỡng
 500 ms); `GET /v1/stats` nay có `week_start:"monday"` (contract đã khai từ đầu nhưng
 `engine/post/stats.js` không trả — vá đúng, có test; xem `contract/engine-api.md`).
+
+## V3 — Nhóm A: dạy từ, lưu âm thanh để nghe lại, HUD, giao diện, "Hôm nay", ký hiệu theo ngữ cảnh, đo độ trễ
+
+| Tính năng | Ở đâu | Ghi chú ngắn |
+|---|---|---|
+| **Dạy từ bằng giọng** | tab Từ điển › "Dạy từ bằng giọng…" | Nhập từ đúng, nói 3–5 lần (mỗi lần ≤ 10 s ở client; engine nhận tối đa 15 s), mỗi lần `POST /v1/teach` trả CHỮ THÔ máy nghe được ("Nghe ra: …", chưa qua từ điển/làm sạch); gom các cách nghe khác nhau rồi lưu vào từ điển (gộp, không trùng). Không ghi lịch sử, thống kê hay âm thanh. |
+| **Lưu âm thanh để nghe lại** (tuỳ chọn) | Cài đặt › Dữ liệu; nút nghe lại ở tab Lịch sử | **Tắt mặc định.** Xem nguyên tắc riêng tư ngay dưới. |
+| **Vị trí và cỡ thanh ghi âm (HUD)** | Cài đặt › Chung › "Thanh ghi âm" | Vị trí "Dưới màn hình" (mặc định, như cũ) hoặc "Cạnh notch"; cỡ Gọn/Vừa/Lớn = 0/2/4 dòng chữ chạy trực tiếp. Có hiệu lực từ lần ghi kế tiếp. |
+| **Giao diện Sáng/Tối** | Cài đặt › Chung › "Giao diện" (và nút ở thanh công cụ) | Hệ thống/Sáng/Tối, áp ngay cho mọi cửa sổ vflow, nhớ qua lần mở sau. |
+| **Viên "Hôm nay"** | thanh công cụ cửa sổ chính | "Hôm nay: N từ", bấm mở tab Thống kê; ẩn khi chưa có số thật (không hiện 0 giả). |
+| **Ký hiệu theo ngữ cảnh** | engine (`context_symbols`, mặc định bật) | "gạch chéo"→`/`, "a còng"→`@`, "hai chấm hai gạch chéo"→`://`… CHỈ trong terminal/IDE/công cụ AI/chat nhóm (danh sách bundle id cứng, so khớp chính xác, `engine/post/contextsymbols.js`); ứng dụng thường (Notes, Mail…) giữ chữ. |
+| **Độ trễ bắt đầu ghi** | Cài đặt › Nâng cao › "Độ trễ bắt đầu ghi" | Từ lúc nhấn phím tới khối âm thanh đầu; 50 lượt gần nhất, CHỈ trong RAM (không ghi đĩa, không chứa giọng nói); chưa có lượt nào ⇒ "Chưa có lượt ghi nào" (không bịa 0 ms). |
+
+Engine có thêm cài đặt `vocab_boost` (tăng cường từ khoá từ điển qua hotwords; mặc định TẮT vì đo thật không cải thiện và chậm hơn ~28% — xem chú thích trong `engine/post/settings.js`).
+
+### Nguyên tắc riêng tư về âm thanh (lưu để nghe lại)
+- **Tắt mặc định.** Khi tắt: không có tệp nào được tạo, phản hồi dictation không có `audio_id`. Bật cần xác nhận (hộp thoại nêu nơi lưu/giới hạn) và chỉ có nghĩa khi "Lưu lịch sử" đang bật — tắt Lịch sử ⇒ lưu âm thanh tự tắt theo (bật lại Lịch sử KHÔNG tự bật lại âm thanh).
+- **Nơi lưu:** CHỈ trên máy này, `$VFLOW_HOME/audio/<id>.wav` (mặc định `~/.vflow/audio/`; WAV 16 kHz mono 16-bit) cùng `index.json` (id, thời điểm, độ dài, app, chế độ — **không có chữ của câu nói**). Không gửi đi đâu.
+- **Quyền:** thư mục `0700`, mỗi tệp `0600` (engine ép lại `0700` mỗi lần ghi nếu thư mục cũ rộng hơn).
+- **Ngân sách:** `audio_history_mb` 50–2000 (mặc định 200) và `audio_history_days` 1–90 (mặc định 7); vượt thì xoá bản **cũ nhất** trước, quá hạn thì xoá; quét cả lúc engine khởi động. Giá trị ngoài miền bị engine từ chối (`400 bad_request`).
+- **Xoá:** từng câu (`DELETE /v1/audio/<id>`, nút "Xoá âm thanh của câu này"), hoặc tất cả (`DELETE /v1/audio`, "Xoá toàn bộ âm thanh…"). Id lạ/ký tự lạ/`..` ⇒ `404`, không đọc/xoá được tệp ngoài thư mục audio.
+- **Không nằm trong export và chẩn đoán:** `GET /v1/export` (kể cả `include_history=1`), `GET /v1/diagnostics`, `/v1/settings`, `/healthz`, thông báo lỗi và log của engine không chứa byte âm thanh, token, khoá 9Router hay đường dẫn tuyệt đối thư mục cá nhân (probe kiểm bằng chuỗi mồi). Chỉ có DUY NHẤT một đường đưa âm thanh ra ngoài: người dùng chủ động bấm "Xuất ZIP…" (`GET /v1/audio/export`, ZIP kiểu "store": các `.wav` + `index.json`).
+- Mọi endpoint âm thanh/`/v1/teach` cần token như các endpoint khác (thiếu/sai ⇒ `401`), chỉ nhận `Host` 127.0.0.1/localhost, không có CORS.
+
+### Bộ kiểm độc lập phía engine: `client/scripts/probe-group-a.mjs`
+```sh
+node client/scripts/probe-group-a.mjs   # ~5 giây; thoát 0 nếu mọi khẳng định PASS, 1 nếu có FAIL, 2 nếu không dựng được môi trường
+```
+- Tự dựng `VFLOW_HOME` + `HOME` giả trong thư mục tạm, chạy `node bin/vflow.js serve` ở cổng NGẪU NHIÊN 27800–27899 (không bao giờ 7611, không đụng `~/.vflow` thật) và một máy chủ STT từ xa GIẢ theo `contract/remote-stt.md` (trả chữ do script đặt — không cần model, không tốn RAM). Tự tắt engine và xoá thư mục tạm kể cả khi lỗi.
+- In bảng PASS/FAIL tiếng Việt, mỗi dòng kèm giá trị quan sát được: xác thực (401/403), `/v1/teach` (định dạng sai, > 15 s ⇒ 413, đồng thời ⇒ 429, không tác dụng phụ lên history/thống kê/từ điển/âm thanh), lưu âm thanh tắt/bật (không tệp/`audio_id`, quyền 0600/0700, `/v1/audio` khớp đĩa), ngân sách + hạn ngày (đuổi bản cũ nhất, dọn quá hạn/mồ côi lúc khởi động), xoá + path traversal, ZIP (tự đọc cấu trúc, CRC32 từng tệp, `index.json` không có chữ), rò rỉ (export/chẩn đoán/log), ký hiệu theo ngữ cảnh, miền giá trị cài đặt. Dòng "(thông tin)" là quan sát không tính PASS/FAIL.
+- `VFLOW_PROBE_ENGINE_BIN=<đường dẫn bin/vflow.js của một BẢN SAO engine>` cho phép thử phá có chủ đích (đột biến) để xác nhận probe thật sự bắt lỗi.
+- Giới hạn: chỉ kiểm engine qua HTTP (không kiểm giao diện Swift — xem `MANUAL-TEST.md` mục L); STT là bản giả nên không đo chất lượng nhận dạng; kiểm "quá hạn" dựng index/tệp giả trực tiếp (engine tính tuổi theo trường `at` trong `index.json`, không theo mtime của tệp).
+
+### Quan sát đã biết của engine (từ probe; không phải lỗi giao diện)
+- Kho âm thanh coi mọi `.wav` KHÔNG có trong `index.json` là "mồ côi" và xoá lúc khởi động — kể cả khi `index.json` bị hỏng/mất (khi đó cả kho bị xoá). Ghi `index.json` là nguyên tử nên hiếm xảy ra.
+- Ở chế độ Thường, câu kết thúc bằng "a còng <tên>" (vd. "…cho an a còng example") ra `an@example` kèm MỘT dấu cách cuối (dành cho mention gõ tiếp); chế độ Lập trình (terminal ở Tự động) không thừa dấu cách.

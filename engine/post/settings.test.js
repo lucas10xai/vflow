@@ -142,3 +142,27 @@ test('update từ chối patch không phải object', (t) => {
     assert.throws(() => store.update(bad), { code: 'bad_request' });
   }
 });
+
+test('khoá mới (A4/A6): mặc định đúng contract, miền giá trị, ghi bền; vocab_boost đã GỠ ⇒ không còn trong cài đặt và PUT bị từ chối', (t) => {
+  const configPath = join(tmp(t), 'config.json');
+  const store = createSettingsStore({ configPath });
+  const s = store.get();
+  // Giá trị viết TAY (không đọc từ DEFAULT_SETTINGS) để đổi mặc định nhầm sẽ làm test đỏ.
+  assert.equal(s.context_symbols, true);
+  assert.equal(s.audio_history, false); // quyền riêng tư: ghi âm lịch sử mặc định TẮT
+  assert.equal(s.audio_history_mb, 200);
+  assert.equal(s.audio_history_days, 7);
+  for (const ok of [{ audio_history_mb: 50 }, { audio_history_mb: 2000 }, { audio_history_days: 1 }, { audio_history_days: 90 }]) {
+    store.update(ok);
+  }
+  const frozen = readFileSync(configPath, 'utf8');
+  for (const bad of [{ audio_history_mb: 49 }, { audio_history_mb: 2001 }, { audio_history_days: 0 }, { audio_history_days: 91 },
+    { audio_history_mb: 100.5 }, { audio_history_days: '7' }, { audio_history: 'on' }, { vocab_boost: false }, { context_symbols: 0 }]) {
+    assert.throws(() => store.update(bad), undefined, JSON.stringify(bad));
+  }
+  assert.equal(readFileSync(configPath, 'utf8'), frozen, 'giá trị sai không được ghi gì');
+  store.update({ audio_history: true, context_symbols: false });
+  const again = createSettingsStore({ configPath }).get();
+  assert.ok(!('vocab_boost' in again));
+  assert.deepEqual([again.audio_history, again.context_symbols, again.audio_history_mb, again.audio_history_days], [true, false, 2000, 90]);
+});

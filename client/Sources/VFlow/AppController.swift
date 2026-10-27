@@ -65,8 +65,23 @@ final class AppController: NSObject {
 
     var historyEnabled: Bool {
         get { (defaults.object(forKey: "historyEnabled") as? Bool) ?? true }
-        set { defaults.set(newValue, forKey: "historyEnabled") }
+        set {
+            defaults.set(newValue, forKey: "historyEnabled")
+            // Tắt Lịch sử ⇒ engine cũng phải ngừng lưu âm thanh NGAY (không đợi tab Dữ liệu mở): bản ghi
+            // âm không còn mục lịch sử nào để gắn vào. Bật lại KHÔNG tự bật (xem `AudioHistoryEnforcer`).
+            if !newValue {
+                Task { [weak self] in
+                    guard let self else { return }
+                    _ = await self.audioHistoryEnforcer.historyEnabledChanged(to: false)
+                }
+            }
+        }
     }
+
+    private lazy var audioHistoryEnforcer = AudioHistoryEnforcer(send: { [weak self] patch in
+        guard let self else { return .failure(.engineNotRunning) }
+        return await self.applySettingsPatch(patch)
+    })
 
     /// Công tắc "Hiện biểu tượng trên thanh menu" (mặc định bật).
     var showMenuBarIcon: Bool {
@@ -221,6 +236,8 @@ final class AppController: NSObject {
         welcomeWindow = WelcomeWindowController(controller: self)
         recorder.onLevel = { [weak self] l in self?.overlay.setLevel(l); self?.processVoiceActivity(level: l) }
         recorder.onInterrupted = { [weak self] why in self?.micInterrupted(why) }
+        // Khung âm thanh đầu tiên của lượt (luồng audio, mốc đơn điệu) ⇒ chốt mẫu đo độ trễ bắt đầu ghi.
+        recorder.onFirstBuffer = { arrivedAt in RecordingLatencyStore.shared.firstBufferReceived(at: arrivedAt) }
         hotkeys.onInput = { [weak self] input in self?.handle(input) }
         hotkeys.onTapDisabled = { [weak self] in self?.tapDisabled() }
         hotkeys.onReinsertChord = { [weak self] in self?.reinsertLastSentence() }
@@ -459,8 +476,13 @@ final class AppController: NSObject {
 
     var hotkeysActive: Bool { hotkeys.isRunning }
 
+    /// Mốc phím xuống của cử chỉ ghi hiện tại (đo độ trễ bắt đầu ghi, xem `RecordingLatencyGesture`).
+    private var latencyGesture = RecordingLatencyGesture()
+
     private func handle(_ input: KeyInput) {
-        perform(machine.handle(input, at: Self.now))
+        let now = Self.now // systemUptime: đơn điệu, lấy NGAY khi nhận sự kiện phím, trước mọi việc khác
+        latencyGesture.observe(input, phase: machine.phase, at: now)
+        perform(machine.handle(input, at: now))
         updateTicking()
     }
 
@@ -506,13 +528,18 @@ final class AppController: NSObject {
     private func perform(_ action: HotkeyAction) {
         switch action {
         case .none: break
-        case .startRecording: beginRecording()
+        case .startRecording, .startCommandRecording:
+            // Đo độ trễ: lượt ghi THẬT bắt đầu (kể cả Command Mode — cùng đường ghi, được đo). Mốc phím xuống
+            // là của cử chỉ (giữ ⌥/đúp ⌥/⌥+⌃), không phải lúc máy trạng thái ra lệnh. Bắt đầu TRƯỚC mọi kiểm
+            // tra quyền/engine để lỗi quyền cũng đi qua `abortRecording` ⇒ `cancel` (không tạo mẫu).
+            RecordingLatencyStore.shared.begin(keyDownAt: latencyGesture.consumeKeyDownAt() ?? Self.now)
+            if case .startRecording = action { beginRecording() } else { beginCommandRecording() }
         case .stopAndSend: finishRecording()
-        case .startCommandRecording: beginCommandRecording()
         case .stopAndSendCommand: finishCommandRecording()
         case .cancel:
             commandSelectionTask?.cancel()
             commandSelectionTask = nil
+            RecordingLatencyStore.shared.cancel() // Esc/phím khác trước khi có âm thanh: không tạo mẫu
             recorder.cancel()
             stopLivePreview()
             overlay.show(.notice(OverlayText.cancelled))
@@ -528,6 +555,7 @@ final class AppController: NSObject {
         _ = machine.reset(optionHeld: hotkeys.leftOptionHeldNow())
         commandSelectionTask?.cancel()
         commandSelectionTask = nil
+        RecordingLatencyStore.shared.cancel() // không phải lượt ghi (lỗi quyền/engine/mic): không tạo mẫu
         recorder.cancel()
         stopLivePreview()
         setError(ErrorText.message(error), showOverlay: true)
@@ -550,6 +578,7 @@ final class AppController: NSObject {
         }
         targetApp = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
         do {
+            RecordingLatencyStore.shared.recorderStartCalled() // ngay trước khi yêu cầu mở mic (xem lưu ý race ở báo cáo)
             try recorder.start(deviceUID: resolvedMicDeviceUIDForRecording())
         } catch let e as ClientError {
             return abortRecording(e)
@@ -629,6 +658,7 @@ final class AppController: NSObject {
         }
         targetApp = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
         do {
+            RecordingLatencyStore.shared.recorderStartCalled()
             try recorder.start(deviceUID: resolvedMicDeviceUIDForRecording())
         } catch let e as ClientError {
             return abortRecording(e)
@@ -730,6 +760,9 @@ final class AppController: NSObject {
                     case .failure(let e):
                         result = .failure(e)
                     case .success(let r):
+                        // Command Mode: mục lịch sử chỉ lưu lệnh + kết quả, KHÔNG gắn âm thanh ⇒ bản ghi âm của
+                        // lệnh (nếu engine đã lưu) phải xoá ngay, kể cả khi bước `/v1/command` sau đó lỗi.
+                        self.discardAudio(HistoryGate.decide(enabled: true, insertedText: r.text, audioId: r.audioId, entryCarriesAudio: false).discardAudioId)
                         let instruction = r.text.trimmingCharacters(in: .whitespacesAndNewlines)
                         if r.silence || instruction.isEmpty {
                             result = .success(CommandDeliveryResult(instruction: "", command: nil, audioMs: r.audioMs))
@@ -803,7 +836,11 @@ final class AppController: NSObject {
                     result = .failure(e)
                 }
             }
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled else {
+                // Người dùng huỷ sau khi engine đã trả kết quả: không còn mục lịch sử nào, xoá bản ghi âm (nếu có).
+                if case .success(let r) = result { self.discardAudio(r.audioId) }
+                return
+            }
             await self.deliver(result)
         }
     }
@@ -943,12 +980,26 @@ final class AppController: NSObject {
     /// Kết quả lỗi/im lặng không bao giờ vào lịch sử (`insertedText == nil` lúc đó). CHỈ lưu văn
     /// bản (text_raw, text, mode, app, model, audio_ms, timings) — tuyệt đối không có âm thanh.
     private func recordHistoryIfNeeded(result: Result<TranscribeResult, ClientError>, insertedText: String?) {
-        guard case .success(let r) = result, HistoryGate.shouldRecord(enabled: historyEnabled, insertedText: insertedText) else { return }
+        guard case .success(let r) = result else { return }
+        // Không ghi mục lịch sử (Lịch sử tắt, kết quả rỗng/im lặng…) ⇒ `audio_id` (nếu có) trỏ vào hư vô: xoá.
+        let decision = HistoryGate.decide(enabled: historyEnabled, insertedText: insertedText, audioId: r.audioId)
+        discardAudio(decision.discardAudioId)
+        guard decision.record else { return }
         let entry = HistoryEntry(at: Date(), appBundleId: targetApp, mode: r.mode, model: r.model,
                                  textRaw: r.textRaw, text: r.text, audioMs: r.audioMs, totalMs: r.totalMs,
-                                 degradedReason: r.degraded ? r.degradedReason : nil)
+                                 degradedReason: r.degraded ? r.degradedReason : nil,
+                                 audioId: r.audioId)
         do { try historyStore.append(entry) } catch {
             if lastError == nil { lastError = "Không ghi được lịch sử: \(error)" }
+            discardAudio(r.audioId) // mục không được ghi ⇒ không ai trỏ tới bản ghi âm
+        }
+    }
+
+    /// Xoá bản ghi âm không còn mục lịch sử nào trỏ tới — BEST-EFFORT, chạy nền, lỗi không ảnh hưởng luồng.
+    private func discardAudio(_ audioId: String?) {
+        guard let audioId else { return }
+        Task {
+            _ = await AudioDisposal.discard(audioId: audioId, delete: { await self.deleteAudioBestEffort(id: $0) })
         }
     }
 
@@ -963,8 +1014,20 @@ final class AppController: NSObject {
     // MARK: lịch sử
 
     func listHistory(query: String?) throws -> HistoryStore.ReadResult { try historyStore.list(query: query) }
-    func deleteHistory(id: String) throws { try historyStore.delete(id: id) }
-    func clearHistory() throws { try historyStore.clearAll() }
+
+    /// Xoá một mục; có bản ghi âm đi kèm ⇒ dọn phía engine BEST-EFFORT (lỗi mạng không chặn việc
+    /// xoá mục lịch sử — engine tự đuổi theo ngân sách/hạn ngày nếu lần dọn này không thành).
+    func deleteHistory(id: String) throws {
+        let removed = try historyStore.delete(id: id)
+        if let audioId = removed?.audioId { Task { await deleteAudioBestEffort(id: audioId) } }
+    }
+
+    func clearHistory() throws {
+        let removed = try historyStore.clearAll()
+        let audioIds = removed.compactMap(\.audioId)
+        guard !audioIds.isEmpty else { return }
+        Task { for id in audioIds { await deleteAudioBestEffort(id: id) } }
+    }
 
     // MARK: từ điển + gợi ý sửa (đọc-sửa-ghi qua `DictionaryOrchestration`)
 
@@ -989,6 +1052,24 @@ final class AppController: NSObject {
                 let session = self.session // không bắt `self` (MainActor) vào closure @Sendable
                 return await DictionaryOrchestration.applyChange(
                     change,
+                    get: { await Self.requestDictionaryList(session: session, port: port, token: token) },
+                    put: { entries in await Self.requestDictionaryPut(session: session, port: port, token: token, entries: entries) })
+            }
+        }
+    }
+
+    /// "Dạy từ bằng giọng" (V3) — đọc-sửa-ghi qua `DictionaryOrchestration.applyTeachWord` (đọc lại
+    /// MỚI NHẤT trước khi ghi, không dùng danh sách tĩnh lúc mở sheet).
+    func applyTeachWord(term: String, selectedVariants: [String]) async -> Result<[DictionaryEntry], ClientError> {
+        switch resolvedPort() {
+        case .failure(let e): return .failure(e)
+        case .success(let port):
+            switch readToken() {
+            case .failure(let e): return .failure(e)
+            case .success(let token):
+                let session = self.session
+                return await DictionaryOrchestration.applyTeachWord(
+                    term: term, selectedVariants: selectedVariants,
                     get: { await Self.requestDictionaryList(session: session, port: port, token: token) },
                     put: { entries in await Self.requestDictionaryPut(session: session, port: port, token: token, entries: entries) })
             }
@@ -1305,6 +1386,126 @@ final class AppController: NSObject {
             return EngineAPI.parsePartial(status: (resp as? HTTPURLResponse)?.statusCode ?? 0, data: data)
         } catch {
             return .failure(.network(error.localizedDescription))
+        }
+    }
+
+    // MARK: Dạy từ bằng giọng (POST /v1/teach) — V3
+
+    func teach(pcm: Data) async -> Result<TeachResult, ClientError> {
+        switch resolvedPort() {
+        case .failure(let e): return .failure(e)
+        case .success(let port):
+            switch readToken() {
+            case .failure(let e): return .failure(e)
+            case .success(let token):
+                do {
+                    let (data, resp) = try await session.data(for: EngineAPI.teachRequest(port: port, token: token, pcm: pcm))
+                    return EngineAPI.parseTeach(status: (resp as? HTTPURLResponse)?.statusCode ?? 0, data: data)
+                } catch {
+                    return .failure(.network(error.localizedDescription))
+                }
+            }
+        }
+    }
+
+    // MARK: Lịch sử âm thanh (GET/DELETE /v1/audio*) — V3
+
+    func fetchAudioHistory() async -> Result<AudioHistorySummary, ClientError> {
+        switch resolvedPort() {
+        case .failure(let e): return .failure(e)
+        case .success(let port):
+            switch readToken() {
+            case .failure(let e): return .failure(e)
+            case .success(let token):
+                do {
+                    let (data, resp) = try await session.data(for: EngineAPI.audioListRequest(port: port, token: token))
+                    return EngineAPI.parseAudioList(status: (resp as? HTTPURLResponse)?.statusCode ?? 0, data: data)
+                } catch {
+                    return .failure(.network(error.localizedDescription))
+                }
+            }
+        }
+    }
+
+    /// `data` audio/wav khi thành công — client KHÔNG BAO GIỜ ghi tệp này vào `~/.vflow` thật (chỉ
+    /// tệp tạm 0600, xoá ngay sau khi phát xong — xem `AudioPlaybackController`).
+    func fetchAudioClip(id: String) async -> Result<Data, ClientError> {
+        switch resolvedPort() {
+        case .failure(let e): return .failure(e)
+        case .success(let port):
+            switch readToken() {
+            case .failure(let e): return .failure(e)
+            case .success(let token):
+                do {
+                    let (data, resp) = try await session.data(for: EngineAPI.audioGetRequest(port: port, token: token, id: id))
+                    return EngineAPI.parseAudioGet(status: (resp as? HTTPURLResponse)?.statusCode ?? 0, data: data)
+                } catch {
+                    return .failure(.network(error.localizedDescription))
+                }
+            }
+        }
+    }
+
+    /// Xoá MỘT bản ghi âm phía engine, best-effort (lỗi không chặn gọi tiếp) — gọi khi xoá mục lịch
+    /// sử/hết hạn, hoặc khi phát gặp 404 (bản đã mất, chỉ cần dọn tham chiếu phía client).
+    @discardableResult
+    private func deleteAudioBestEffort(id: String) async -> Bool {
+        switch resolvedPort() {
+        case .failure: return false
+        case .success(let port):
+            switch readToken() {
+            case .failure: return false
+            case .success(let token):
+                do {
+                    let (data, resp) = try await session.data(for: EngineAPI.audioDeleteOneRequest(port: port, token: token, id: id))
+                    if case .success = EngineAPI.parseOk(status: (resp as? HTTPURLResponse)?.statusCode ?? 0, data: data) { return true }
+                    return false
+                } catch {
+                    return false
+                }
+            }
+        }
+    }
+
+    /// Nút "Xoá âm thanh của câu này" (menu chuột phải Lịch sử): xoá phía engine rồi xoá tham chiếu
+    /// `audioId` khỏi mục lịch sử (client không chờ engine xong mới gọi — cả hai luôn best-effort,
+    /// không để lại `audioId` trỏ tới bản ghi đã xoá dù engine có lỗi tạm thời).
+    func deleteHistoryAudio(entryId: String, audioId: String) async {
+        _ = await deleteAudioBestEffort(id: audioId)
+        try? historyStore.clearAudioId(id: entryId)
+    }
+
+    func deleteAllAudioHistory() async -> Result<Int, ClientError> {
+        switch resolvedPort() {
+        case .failure(let e): return .failure(e)
+        case .success(let port):
+            switch readToken() {
+            case .failure(let e): return .failure(e)
+            case .success(let token):
+                do {
+                    let (data, resp) = try await session.data(for: EngineAPI.audioDeleteAllRequest(port: port, token: token))
+                    return EngineAPI.parseAudioDeleteAll(status: (resp as? HTTPURLResponse)?.statusCode ?? 0, data: data)
+                } catch {
+                    return .failure(.network(error.localizedDescription))
+                }
+            }
+        }
+    }
+
+    func fetchAudioExport() async -> Result<Data, ClientError> {
+        switch resolvedPort() {
+        case .failure(let e): return .failure(e)
+        case .success(let port):
+            switch readToken() {
+            case .failure(let e): return .failure(e)
+            case .success(let token):
+                do {
+                    let (data, resp) = try await session.data(for: EngineAPI.audioExportRequest(port: port, token: token))
+                    return EngineAPI.parseAudioExport(status: (resp as? HTTPURLResponse)?.statusCode ?? 0, data: data)
+                } catch {
+                    return .failure(.network(error.localizedDescription))
+                }
+            }
         }
     }
 }

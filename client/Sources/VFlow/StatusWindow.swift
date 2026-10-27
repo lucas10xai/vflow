@@ -11,10 +11,23 @@ final class StatusWindowViewModel: ObservableObject {
     /// CHỈ cho `--snapshot` (U3) — xem `DictionaryView.init(debugOpenEditor:)`.
     @Published var debugOpenDictionaryEditor: (term: String, spokenText: String)?
 
+    /// Thống kê mới nhất cho viên "Hôm nay" — `nil` = chưa có/không tải được/engine chưa sẵn sàng (viên ẩn).
+    @Published var todayStats: StatsSummary?
+
     init(controller: AppController, selectedTab: MainTab) {
         self.controller = controller
         self.model = controller.statusModel
         self.selectedTab = selectedTab
+    }
+
+    /// Lấy `GET /v1/stats` qua `AppController.fetchStats` (cùng đường với tab Thống kê). Lỗi/chưa sẵn
+    /// sàng ⇒ `nil` (ẩn viên) — "không biết" không bao giờ biến thành "0 từ".
+    func refreshToday() async {
+        guard model.engineReady else { todayStats = nil; return }
+        switch await controller.fetchStats() {
+        case .success(let s): todayStats = s
+        case .failure: todayStats = nil
+        }
     }
 }
 
@@ -35,6 +48,7 @@ final class StatusWindowController: NSObject, NSWindowDelegate {
 
     init(controller: AppController, initialTab: MainTab = .overview) {
         self.controller = controller
+        AppearanceStore.shared.applyAtLaunch()
         self.viewModel = StatusWindowViewModel(controller: controller, selectedTab: initialTab)
         let hosting = NSHostingView(rootView: MainWindowView(viewModel: viewModel))
         let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 960, height: 680),
@@ -136,6 +150,7 @@ struct MainWindowView: View {
     @ObservedObject var viewModel: StatusWindowViewModel
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     private var model: StatusModel { viewModel.model }
+    @ObservedObject private var appearance = AppearanceStore.shared
     private var controller: AppController { viewModel.controller }
 
     var body: some View {
@@ -171,6 +186,11 @@ struct MainWindowView: View {
                     .defaultScrollAnchor(.top)
                 }
                 .frame(width: proxy.size.width, height: proxy.size.height)
+                // Tô tường minh nền cửa sổ: nội dung đặt thẳng lên nền cửa sổ (tiêu đề, chữ chào, thẻ tô màu
+                // trong suốt) chỉ đọc được nếu nền thật sự được vẽ. Cửa sổ thật vẽ nền này sẵn; ảnh chụp
+                // ngoài màn hình (`cacheDisplay` chỉ chụp contentView) thì không — nên chữ trắng ở giao
+                // diện Tối biến mất trên nền trắng. Cùng màu với nền cửa sổ nên không đổi gì ở app thật.
+                .background(Color(nsColor: .windowBackgroundColor))
             }
         }
         .frame(minWidth: 800, minHeight: 560)
@@ -184,7 +204,12 @@ struct MainWindowView: View {
         // (b) Nút bánh răng Cài đặt ở thanh công cụ, phía phải — cùng cửa sổ Cài đặt duy nhất với
         // nút ở chân thanh bên/menu (xem mục 5 trong yêu cầu).
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
+            ToolbarItemGroup(placement: .primaryAction) {
+                // Viên "Hôm nay": chỉ hiện khi có số thật > 0 (xem `VFlowCore.TodayPill`).
+                if let text = TodayPill.text(from: viewModel.todayStats) {
+                    TodayPillButton(text: text) { viewModel.selectedTab = .stats }
+                }
+                AppearanceMenu(store: appearance)
                 Button { controller.openSettingsWindow() } label: { Image(systemName: "gearshape") }
                     .help("Cài đặt… (⌘,)")
                     .accessibilityLabel("Cài đặt")
@@ -192,6 +217,15 @@ struct MainWindowView: View {
         }
         .background(keyboardShortcuts)
         .defaultAppStorage(controller.appStorageDefaults)
+        // Cùng một nguồn sự kiện với tab Thống kê (`StatsView`): mở cửa sổ/engine sẵn sàng, cửa sổ lấy lại
+        // focus, và sau mỗi lần đọc chính tả xong — không poll liên tục.
+        .task(id: model.engineReady) { await viewModel.refreshToday() }
+        .onReceive(NotificationCenter.default.publisher(for: .vflowStatsMayHaveChanged)) { _ in
+            Task { await viewModel.refreshToday() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            Task { await viewModel.refreshToday() }
+        }
     }
 
     private var sidebar: some View {
@@ -303,21 +337,24 @@ private struct SidebarRow: View {
         Button(action: action) {
             HStack(spacing: Theme.Spacing.sm) {
                 Image(systemName: tab.symbol).frame(width: 18).font(.body)
+                    .foregroundStyle(selected ? Theme.accent : Color.primary)
                 Text(tab.title).font(.body)
                 Spacer()
                 if badge > 0 {
                     Text("\(badge)")
                         .font(.caption2.weight(.bold))
                         .padding(.horizontal, 6).padding(.vertical, 1)
-                        .background(Color.orange, in: Capsule())
-                        .foregroundStyle(.white)
+                        .background(Theme.accent, in: Capsule())
+                        .foregroundStyle(Theme.textOnAccent)
                 }
             }
             .padding(.horizontal, Theme.Spacing.sm)
             .padding(.vertical, 6)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(selected ? Theme.accent.opacity(0.22) : Color.clear, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-            .foregroundStyle(selected ? Theme.accent : Color.primary)
+            // Chữ mục đang chọn dùng màu chính (đủ tương phản trên nền tô cam nhạt ở cả hai giao diện);
+            // chỉ biểu tượng mang màu nhấn — cam #ED6300 làm chữ trên nền sáng chỉ đạt ~2,6:1.
+            .foregroundStyle(Color.primary)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

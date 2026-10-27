@@ -246,3 +246,72 @@ D6b. Làm engine bỏ cuộc hẳn: `pkill -9 -f "vflow.js serve"` liên tục (
     **Dự kiến:** sau lần sửa thứ hai, mở tab Từ điển ⇒ khối "Gợi ý từ lần anh sửa" xuất hiện phía trên danh sách với đúng thuật ngữ, cách nói sai, "Gặp 2 lần". Bấm "Thêm vào từ điển" ⇒ mở sheet Thêm mục đã điền sẵn thuật ngữ + cách nói, Lưu ⇒ gợi ý đó biến mất khỏi danh sách và mục mới xuất hiện trong từ điển chính. Thử lại với một gợi ý khác (nếu có) bằng nút "Bỏ qua" ⇒ gợi ý đó biến mất và KHÔNG quay lại kể cả sau khi mở lại app.
 94. Cài đặt › Dữ liệu: bấm "Sao chép chẩn đoán", dán (⌘V) vào một trình soạn thảo.
     **Dự kiến:** nội dung là JSON có `engine_version`/`model`/`settings`/`counts`/`recent_errors`; tìm (⌘F) chuỗi "key"/"token" trong nội dung dán ra — không thấy giá trị bí mật nào (chỉ tên trường, nếu có). Bấm "Lưu chẩn đoán…" lưu ra tệp, kiểm quyền tệp `-rw-------` như bước 90.
+
+## L. Nhóm A (V3): dạy từ bằng giọng, lưu âm thanh để nghe lại, HUD, giao diện, "Hôm nay", ký hiệu theo ngữ cảnh, độ trễ ghi
+
+Dành cho chủ dự án, tự thử trên máy thật. Không cần biết lập trình: chỉ làm theo từng bước rồi so với **KỲ VỌNG**; thấy **DẤU HIỆU SAI** thì ghi lại bước đó + chụp/chép nguyên văn thông báo trên màn hình.
+Chuẩn bị: đã dựng và mở bản mới (`client/scripts/build-app.sh`, rồi mở `client/build/VFlow.app`); micro và quyền macOS đã cấp (mục A ở trên). Bước nào nhắc dòng lệnh thì dán vào Terminal.
+(Phần engine đã có bộ kiểm tự động riêng: `node client/scripts/probe-group-a.mjs` — chạy được trước khi thử tay, không đụng dữ liệu thật; xem `client/README.md`.)
+
+**L1. Dạy một từ khó bằng giọng**
+1. Cửa sổ "vflow" › tab **Từ điển** › bấm **"Dạy từ bằng giọng…"**.
+2. Ở ô "Từ đúng" gõ một từ mà vflow hay nghe sai (ví dụ tên anh, "Supabase", "Orca").
+3. Bấm **"Bắt đầu ghi"**, nói rõ đúng từ đó (một mình, ~1–2 giây), bấm **"Dừng ghi"**. Lặp lại 3 lần, mỗi lần nói hơi khác (nhanh/chậm/giọng tự nhiên).
+4. Chọn các cách nói muốn giữ rồi bấm **"Lưu vào từ điển"**. Sang tab Từ điển xem mục vừa lưu; sau đó đọc chính tả một câu có chứa từ đó vào Notes.
+   **KỲ VỌNG:** mỗi lần ghi xuất hiện một dòng "1. Nghe ra: …" (chữ máy nghe được, viết thường, CHƯA qua từ điển — nên có thể sai, đó chính là điều cần dạy); đủ 3–5 lần thì nút ghi tạm khoá; danh sách "Cách nói sẽ lưu" gom các cách nghe khác nhau (không trùng); sau khi lưu, mục có thuật ngữ đúng + các cách nói đó, câu đọc ở Notes ra ĐÚNG từ đã dạy. Nếu máy nghe ra y hệt từ đã gõ, thấy dòng "Engine nghe ra đúng như từ đã nhập — không có cách nói nào cần dạy thêm.".
+   **DẤU HIỆU SAI:** không ra dòng "Nghe ra" sau khi dừng ghi (hoặc ra lỗi mơ hồ); ghi quá 10 giây mà không báo gì; lưu xong mục bị TRÙNG với mục cũ thay vì gộp; câu đọc ở Notes vẫn ra từ cũ; **sau khi dạy, tab Lịch sử có thêm câu mới hoặc số "từ" ở tab Thống kê/viên "Hôm nay" tăng** (dạy từ KHÔNG được tính là đọc chính tả); hoặc bật "Lưu âm thanh" (L2) rồi dạy từ mà `ls ~/.vflow/audio` có thêm tệp (dạy từ không được lưu âm thanh).
+
+**L2. Bật lưu âm thanh rồi nghe lại một câu (riêng tư: mặc định TẮT)**
+1. Lần đầu: Cài đặt (⌘,) › **Dữ liệu** › mục **"Lưu âm thanh để nghe lại"**. Chưa bật gì: công tắc phải đang TẮT. Chạy `ls ~/.vflow/audio` ⇒ báo không có thư mục (hoặc rỗng).
+2. Đọc chính tả một câu bình thường (công tắc vẫn tắt). Tab **Lịch sử**: câu đó KHÔNG có nút nghe lại.
+3. Bật công tắc. Hộp thoại hỏi xác nhận phải nói rõ: lưu ở `~/.vflow/audio` trên máy này, không gửi đi đâu, giới hạn dung lượng/số ngày, tệp quyền 0600, xoá được bất cứ lúc nào. Bấm **"Bật lưu âm thanh"**.
+4. Đọc chính tả một câu (ví dụ "hôm nay trời đẹp quá"). Mở tab Lịch sử, bấm nút nghe lại ở dòng câu đó (KHÔNG tự phát khi mở tab), rồi bấm lại để dừng.
+5. Kiểm tệp: `ls -ld ~/.vflow/audio && ls -l ~/.vflow/audio`.
+6. Cài đặt › Dữ liệu: đọc dòng dung lượng đã lưu, bấm **"Xuất ZIP…"**, lưu ra Desktop, nhấp đúp mở ZIP trong Finder; mở `index.json` bằng TextEdit.
+7. Chuột phải câu đó trong Lịch sử › **"Xoá âm thanh của câu này"**; rồi đọc thêm vài câu và Cài đặt › Dữ liệu › **"Xoá toàn bộ âm thanh…"** (xác nhận). Chạy lại `ls ~/.vflow/audio`.
+8. Tắt công tắc "Lưu lịch sử" ở Cài đặt › Lịch sử & riêng tư (khi lưu âm thanh đang bật).
+   **KỲ VỌNG:** (1–2) mặc định tắt, không có tệp, không có nút nghe lại. (3) hộp thoại đúng nội dung trên. (4) nghe đúng giọng và đúng câu mình vừa nói; nút đổi thành "dừng". (5) thư mục `drwx------` (0700), mỗi tệp `.wav` `-rw-------` (0600), tên kiểu `tr_….wav`; có `index.json` 0600; số tệp = số câu đã đọc kể từ lúc bật. (6) ZIP mở được, có đủ tệp `.wav` nghe được + `index.json` chỉ có `id`, `at`, `audio_ms`, `app`, `mode` — KHÔNG có chữ của câu nói. (7) xoá một: nút nghe lại của câu đó mất, các câu khác vẫn nghe được; xoá hết: thông báo "Đã xoá N tệp âm thanh.", `ls` không còn `.wav`, các câu trong Lịch sử vẫn còn (chỉ mất âm thanh). (8) tự tắt công tắc lưu âm thanh kèm thông báo "Đã tự tắt lưu âm thanh vì Lịch sử đang tắt."; bật lại Lịch sử KHÔNG tự bật lại lưu âm thanh.
+   **DẤU HIỆU SAI:** công tắc tự bật sẵn; có tệp `.wav` trong `~/.vflow/audio` khi công tắc tắt (kể cả câu im lặng, câu dạy từ, lệnh Command Mode); quyền tệp/thư mục khác 0600/0700; nghe ra giọng/câu khác; nút nghe lại tự phát khi mở tab; `index.json` hay ZIP chứa chữ của câu nói; sau "Xoá toàn bộ" `ls` vẫn còn `.wav`; thông báo lỗi tiếng Anh/mã máy.
+   Kiểm riêng tư thêm (một lần): Cài đặt › Dữ liệu › **"Xuất dữ liệu…"** (để công tắc "Gồm lịch sử" tắt) và **"Sao chép chẩn đoán"** rồi dán vào trình soạn thảo. **KỲ VỌNG:** chỉ là văn bản JSON nhỏ (vài KB); tìm "audio" chỉ thấy tên các cờ cài đặt (`audio_history`…), KHÔNG có đường dẫn `/Users/…`, KHÔNG có dữ liệu âm thanh, token hay khoá. **SAI:** tệp xuất/chẩn đoán lớn bất thường, có chuỗi "RIFF"/"WAVE", đường dẫn tuyệt đối thư mục cá nhân, hoặc token.
+   Giới hạn dung lượng/hạn ngày (tự kiểm ở mức engine bằng `probe-group-a.mjs`; thử tay nếu muốn): đặt giới hạn nhỏ nhất (50 MB) và 1 ngày ở Cài đặt › Dữ liệu rồi đọc nhiều câu dài — **KỲ VỌNG:** tổng dung lượng hiển thị không vượt giới hạn, bản CŨ nhất bị xoá trước; **SAI:** dung lượng vượt giới hạn mà không bản nào bị xoá, hoặc bản MỚI nhất bị xoá thay vì bản cũ.
+
+**L3. Đổi vị trí và cỡ thanh ghi âm (HUD) sang cạnh notch**
+1. Cài đặt › **Chung** › mục **"Thanh ghi âm"**: Vị trí = **"Cạnh notch"**, Cỡ = **"Lớn"**.
+2. Mở Notes, giữ ⌥ trái nói một câu DÀI (≥ 10 giây, vừa nói vừa nhìn lên mép trên màn hình), nhả.
+3. Đổi Cỡ thành **"Vừa"**, rồi **"Gọn"**, lặp lại bước 2 mỗi lần. Cuối cùng đặt lại Vị trí = "Dưới màn hình", Cỡ như ý.
+   **KỲ VỌNG:** HUD hiện ở GIỮA mép trên màn hình, ngay DƯỚI thanh menu và KHÔNG đè lên notch (MacBook có notch; trên màn ngoài không notch vẫn nằm dưới thanh menu); không cướp focus (con trỏ vẫn ở Notes, chữ vẫn dán đúng chỗ). "Lớn" hiện tối đa 4 dòng chữ chạy trực tiếp, rộng hơn; "Vừa" 2 dòng; "Gọn" chỉ có viên trạng thái + sóng âm (không dòng chữ). Đổi cài đặt có hiệu lực từ LẦN GHI KẾ TIẾP (không nhảy giữa lúc đang ghi).
+   **DẤU HIỆU SAI:** HUD nằm đè lên notch/bị notch cắt; hiện ngoài màn hình hoặc sai màn hình; chữ chạy trực tiếp bị cắt giữa chừng, tràn khỏi khung "Lớn"; "Gọn" vẫn hiện dòng chữ; sau khi chọn "Cạnh notch" thoát/mở lại app thì quay về vị trí cũ (phải được NHỚ).
+
+**L4. Đổi giao diện Sáng/Tối**
+1. Cài đặt › **Chung** › mục **"Giao diện"** chọn **"Tối"**; xem cửa sổ chính (mỗi tab: Tổng quan, Thống kê, Lịch sử, Từ điển, Snippets) và cửa sổ Cài đặt. Chọn **"Sáng"**, xem lại. Chọn **"Hệ thống"**.
+2. Dùng nút "Giao diện" ở thanh công cụ cửa sổ chính (cùng chức năng), thoát hẳn app rồi mở lại.
+3. Đổi System Settings › Giao diện của macOS sang Sáng/Tối trong lúc vflow đang ở "Sáng" rồi ở "Hệ thống".
+   **KỲ VỌNG:** đổi NGAY cho mọi cửa sổ vflow (kể cả đang mở), không cần mở lại; chữ đọc rõ, thẻ/viền tách khỏi nền ở cả hai kiểu; lựa chọn được nhớ sau khi mở lại; ở "Sáng"/"Tối" cố định thì đổi macOS KHÔNG làm vflow đổi theo, ở "Hệ thống" thì đổi theo macOS; không ứng dụng nào khác bị đổi giao diện.
+   **DẤU HIỆU SAI:** chỉ một cửa sổ đổi, cửa sổ kia giữ nguyên; chữ xám nhạt khó đọc/thẻ gần biến mất ở Tối; chọn "Sáng" nhưng vẫn theo macOS; mở lại app quên lựa chọn; nhấp nháy sáng-tối khi đổi.
+
+**L5. Xem viên "Hôm nay"**
+1. Dùng một thư mục dữ liệu trống để thấy trạng thái đầu: `VFLOW_HOME=/tmp/vflow-nhomA ./client/build/VFlow.app/Contents/MacOS/VFlow` (hoặc dùng ngày chưa nói câu nào). Nhìn góc thanh công cụ cửa sổ chính.
+2. Đọc chính tả một câu (khoảng 10 từ). Nhìn lại viên.
+3. Bấm vào viên.
+4. Mở "Dạy từ bằng giọng…" (L1) dạy một từ rồi nhìn lại số trên viên.
+   **KỲ VỌNG:** (1) chưa có số thật thì viên ẨN (không hiện "0 từ" giả); (2) sau khi chèn chữ xong viên hiện "Hôm nay: N từ" với N khớp số từ đã nói (gần bằng số từ của câu); (3) bấm mở tab **Thống kê**, số ở đó (hôm nay) trùng viên; (4) dạy từ KHÔNG làm N tăng. Sang ngày mới (hoặc đổi giờ hệ thống thử) viên về trạng thái ẩn/0 theo ngày mới, không cộng dồn ngày cũ.
+   **DẤU HIỆU SAI:** viên hiện "0 từ"; số lệch rõ so với tab Thống kê; N tăng khi dạy từ hoặc khi huỷ/không nghe thấy gì; bấm viên không có gì xảy ra; chữ trong viên khó đọc ở một trong hai giao diện Sáng/Tối.
+
+**L6. "gạch chéo", "a còng" trong Terminal và trong Notes**
+1. Đặt chế độ **Tự động**. Mở **Terminal**, bấm vào dòng lệnh, giữ ⌥ trái nói đúng câu: "gửi file backup gạch chéo main cho an a còng example", nhả.
+2. Mở **Notes**, nói CÙNG câu y hệt.
+3. Terminal: nói "mở trang https hai chấm hai gạch chéo example".  Notes: nói cùng câu.
+4. (Nếu dùng Slack) ở Slack gõ vào ô soạn tin, nói "gạch chéo giúp đỡ".
+   **KỲ VỌNG:** Terminal ra `gửi file backup/main cho an@example` (ký hiệu thật, không còn chữ "gạch chéo"/"a còng"); Notes giữ NGUYÊN chữ: `gửi file backup gạch chéo main cho an a còng example` (lời nói thường, không bị đổi thành ký hiệu). Bước 3: Terminal ra `https://example`; Notes giữ nguyên chữ. Slack: `/giúp đỡ`. Ứng dụng nằm ngoài danh sách terminal/IDE/Claude/chat nhóm (Notes, Mail, TextEdit, Chrome…) luôn giữ chữ. (Đã biết, nhỏ: ở chế độ Thường/Làm sạch trong ứng dụng thuộc danh sách, câu kết thúc đúng bằng "a còng <tên>" có thể thừa MỘT dấu cách cuối.)
+   **DẤU HIỆU SAI:** Notes bị đổi thành `/` hoặc `@` (đổi nhầm ở ứng dụng thường); Terminal vẫn ra chữ "gạch chéo" hoặc "a còng" (chỉ đổi được một nửa); mất chữ lân cận (vd. "an@example" nuốt mất "cho"); câu như "chúng ta nói về gạch chéo trong toán học" ở Notes bị đổi mất.
+   Tắt thử (tuỳ chọn, chưa có công tắc trên giao diện): `curl -s -X PUT 127.0.0.1:7611/v1/settings -H "Authorization: Bearer $(cat ~/.vflow/token)" -H 'content-type: application/json' -d '{"context_symbols":false}'` rồi nói lại câu bước 1 ở Terminal ⇒ **KỲ VỌNG:** giữ chữ ở mọi ứng dụng; đặt lại bằng cùng lệnh với `true`.
+
+**L7. Xem độ trễ bắt đầu ghi trong Cài đặt › Nâng cao**
+1. Cài đặt › **Nâng cao** › mục **"Độ trễ bắt đầu ghi"** khi mới mở app, chưa ghi lần nào.
+2. Giữ ⌥ trái ghi vài lượt (5–10 lượt, cả kiểu giữ phím lẫn đúp ⌥), quay lại mục đó (cửa sổ Cài đặt có thể để mở sẵn).
+3. Esc huỷ một lượt ngay khi vừa bấm; rồi thoát/mở lại app, xem lại mục.
+   **KỲ VỌNG:** (1) hiện "Chưa có lượt ghi nào trong phiên này" (KHÔNG phải "0 ms"); (2) mỗi lượt thật cập nhật con số "Từ nhấn phím tới khối âm thanh đầu" (trung vị + lượt gần nhất, đơn vị ms; thường vài chục đến vài trăm ms); (3) lượt bị Esc huỷ trước khi có âm thanh KHÔNG tạo mẫu; mở lại app thì về "Chưa có lượt ghi nào…" (chỉ giữ trong bộ nhớ, tối đa 50 lượt gần nhất, không ghi đĩa, không chứa nội dung giọng nói — đúng như dòng chú thích dưới mục đó).
+   **DẤU HIỆU SAI:** hiện "0 ms" khi chưa có lượt; con số vô lý (hàng chục giây hoặc âm); số lượt đo nhiều hơn số lượt ghi thật; lượt Esc vẫn làm đổi số; mở lại app vẫn còn số cũ.
+
+**L8. Chạy bộ kiểm tự động của engine (một lệnh)**
+- `node client/scripts/probe-group-a.mjs` — dựng engine thử ở cổng ngẫu nhiên 27800–27899 trong thư mục tạm (KHÔNG đụng `~/.vflow`, KHÔNG dùng cổng 7611), in bảng PASS/FAIL tiếng Việt cho teach, lưu âm thanh, ngân sách/hạn, xoá, path traversal, ZIP, rò rỉ riêng tư, ký hiệu theo ngữ cảnh, cài đặt; tự dọn. **KỲ VỌNG:** dòng cuối "N PASS, 0 FAIL", thoát mã 0, dòng "Dọn dẹp: engine … đã tắt; thư mục tạm đã xoá.". **SAI:** có FAIL (nhất là mục "Rò rỉ riêng tư" hay "Xoá và path traversal" — nghiêm trọng, dừng dùng tính năng lưu âm thanh và báo ngay).

@@ -15,11 +15,20 @@ export const DEFAULT_SETTINGS = Object.freeze({
   stats_enabled: true,
   app_rules: Object.freeze({}),
   voice_punctuation: true,
+  // A4: ký hiệu theo ngữ cảnh (chỉ áp dụng trong danh sách app terminal/IDE/AI/chat nhóm mã hoá
+  // cứng — xem engine/post/contextsymbols.js), mặc định bật (an toàn: ngoài danh sách app không
+  // đổi gì).
+  context_symbols: true,
   tone: 'neutral',
   whisper_mode: false,
   learn_from_edits: true,
   live_preview: true,
   silence_stop_seconds: 0,
+  // A6: lịch sử âm thanh tuỳ chọn (xem contract/engine-api.md mục "Lịch sử âm thanh (audio_history)").
+  // Mặc định TẮT — quyền riêng tư là điều kiện cứng.
+  audio_history: false,
+  audio_history_mb: 200,
+  audio_history_days: 7,
 });
 
 const SETTINGS_KEYS = Object.keys(DEFAULT_SETTINGS);
@@ -72,12 +81,20 @@ function validateValues(v) {
   if (typeof v.stats_enabled !== 'boolean') throw new SettingsError('stats_enabled phải là boolean');
   v.app_rules = validateAppRules(v.app_rules);
   if (typeof v.voice_punctuation !== 'boolean') throw new SettingsError('voice_punctuation phải là boolean');
+  if (typeof v.context_symbols !== 'boolean') throw new SettingsError('context_symbols phải là boolean');
   if (!TONES.includes(v.tone)) throw new SettingsError(`tone phải là một trong: ${TONES.join(', ')}`);
   if (typeof v.whisper_mode !== 'boolean') throw new SettingsError('whisper_mode phải là boolean');
   if (typeof v.learn_from_edits !== 'boolean') throw new SettingsError('learn_from_edits phải là boolean');
   if (typeof v.live_preview !== 'boolean') throw new SettingsError('live_preview phải là boolean');
   if (!Number.isInteger(v.silence_stop_seconds) || v.silence_stop_seconds < 0 || v.silence_stop_seconds > 60) {
     throw new SettingsError('silence_stop_seconds phải là số nguyên 0–60');
+  }
+  if (typeof v.audio_history !== 'boolean') throw new SettingsError('audio_history phải là boolean');
+  if (!Number.isInteger(v.audio_history_mb) || v.audio_history_mb < 50 || v.audio_history_mb > 2000) {
+    throw new SettingsError('audio_history_mb phải là số nguyên 50–2000');
+  }
+  if (!Number.isInteger(v.audio_history_days) || v.audio_history_days < 1 || v.audio_history_days > 90) {
+    throw new SettingsError('audio_history_days phải là số nguyên 1–90');
   }
   return v;
 }

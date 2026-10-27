@@ -118,3 +118,18 @@ test('mergeHistory: merge theo id, không tạo trùng', () => {
   assert.equal(applied, 1);
   assert.equal(result.find((e) => e.id === 'h_1').text, 'a');
 });
+
+test('validateImportPackage: settings.audio_history:true bị loại và báo ignored (tệp không được tự bật ghi âm); false thì giữ', () => {
+  const on = validateImportPackage({ format: 'vflow-export', version: 1, settings: { audio_history: true, tone: 'formal' } });
+  assert.deepEqual(on.settings, { tone: 'formal' });
+  assert.deepEqual(on.ignoredSettingsKeys, ['audio_history']);
+  const off = validateImportPackage({ format: 'vflow-export', version: 1, settings: { audio_history: false } });
+  assert.deepEqual(off.settings, { audio_history: false });
+  assert.deepEqual(off.ignoredSettingsKeys, []);
+});
+
+test('validateImportPackage: gói xuất từ bản cũ có settings.vocab_boost (khoá đã gỡ) KHÔNG làm hỏng cả gói — bỏ qua và báo ignored', () => {
+  const r = validateImportPackage({ format: 'vflow-export', version: 1, settings: { vocab_boost: false, tone: 'formal' } });
+  assert.deepEqual(r.settings, { tone: 'formal' });
+  assert.deepEqual(r.ignoredSettingsKeys, ['vocab_boost']);
+});
