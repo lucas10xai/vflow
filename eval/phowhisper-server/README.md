@@ -1,20 +1,20 @@
 # Máy chủ STT PhoWhisper (M1c)
 
-Máy chủ STT từ xa theo `contract/remote-stt.md`, chạy `vinai/PhoWhisper-large` trên `gpu-host`
-(RTX A4000, dùng chung). Mac gọi qua SSH tunnel; máy chủ chỉ nghe `127.0.0.1:7612`.
+Máy chủ STT từ xa theo `contract/remote-stt.md`, chạy `vinai/PhoWhisper-large` trên một máy GPU (`gpu-host`;
+RTX A4000, dùng chung). Mac gọi qua SSH tunnel; máy chủ chỉ nghe `127.0.0.1:7612`.
 
 | Tệp | Vai trò |
 |---|---|
 | `server.py` | HTTP (thư viện chuẩn `http.server`), `GET /healthz`, `POST /v1/transcribe` |
 | `convert.py` | Chuyển PhoWhisper (`pytorch_model.bin` fp32) sang CTranslate2 float16, RAM đỉnh thấp |
-| `run.sh` / `stop.sh` | Chạy/dừng nền trên gpu-host bằng `nohup` + `server.pid` (không sudo) |
-| `tunnel.sh` | Trên Mac: `ssh -N -L 127.0.0.1:7612:127.0.0.1:7612 gpu-host`, báo lỗi nếu cổng đã bận |
-| `bench.py` | Đo độ trễ/RTF và WER/CER (thư viện chuẩn, chạy được trên Mac và gpu-host) |
+| `run.sh` / `stop.sh` | Chạy/dừng nền trên máy GPU bằng `nohup` + `server.pid` (không sudo) |
+| `tunnel.sh` | Trên Mac: `ssh -N -L 127.0.0.1:7612:127.0.0.1:7612 gpu-host`, báo lỗi nếu cổng đã bận (đặt `VFLOW_REMOTE_HOST` nếu alias SSH khác) |
+| `bench.py` | Đo độ trễ/RTF và WER/CER (thư viện chuẩn, chạy được trên Mac và máy GPU) |
 | `test_server.py` | Kiểm thử hành vi HTTP bằng backend giả (không cần GPU): `python3 -m unittest test_server` |
 
 ## Chọn phương án
 Backend mặc định `ct2` = faster-whisper 1.2.1 / CTranslate2 4.8.4, `float16` trên `cuda:0`, `beam_size=1`.
-Đã đo cả hai trên cùng bộ mẫu (2026-10-26, gpu-host, đo tại chỗ không qua tunnel):
+Đã đo cả hai trên cùng bộ mẫu (2026-10-26, máy GPU, đo tại chỗ không qua tunnel):
 
 | Backend | Tải model | VRAM tiến trình | stt 5 s (trung vị / p95) | stt 15 s | WER 12 clip |
 |---|---|---|---|---|---|
@@ -26,7 +26,7 @@ ct2 nhanh hơn ~2,7 lần, WER như nhau, xử lý âm thanh dài > 30 s sẵn (
 có cảnh báo "very experimental"). Beam 5 chậm hơn ~12 % mà WER trên FLEURS dev không tốt hơn
 (0,0826 so với 0,0813), nên giữ beam 1. Backend `hf` vẫn giữ trong mã để đối chiếu (`VFLOW_BACKEND=hf`).
 
-## Cài đặt trên gpu-host (mọi thứ trong `~/vflow-phowhisper/`)
+## Cài đặt trên máy GPU (gpu-host; mọi thứ trong `~/vflow-phowhisper/`)
 ```sh
 cd ~/vflow-phowhisper
 python3 -m venv venv
@@ -44,7 +44,7 @@ Mã nằm ở `~/vflow-phowhisper/app/` (sao chép từ thư mục này). Giấy
 
 ## Chạy
 ```sh
-# gpu-host
+# máy GPU (gpu-host)
 bash ~/vflow-phowhisper/app/run.sh      # đọc token từ VFLOW_REMOTE_TOKEN hoặc ~/vflow-phowhisper/token
 curl -s 127.0.0.1:7612/healthz          # chờ "loaded": true
 bash ~/vflow-phowhisper/app/stop.sh
@@ -73,7 +73,7 @@ Biến môi trường: `VFLOW_REMOTE_TOKEN` / `VFLOW_REMOTE_TOKEN_FILE`, `VFLOW_
 - Không kiểm `Host` (khác engine): cổng phía Mac của tunnel có thể khác 7612; token là lớp bảo vệ.
 
 ## Đo (2026-10-26)
-Điều kiện: gpu-host RTX A4000 16 GB dùng chung (đang có youtube-dubbing 2.268 MiB + ComfyUI 160 MiB, GPU nhàn rỗi 0 %),
+Điều kiện: máy GPU RTX A4000 16 GB dùng chung với các dịch vụ khác (đang có hai tiến trình khác chiếm ~2.430 MiB VRAM, GPU nhàn rỗi 0 %),
 8 CPU (cgroup), ct2 fp16 beam 1. `stt_ms` do máy chủ đo (chỉ phần suy luận); RTF = `stt_ms / audio_ms`.
 p95 theo nearest-rank. Dữ liệu:
 - `3s`: `test_wavs/0.wav` (3,74 s), `1.wav` (2,40 s) trong gói `sherpa-onnx-zipformer-vi-30M-int8-2026-02-09`
@@ -85,7 +85,7 @@ p95 theo nearest-rank. Dữ liệu:
 - Chuẩn hoá WER/CER (`bench.py`): NFC, chữ thường, bỏ dấu câu/ký hiệu Unicode (P*, S*), gộp khoảng trắng; CER bỏ
   khoảng trắng. **Không** chuẩn hoá số ("100 feet" và "một trăm phít" tính là 3 lỗi từ).
 
-| Nhóm | Clip × lần | audio TB | stt trung vị / p95 | RTF trung vị / p95 | e2e tại gpu-host | e2e từ Mac qua tunnel | WER / CER |
+| Nhóm | Clip × lần | audio TB | stt trung vị / p95 | RTF trung vị / p95 | e2e tại máy GPU | e2e từ Mac qua tunnel | WER / CER |
 |---|---|---|---|---|---|---|---|
 | 3s | 2 × 10 | 3,07 s | 345 / 377 ms | 0,113 / 0,134 | 348 / 380 ms | 484 / 526 ms | không xác định (không có tham chiếu) |
 | 5s | 7 × 10 | 4,98 s | 368 / 452 ms | 0,077 / 0,089 | 371 / 455 ms | 523 / 584 ms | 0,136 / 0,117 (7 clip, 81 từ) |
@@ -101,7 +101,7 @@ p95 theo nearest-rank. Dữ liệu:
 - **Tunnel phải có `-o IPQoS=cs0`**: với mặc định của `ssh -N`, tải lên 478 KB (15 s WAV) mất 31–40 s; với cs0
   là 0,76–0,88 s. `tunnel.sh` đã đặt sẵn.
 
-Giới hạn: bộ mẫu nhỏ, giọng đọc FLEURS/đọc văn bản, **không đại diện giọng chủ dự án** hay câu lệnh xen thuật ngữ
+Giới hạn: bộ mẫu nhỏ, giọng đọc FLEURS/đọc văn bản, **không đại diện giọng của người dùng cuối** hay câu lệnh xen thuật ngữ
 tiếng Anh; số đo GPU phụ thuộc tải của dịch vụ khác lúc đo. Lỗi điển hình quan sát được: số đọc thành chữ
 ("100 feet" → "một trăm phít"), tên riêng nước ngoài ("Moldova" → "modova", "Bishkek" → "bi két"), từ mượn
 ("ra đa" → "radar").

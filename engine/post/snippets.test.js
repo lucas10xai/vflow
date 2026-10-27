@@ -18,7 +18,7 @@ function setup(t, entries) {
 
 const LINK = { trigger: 'link lịch hẹn', text: 'https://cal.example/demo' };
 const LINK_X = { trigger: 'link lịch', text: 'https://cal.example/khac' };
-const SIG = { trigger: 'chữ ký', text: 'Nguyễn Văn An\nAIOS' };
+const SIG = { trigger: 'chữ ký', text: 'Nguyễn Văn An\nCông ty ABC' };
 
 test('khớp cả câu (chuẩn hoá dấu/hoa thường/dấu câu/khoảng trắng) ⇒ thay toàn bộ bằng text', (t) => {
   const { path } = setup(t, [LINK]);

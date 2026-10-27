@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# phowhisper.sh — bật/tắt máy chủ PhoWhisper trên gpu-host và SSH tunnel từ Mac (chạy từ Mac).
+# phowhisper.sh — bật/tắt máy chủ PhoWhisper trên một máy GPU từ xa (gpu-host) và SSH tunnel từ Mac (chạy từ Mac).
 #
 #   scripts/phowhisper.sh up            kiểm VRAM → run.sh → chờ /healthz loaded:true (qua ssh) → mở tunnel nền
-#   scripts/phowhisper.sh down          đóng tunnel → stop.sh trên gpu-host
+#   scripts/phowhisper.sh down          đóng tunnel → stop.sh trên máy GPU
 #   scripts/phowhisper.sh status        trạng thái tunnel, máy chủ, VRAM
-#   scripts/phowhisper.sh exec -- CMD…  chạy CMD với VFLOW_REMOTE_TOKEN lấy từ gpu-host (chỉ trong env tiến trình con)
+#   scripts/phowhisper.sh exec -- CMD…  chạy CMD với VFLOW_REMOTE_TOKEN lấy từ máy GPU (chỉ trong env tiến trình con)
 #
 # GPU dùng chung với dịch vụ khác: `up` trước khi đo, `down` ngay sau khi đo; không để chạy nền.
 # Token không bao giờ được in, ghi đĩa trên Mac hay ghi log.
 #
 # Biến môi trường (tuỳ chọn):
-#   VFLOW_GPU_HOST            host SSH (mặc định gpu-host)
+#   VFLOW_GPU_HOST            host SSH của máy có GPU (mặc định gpu-host — đặt alias này trong ~/.ssh/config hoặc truyền tên thật)
 #   VFLOW_REMOTE_PORT         cổng (mặc định 7612, cả hai đầu tunnel)
 #   VFLOW_GPU_MAX_OTHER_MIB   VRAM tối đa dịch vụ khác được chiếm để vẫn `up` (mặc định 10240)
 #   VFLOW_HEALTH_TIMEOUT_S    thời gian chờ model tải (mặc định 180)

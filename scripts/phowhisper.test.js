@@ -1,4 +1,4 @@
-// Kiểm scripts/phowhisper.sh bằng `ssh` giả (không chạm gpu-host thật). Cần bash nên bỏ qua trên Windows.
+// Kiểm scripts/phowhisper.sh bằng `ssh` giả (không chạm máy GPU thật). Cần bash nên bỏ qua trên Windows.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';

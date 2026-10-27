@@ -1,0 +1,101 @@
+vflow
+Copyright 2026 Lê Quốc Nghĩa
+
+Mã nguồn vflow được phát hành theo Apache License 2.0 (xem tệp LICENSE).
+The vflow source code is released under the Apache License 2.0 (see LICENSE).
+
+================================================================================
+!!! QUAN TRỌNG — MODEL NHẬN DẠNG GIỌNG NÓI KHÔNG THUỘC GIẤY PHÉP APACHE-2.0 !!!
+!!! IMPORTANT — THE SPEECH MODEL IS NOT COVERED BY APACHE-2.0               !!!
+================================================================================
+
+Model mặc định của vflow là "zipformer-vi-30m" (gói sherpa-onnx int8 của
+Zipformer-30M-RNNT-6000h), tác giả hynt:
+
+    https://huggingface.co/hynt/Zipformer-30M-RNNT-6000h
+
+Giấy phép của model: Creative Commons Attribution-NonCommercial-NoDerivatives
+4.0 International (CC-BY-NC-ND-4.0)
+    https://creativecommons.org/licenses/by-nc-nd/4.0/
+(đối chiếu trực tiếp trên trang model Hugging Face ngày 2026-10-27: "License:
+cc-by-nc-nd-4.0"; vflow cũng ghi đúng giá trị này trong engine/stt/registry.js
+và manifest.json của model tải về).
+
+Hệ quả, nói thẳng:
+
+  1. Mã nguồn vflow là Apache-2.0 (cho phép dùng thương mại, sửa, phân phối lại),
+     nhưng MODEL thì KHÔNG: "NC" = cấm dùng cho mục đích thương mại;
+     "ND" = cấm phân phối bản đã sửa đổi của model.
+  2. Bản phát hành công khai của vflow KHÔNG kèm model. Người dùng tự tải model
+     ở lần chạy đầu tiên và tự chịu trách nhiệm tuân thủ giấy phép của model.
+     Dùng vflow KÈM model này vào việc thương mại (bán, dùng trong công ty có doanh
+     thu, cung cấp như dịch vụ...) là KHÔNG được phép nếu chưa có giấy phép riêng.
+  3. Ai muốn dùng thương mại phải làm MỘT trong hai việc:
+       a) Đổi sang model có giấy phép cho phép thương mại. Gợi ý: PhoWhisper của
+          VinAI (vinai/PhoWhisper-*, giấy phép BSD-3-Clause theo thẻ model
+          Hugging Face, đối chiếu ngày 2026-10-27; vflow đã có đường chạy
+          PhoWhisper qua máy chủ riêng, xem contract/remote-stt.md và
+          eval/phowhisper-server/). Tự kiểm lại giấy phép tại thời điểm dùng.
+       b) Xin giấy phép riêng từ tác giả model (hynt trên Hugging Face).
+  4. Đây là mô tả kỹ thuật, KHÔNG phải tư vấn pháp lý. Nếu cần chắc chắn, hãy hỏi
+     luật sư hoặc tác giả model.
+
+Chi tiết quyết định giấy phép: docs/license-decision.md
+
+================================================================================
+THÀNH PHẦN BÊN THỨ BA / THIRD-PARTY COMPONENTS
+================================================================================
+(Mỗi giấy phép dưới đây đã được tự kiểm trong repo/bản tải chính thức, không chép
+từ tài liệu thiết kế; cách kiểm ghi ở docs/license-decision.md.)
+
+1. sherpa-onnx-node 2.0.0  và  sherpa-onnx-darwin-arm64 2.0.0
+   Phụ thuộc chạy thật của engine (khai trong package.json / package-lock.json;
+   gói nền tảng được kéo qua optionalDependencies của sherpa-onnx-node).
+   Giấy phép: Apache-2.0 (trường "license" trong package.json của cả hai gói;
+   kho gốc k2-fsa/sherpa-onnx dùng cùng giấy phép Apache-2.0).
+   https://github.com/k2-fsa/sherpa-onnx
+   Gói sherpa-onnx-darwin-arm64 chứa sẵn các thư viện nhị phân:
+   sherpa-onnx.node, libsherpa-onnx-c-api.dylib, libsherpa-onnx-cxx-api.dylib,
+   libonnxruntime.dylib.
+
+2. ONNX Runtime (libonnxruntime.dylib, nằm trong gói sherpa-onnx-darwin-arm64)
+   Copyright (c) Microsoft Corporation. Giấy phép: MIT.
+   Chuỗi phiên bản đọc được trong thư viện: 1.28.2.
+   https://github.com/microsoft/onnxruntime  (LICENSE, và ThirdPartyNotices.txt
+   cho các thư viện bên trong ONNX Runtime)
+
+3. Node.js (runtime nhúng trong VFlow.app của bản dựng đầy đủ)
+   Node.js 22 LTS bản chính thức darwin-arm64, tải từ nodejs.org và kiểm sha256
+   bởi client/scripts/bundle-engine.sh. Copyright Node.js contributors.
+   Giấy phép: MIT, kèm thông báo giấy phép của các thành phần bên trong Node.js
+   (V8, OpenSSL, ICU, libuv, ... — nằm trong tệp LICENSE đi kèm bản Node; tệp này
+   được chép vào VFlow.app/Contents/Resources/LICENSES/NODE.txt khi đóng gói).
+   https://github.com/nodejs/node/blob/main/LICENSE
+
+4. Model zipformer-vi-30m — CC-BY-NC-ND-4.0 (xem khung cảnh báo ở đầu tệp này)
+   Zipformer-30M-RNNT-6000h, tác giả hynt (VLSP 2025 hạng nhất theo thẻ model).
+   Gói ONNX int8 phát hành bởi dự án sherpa-onnx:
+   https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models
+   (tệp sherpa-onnx-zipformer-vi-30M-int8-2026-02-09.tar.bz2, sha256 ghi trong
+   engine/stt/registry.js).
+   Giấy phép gốc cấm phân phối bản sửa đổi (ND). Gói ONNX int8 là bản chuyển đổi do dự án
+   sherpa-onnx đăng; việc bản chuyển đổi đó có phù hợp với giấy phép gốc hay không là câu hỏi
+   pháp lý mà vflow không thể trả lời. Vì vậy vflow KHÔNG tự sửa model, CHỈ tải model từ nguồn
+   công khai ở trên về máy người dùng, và KHÔNG đăng lại model trong repo hay bản phát hành.
+
+5. Model tuỳ chọn zipformer-vi-30m-streaming (cùng tác giả, cùng CC-BY-NC-ND-4.0)
+   Chỉ tải khi người dùng chọn. https://huggingface.co/hynt/Zipformer-30M-RNNT-Streaming-6000h
+
+6. Model tuỳ chọn PhoWhisper (vinai/PhoWhisper-large), BSD-3-Clause
+   Chỉ dùng nếu người dùng tự dựng máy chủ PhoWhisper và trỏ vflow tới (không có
+   trong bản phát hành, không tải tự động). Xem ý 3a trong khung cảnh báo ở đầu tệp.
+
+Phía macOS client (Swift): chỉ dùng framework của Apple (AppKit, SwiftUI,
+AVFoundation...) và thư viện chuẩn Swift; KHÔNG có gói Swift Package bên thứ ba
+(client/Package.swift không khai báo dependency nào). Biểu tượng giao diện dùng SF
+Symbols của hệ thống.
+
+Dịch vụ bên ngoài (không phải thành phần phần mềm đi kèm): chế độ Gọn/Thư và
+Command Mode, NẾU người dùng tự bật và tự cấu hình, gửi VĂN BẢN (không âm thanh)
+tới máy chủ tương thích OpenAI mà người dùng chỉ định. vflow không kèm khoá, không
+đăng ký dịch vụ nào thay người dùng.

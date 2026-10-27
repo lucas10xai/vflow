@@ -1,4 +1,4 @@
-# Đã kiểm trên gpu-host (Python 3.12, driver 595.84 / CUDA 13.2, RTX A4000), 2026-10-26.
+# Đã kiểm trên một máy GPU (Python 3.12, driver 595.84 / CUDA 13.2, RTX A4000), 2026-10-26.
 # Cài torch trước, từ chỉ mục CUDA:
 #   venv/bin/pip install torch==2.5.1 --index-url https://download.pytorch.org/whl/cu124
 # torch cần cho bước chuyển đổi model (convert.py) và backend hf; cũng cung cấp

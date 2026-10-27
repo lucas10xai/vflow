@@ -49,7 +49,7 @@ Quy tắc: `text_raw` luôn là chữ gốc do STT trả về, không đổi. `t
 `PUT /v1/dictionary` thay toàn bộ (kiểm schema, tối đa 5.000 mục). `POST /v1/corrections` với `{ "before": "…", "after": "…" }` → `{ "suggestions": [ { "term": "…", "spoken": ["…"] } ] }` (phản hồi ngay chỉ là gợi ý, KHÔNG tự thêm vào từ điển — người dùng xác nhận mới ghi qua `PUT /v1/dictionary`; đồng thời, nếu `learn_from_edits` bật, engine LƯU LẠI cặp này để tổng hợp `GET /v1/dictionary/suggestions` khi đủ ≥ 2 lần — xem mục "Gợi ý từ điển"). Tệp lưu `~/.vflow/dictionary.json` (0600), không nằm trong repo. Hạt giống `config/dictionary.seed.json` chỉ chứa thuật ngữ chung, không có tên riêng/khoá.
 
 ## Cấu hình (`~/.vflow/config.json`, tất cả có mặc định)
-`default_model`, `rewrite.url` (mặc định `http://127.0.0.1:20128/v1`), `rewrite.model`, `rewrite.timeout_ms` (mặc định 8000), `rewrite.key_file` (đường dẫn tệp chứa khoá; **không** chứa khoá trực tiếp trong cấu hình), `auto.apps` (bảng ánh xạ `{ "<bundleId>": "normal|clean|email" }` cho chế độ `auto`; có mặc định, sửa được). `remote.phowhisper.url`.
+`default_model`, `rewrite.url` (mặc định `http://127.0.0.1:20128/v1` — cổng mặc định của 9Router, một máy chủ tương thích OpenAI chạy cục bộ và hoàn toàn tuỳ chọn; trỏ sang endpoint OpenAI-compatible khác bằng cách đổi giá trị này), `rewrite.model`, `rewrite.timeout_ms` (mặc định 8000), `rewrite.key_file` (đường dẫn tệp chứa khoá; **không** chứa khoá trực tiếp trong cấu hình), `auto.apps` (bảng ánh xạ `{ "<bundleId>": "normal|clean|email" }` cho chế độ `auto`; có mặc định, sửa được). `remote.phowhisper.url`.
 
 ## Chế độ
 - `normal`: STT + từ điển + **dấu câu bằng giọng** (xem mục riêng dưới).

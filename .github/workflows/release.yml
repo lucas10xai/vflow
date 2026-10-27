@@ -1,0 +1,224 @@
+name: Phát hành
+
+# Chạy khi gắn thẻ phiên bản (v0.1.0, v0.2.0-rc.1…) hoặc chạy tay (Actions › Phát hành › Run workflow)
+# để THỬ quy trình mà KHÔNG tạo Release (dry_run, mặc định bật): vẫn chạy test, dựng app, nén zip và
+# đưa zip lên mục Artifacts để tải về kiểm.
+#
+# Quy trình đầy đủ và danh sách kiểm trước khi phát hành: docs/release-process.md
+#
+# KHÔNG dùng bí mật ký của chủ dự án: bản dựng ký ad-hoc (không có danh tính ký trong keychain của
+# runner nên client/scripts/lib-signing.sh tự rơi về "-"), KHÔNG công chứng. Người dùng phải tự gỡ chặn
+# macOS — ghi rõ trong ghi chú phát hành (.github/RELEASE_NOTES_FOOTER.md). Chỉ dùng GITHUB_TOKEN tự
+# cấp của workflow để tạo Release.
+#
+# KHÔNG kèm model (giấy phép CC-BY-NC-ND-4.0 — xem NOTICE): dựng bằng build-app.sh --no-model và
+# kiểm lại sau khi dựng rằng gói không chứa model nào.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Chạy thử: dựng + test + zip nhưng KHÔNG tạo GitHub Release'
+        type: boolean
+        default: true
+
+permissions:
+  contents: write # chỉ để tạo Release bằng GITHUB_TOKEN tự cấp
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Test, dựng và phát hành
+    runs-on: macos-latest # Apple Silicon (arm64) — bản dựng chỉ hỗ trợ arm64
+    timeout-minutes: 60
+    env:
+      # Chạy tay (workflow_dispatch) mà tắt dry_run thì phải có thẻ thật; xem bước "Xác định phiên bản".
+      IS_TAG: ${{ startsWith(github.ref, 'refs/tags/v') }}
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+      REF_NAME: ${{ github.ref_name }}
+      VFLOW_BUILD_JOBS: '3'
+    steps:
+      - name: Lấy mã nguồn
+        uses: actions/checkout@v4
+
+      - name: Cài Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Kiểm công cụ dựng (Swift ≥ 6, arm64)
+        run: |
+          set -euo pipefail
+          uname -m
+          [ "$(uname -m)" = "arm64" ] || { echo "LỖI: runner không phải arm64" >&2; exit 1; }
+          xcodebuild -version
+          swift --version
+          swift_major="$(swift --version | sed -nE 's/.*Swift version ([0-9]+)\..*/\1/p' | head -n1)"
+          [ -n "$swift_major" ] && [ "$swift_major" -ge 6 ] || { echo "LỖI: cần Swift 6 trở lên (Xcode 16+), thấy: '$swift_major'" >&2; exit 1; }
+          node --version
+
+      - name: Xác định phiên bản và kiểm khớp với mã nguồn
+        id: version
+        run: |
+          set -euo pipefail
+          engine_version="$(sed -nE "s/^export const VERSION = '([^']+)';.*/\1/p" engine/server/index.js | head -n1)"
+          plist_version="$(sed -nE 's#.*<key>CFBundleShortVersionString</key><string>([^<]+)</string>.*#\1#p' client/scripts/build-app.sh | head -n1)"
+          [ -n "$engine_version" ] || { echo "LỖI: không đọc được VERSION trong engine/server/index.js" >&2; exit 1; }
+          [ -n "$plist_version" ] || { echo "LỖI: không đọc được CFBundleShortVersionString trong client/scripts/build-app.sh" >&2; exit 1; }
+          if [ "$IS_TAG" = "true" ]; then
+            tag="$REF_NAME"
+            echo "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?$' \
+              || { echo "LỖI: thẻ '$tag' không đúng dạng vMAJOR.MINOR.PATCH[-tiền-phát-hành]" >&2; exit 1; }
+            version="${tag#v}"
+          else
+            # Chạy tay không có thẻ: lấy theo mã nguồn, chỉ được chạy thử.
+            [ "$DRY_RUN" = "true" ] || { echo "LỖI: chạy tay chỉ được ở chế độ dry_run; muốn phát hành hãy gắn thẻ v*" >&2; exit 1; }
+            version="$engine_version"
+            tag="v$version"
+          fi
+          core_version="${version%%-*}" # bỏ hậu tố -rc.1… khi so với số phiên bản đã nhúng trong mã
+          [ "$core_version" = "$engine_version" ] || { echo "LỖI: thẻ $tag ≠ engine/server/index.js VERSION ($engine_version)" >&2; exit 1; }
+          [ "$core_version" = "$plist_version" ] || { echo "LỖI: thẻ $tag ≠ build-app.sh CFBundleShortVersionString ($plist_version)" >&2; exit 1; }
+          prerelease=false
+          case "$version" in *-*) prerelease=true ;; esac
+          {
+            echo "tag=$tag"
+            echo "version=$version"
+            echo "prerelease=$prerelease"
+          } >> "$GITHUB_OUTPUT"
+          echo "Phiên bản: $version (thẻ $tag, tiền phát hành: $prerelease, chạy thử: $DRY_RUN)"
+
+      - name: Kiểm ghi chú CHANGELOG cho phiên bản này
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          awk -v ver="$VERSION" '
+            /^## \[/ { if (found) exit; if (index($0, "## [" ver "]") == 1) { found = 1; next } }
+            found { print }
+          ' CHANGELOG.md > "$RUNNER_TEMP/changelog-section.md"
+          if ! grep -q '[^[:space:]]' "$RUNNER_TEMP/changelog-section.md"; then
+            echo "LỖI: CHANGELOG.md không có mục '## [$VERSION]' (hoặc mục rỗng). Thêm mục này trước khi gắn thẻ." >&2
+            exit 1
+          fi
+          echo "--- Ghi chú lấy từ CHANGELOG.md ---"
+          cat "$RUNNER_TEMP/changelog-section.md"
+
+      - name: Cài phụ thuộc engine
+        run: npm ci
+
+      - name: Test engine (npm test)
+        run: npm test
+
+      - name: Test client (swift test)
+        working-directory: client
+        run: swift test
+
+      - name: Kiểm build-app.sh có cờ --no-model
+        # Cờ này do việc "bản dựng công khai không kèm model" thêm vào build-app.sh. Nếu thiếu, DỪNG:
+        # tuyệt đối không dựng bản kèm model rồi đăng công khai (model CC-BY-NC-ND-4.0, xem NOTICE).
+        run: |
+          set -euo pipefail
+          grep -q -- '--no-model' client/scripts/build-app.sh \
+            || { echo "LỖI: client/scripts/build-app.sh chưa hỗ trợ --no-model — không thể dựng bản công khai không kèm model." >&2; exit 1; }
+
+      - name: Dựng VFlow.app (không kèm model, ký ad-hoc)
+        run: client/scripts/build-app.sh --no-model
+
+      - name: Kiểm bản dựng (không model, arm64, chữ ký, phiên bản)
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          app=client/build/VFlow.app
+          [ -d "$app" ] || { echo "LỖI: không thấy $app" >&2; exit 1; }
+          # 1) KHÔNG có model nào trong gói.
+          models="$(find "$app" \( -name '*.onnx' -o -path '*/Resources/models/*' \) -print)"
+          if [ -n "$models" ]; then
+            echo "LỖI: bản công khai không được chứa model, nhưng thấy:" >&2
+            echo "$models" >&2
+            exit 1
+          fi
+          # 2) Chỉ arm64.
+          archs="$(lipo -archs "$app/Contents/MacOS/VFlow")"
+          [ "$archs" = "arm64" ] || { echo "LỖI: nhị phân VFlow có kiến trúc '$archs', cần đúng 'arm64'" >&2; exit 1; }
+          # 3) Chữ ký ad-hoc hợp lệ (không có danh tính ký của chủ dự án trên runner).
+          codesign --verify --deep --strict "$app"
+          codesign -dv "$app" 2>&1 | sed -n '1,12p'
+          # 4) Phiên bản trong Info.plist khớp.
+          plist_v="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")"
+          core="${VERSION%%-*}"
+          [ "$plist_v" = "$core" ] || { echo "LỖI: Info.plist $plist_v ≠ $core" >&2; exit 1; }
+          du -sh "$app"
+
+      - name: Nén zip và tạo SHA-256
+        id: pack
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          name="vflow-${VERSION}-macos-arm64"
+          rm -rf stage dist
+          mkdir -p stage dist
+          ditto client/build/VFlow.app stage/VFlow.app
+          cp LICENSE NOTICE stage/
+          ditto -c -k --sequesterRsrc stage "dist/${name}.zip"
+          (cd dist && shasum -a 256 "${name}.zip" > "${name}.zip.sha256" && cat "${name}.zip.sha256")
+          # Kiểm zip: nguyên vẹn và chữ ký còn đúng sau khi giải nén.
+          unzip -tq "dist/${name}.zip"
+          rm -rf verify && mkdir verify
+          ditto -x -k "dist/${name}.zip" verify
+          codesign --verify --deep --strict verify/VFlow.app
+          [ -f verify/LICENSE ] || { echo "LỖI: zip thiếu LICENSE" >&2; exit 1; }
+          [ -f verify/NOTICE ] || { echo "LỖI: zip thiếu NOTICE" >&2; exit 1; }
+          rm -rf verify stage
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          ls -la dist
+
+      - name: Soạn ghi chú phát hành
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## vflow ${VERSION}"
+            echo
+            cat "$RUNNER_TEMP/changelog-section.md"
+            echo
+            cat .github/RELEASE_NOTES_FOOTER.md
+          } > "$RUNNER_TEMP/release-notes.md"
+          echo "--- Ghi chú phát hành ---"
+          cat "$RUNNER_TEMP/release-notes.md"
+
+      - name: Đưa zip lên Artifacts (dùng khi chạy thử)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.pack.outputs.name }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Tạo GitHub Release
+        if: ${{ env.IS_TAG == 'true' && env.DRY_RUN != 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+          PRERELEASE: ${{ steps.version.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          extra=""
+          if [ "$PRERELEASE" = "true" ]; then extra="--prerelease"; fi
+          # shellcheck disable=SC2086 # $extra rỗng hoặc đúng một cờ, không chứa khoảng trắng
+          gh release create "$TAG" dist/* \
+            --verify-tag \
+            --title "vflow ${VERSION}" \
+            --notes-file "$RUNNER_TEMP/release-notes.md" \
+            $extra

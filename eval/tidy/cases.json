@@ -1,5 +1,5 @@
 {
-  "_note": "Bộ ca đo tidy (eval/tidy-bench.js). Không dấu câu, có từ đệm, tự sửa giữa câu, liệt kê, câu hỏi nằm trong nội dung KHÔNG được trả lời, số liệu, đường dẫn/lệnh, thuật ngữ tiếng Anh xen vào — theo cách chủ dự án nói với agent. expect_contains/expect_not_contains so khớp không phân biệt hoa/thường, chỉ kiểm một phần (substring), không phải toàn bộ câu chuẩn.",
+  "_note": "Bộ ca đo tidy (eval/tidy-bench.js). Không dấu câu, có từ đệm, tự sửa giữa câu, liệt kê, câu hỏi nằm trong nội dung KHÔNG được trả lời, số liệu, đường dẫn/lệnh, thuật ngữ tiếng Anh xen vào — theo cách lập trình viên nói với agent. expect_contains/expect_not_contains so khớp không phân biệt hoa/thường, chỉ kiểm một phần (substring), không phải toàn bộ câu chuẩn.",
   "cases": [
     {
       "id": "filler-1",

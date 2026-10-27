@@ -41,6 +41,18 @@ else
   "$CLIENT_DIR/scripts/build-app.sh"
 fi
 
+# ── Cảnh báo (KHÔNG chặn): cài bản KHÔNG kèm model mà máy cũng chưa có model ─────────────────────────
+# Bản kèm model chép model sang ~/.vflow/models ở lần chạy đầu; bản không kèm model thì chỉ chạy ngay nếu
+# model đã có ở đó, còn không thì lần mở đầu sẽ hiện màn hình xin tải (≈ 26 MB, phải đồng ý giấy phép).
+MODEL_ID="zipformer-vi-30m"
+DATA_HOME="${VFLOW_HOME:-$HOME/.vflow}"
+if [ ! -f "$SRC_APP/Contents/Resources/models/$MODEL_ID/manifest.json" ] \
+   && [ ! -f "$DATA_HOME/models/$MODEL_ID/manifest.json" ]; then
+  echo "CẢNH BÁO: đang cài bản KHÔNG kèm model và $DATA_HOME/models/$MODEL_ID cũng chưa có." >&2
+  echo "          Lần mở đầu vflow sẽ hiện màn hình xin tải model (≈ 26 MB, giấy phép CC-BY-NC-ND-4.0, phải bấm đồng ý);" >&2
+  echo "          chưa tải thì chưa đọc chính tả được." >&2
+fi
+
 # ── Thoát nhẹ nhàng các bản vflow đang chạy từ build cũ hoặc /Applications, rồi XÁC NHẬN đã thoát ──
 # Khớp cả "VFlow.app" (dựng từ client/build) lẫn "vflow.app" (đã cài ở /Applications) — case-
 # insensitive (-i) vì ditto tạo DEST_APP đúng theo tên viết hoa/thường được truyền vào, khác với tên

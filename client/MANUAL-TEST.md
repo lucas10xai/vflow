@@ -344,3 +344,26 @@ Lỗi gốc: thông báo `AVAudioEngineConfigurationChange` (bắn rất thườ
 **M5. Thẻ "Lỗi gần nhất" tự hết**
 1. (Tạo lỗi: tắt quyền Micro ở System Settings, giữ ⌥ để thấy lỗi, bật lại quyền.) Sau đó đọc chính tả MỘT lượt thành công.
    **KỲ VỌNG:** ngay sau lượt thành công thẻ "Lỗi gần nhất" và "Có vấn đề cần xử lý" biến mất, KHÔNG cần bấm X.
+
+## N. O1: bản KHÔNG kèm model (công khai) — bản chủ dự án đang dùng KHÔNG được đổi trải nghiệm
+
+Dựng: `client/scripts/build-app.sh --no-model` (≈ 146 MB; bản mặc định `build-app.sh` không cờ vẫn ≈ 179 MB, KÈM model). Chạy bản mới bằng `open client/build/VFlow.app` — KHÔNG thoát/đè bản đang chạy ở `/Applications` nếu chưa muốn. Các bước 1–2 đã được tự động kiểm bằng thư mục tạm (xem báo cáo O1); bước 3–6 cần cửa sổ thật nên CHỈ chủ dự án kiểm được.
+
+**N1. Máy đã có model ở `~/.vflow/models/zipformer-vi-30m` (đúng máy của anh)**
+1. Mở bản không kèm model.
+   **KỲ VỌNG:** mở ngay như bản kèm model, KHÔNG có cửa sổ "Cần tải model…", không tải gì, không chậm hơn thấy được; giữ ⌥ nói bình thường.
+   **DẤU HIỆU SAI:** hiện màn hình xin tải hoặc xin đồng ý giấy phép; Tổng quan › Hệ thống báo thiếu model.
+
+**N2. Máy CHƯA có model (thử an toàn bằng thư mục khác, KHÔNG xoá `~/.vflow` thật)**
+1. Thoát bản đang thử, rồi chạy: `VFLOW_HOME=/tmp/vflow-thu ./client/build/VFlow.app/Contents/MacOS/VFlow` (thư mục tạm; có thể tạo `/tmp/vflow-thu/client.json` = `{"port": 28999}` để không đụng cổng 7611 của bản đang dùng).
+   **KỲ VỌNG:** hiện cửa sổ **"Tải model nhận dạng giọng nói"** có: tên model (Zipformer-30M-RNNT-6000h), dung lượng (≈ 26 MB tải / ≈ 33 MB trên đĩa), nguồn (Hugging Face + GitHub k2-fsa/sherpa-onnx), giấy phép **CC-BY-NC-ND-4.0** với câu "Chỉ dùng cá nhân, phi thương mại; không được phát hành lại bản sửa đổi", hai nút "Mở trang giấy phép"/"Mở trang model" (mở trình duyệt), nút "Để sau" và "Đồng ý và tải (≈ 26 MB)". Chưa bấm đồng ý thì KHÔNG có tải nào (Activity Monitor › Mạng không thấy tăng).
+2. Bấm "Để sau", rồi mở Tổng quan › Hệ thống.
+   **KỲ VỌNG:** dòng "Chưa có model nhận dạng giọng nói — cần tải một lần…" và nút **"Tải model…"** mở lại cửa sổ.
+3. Bấm "Đồng ý và tải", xem thanh tiến độ ("Đã tải X / 25,2 MB"), rồi bấm "Huỷ tải" giữa chừng.
+   **KỲ VỌNG:** dừng ngay, hiện "Đã huỷ tải…" và nút "Thử lại"; không còn thư mục `.tmp-zipformer-vi-30m.*` trong `/tmp/vflow-thu/models`.
+4. Bấm "Thử lại" và để tải xong.
+   **KỲ VỌNG:** "Đang kiểm mã băm SHA-256…" rồi "Đã tải xong và kiểm mã băm khớp"; engine tự khởi động lại; giữ ⌥ nói ra chữ. `ls /tmp/vflow-thu/models/zipformer-vi-30m` có `encoder.int8.onnx decoder.onnx joiner.int8.onnx tokens.txt manifest.json` và `shasum -a 256` các tệp khớp `~/.vflow/models/zipformer-vi-30m` (cùng gói gốc).
+5. Tắt mạng (Wi-Fi off) rồi bấm "Thử lại" ở một thư mục trống khác.
+   **KỲ VỌNG:** lỗi đỏ "Không tải được model — lỗi mạng hoặc máy chủ…", nút "Thử lại" dùng được khi bật lại mạng; KHÔNG để lại model dở dang.
+6. (Chỉ để xem) làm hỏng một tệp model đã tải (`echo x >> .../encoder.int8.onnx`) rồi mở lại app.
+   **KỲ VỌNG:** vẫn coi là "đủ" (lúc mở chỉ kiểm sự có mặt của tệp, không băm 33 MB mỗi lần — đây là chủ ý để không chậm); mã băm chỉ được kiểm ngay sau khi TẢI. Nếu muốn kiểm tay: `node bin/vflow.js doctor`.

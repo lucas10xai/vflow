@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Chạy máy chủ PhoWhisper nền trên gpu-host (không sudo). Mọi thứ nằm trong ~/vflow-phowhisper.
+# Chạy máy chủ PhoWhisper nền trên máy GPU (gpu-host; không sudo). Mọi thứ nằm trong ~/vflow-phowhisper.
 # Token: đặt VFLOW_REMOTE_TOKEN, hoặc để trong ~/vflow-phowhisper/token (quyền 0600).
 set -euo pipefail
 BASE="${VFLOW_BASE:-$HOME/vflow-phowhisper}"

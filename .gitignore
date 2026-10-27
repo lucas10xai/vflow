@@ -8,3 +8,31 @@ models/
 *.pcm
 .env
 .env.*
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Bản dựng và ảnh chụp/tạm (client/.gitignore đã chặn client/build/ và client/.build/; đặt lại ở đây cho chắc)
+client/build/
+client/.build/
+.build/
+*.xcodeproj/
+.swiftpm/
+*.dmg
+*.pkg
+
+# Ảnh chụp giao diện tạm (client/scripts/snapshot.sh ghi ra thư mục do người dùng chọn — không commit)
+snapshots/
+snapshot-out/
+*.snapshot.png
+
+# Bí mật và dữ liệu cá nhân không bao giờ được commit
+rewrite.key
+token
+*.pem
+*.p12
+*.key

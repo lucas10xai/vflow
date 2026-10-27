@@ -244,7 +244,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         c.start(initialTab: initialTab)
 
         DispatchQueue.main.asyncAfter(deadline: .now() + waitMs / 1000) { Task { @MainActor in
-            if target == "welcome" {
+            if target == "modeldownload" || target.hasPrefix("modeldownload:") {
+                let variant = target.split(separator: ":", maxSplits: 1).dropFirst().first.map(String.init) ?? ""
+                c.captureModelDownloadOffscreen(variant: variant, to: outPath)
+            } else if target == "welcome" {
                 c.openWelcome()
                 c.captureWelcomeOffscreen(to: outPath)
             } else if target.hasPrefix("caidat") {

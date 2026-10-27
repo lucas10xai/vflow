@@ -1,0 +1,42 @@
+name: Đề xuất tính năng
+description: Gợi ý một tính năng hay cải tiến cho vflow
+title: "[Đề xuất] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        vflow là dự án nhỏ do một cá nhân duy trì và có nguyên tắc cứng: **âm thanh không rời máy, không telemetry, không tài khoản**. Đề xuất đi ngược các nguyên tắc này sẽ khó được nhận.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Bạn đang gặp vấn đề gì?
+      description: Mô tả tình huống dùng thật, không chỉ giải pháp.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: Bạn muốn vflow làm gì?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Cách khác bạn đã thử hoặc cân nhắc
+  - type: dropdown
+    id: privacy
+    attributes:
+      label: Đề xuất có cần gửi dữ liệu ra ngoài máy không?
+      options:
+        - Không
+        - Có (văn bản, qua máy chủ do người dùng tự cấu hình)
+        - Không chắc
+    validations:
+      required: true
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Đóng góp
+      options:
+        - label: Tôi sẵn sàng thử làm PR cho đề xuất này (xem CONTRIBUTING.md).

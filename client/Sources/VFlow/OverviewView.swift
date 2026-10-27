@@ -464,7 +464,10 @@ private struct SystemDisclosure: View {
             VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
                 if let status = model.modelBootstrapStatus {
                     Text(status).font(.callout)
-                        .foregroundStyle(status.hasPrefix("Chép model lần đầu lỗi") ? Color.red : Color.secondary)
+                        .foregroundStyle(status.hasPrefix("Chép model lần đầu lỗi") || status.hasPrefix("Tải model lỗi") ? Color.red : Color.secondary)
+                    if controller.canOpenModelDownload {
+                        Button("Tải model…") { controller.openModelDownload() }
+                    }
                 }
                 Text(model.engineSummary).font(.callout)
                 if model.models.isEmpty {

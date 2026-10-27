@@ -30,7 +30,7 @@ node bin/vflow.js record-set --prompts eval/prompts/vi-en-40.txt --out ~/.vflow/
 # Chỉ model cục bộ
 node bin/vflow.js compare --set ~/.vflow/eval/vi-en-40 --models zipformer-vi-30m
 
-# Có PhoWhisper trên gpu-host (GPU dùng chung: bật trước khi đo, TẮT ngay sau khi đo)
+# Có PhoWhisper trên máy GPU từ xa (GPU dùng chung: bật trước khi đo, TẮT ngay sau khi đo)
 scripts/phowhisper.sh up        # kiểm VRAM (> 10 GB của dịch vụ khác ⇒ từ chối, mã 3), chạy máy chủ, mở tunnel
 scripts/phowhisper.sh exec -- node bin/vflow.js compare --set ~/.vflow/eval/vi-en-40 \
   --models zipformer-vi-30m,phowhisper-large
@@ -38,7 +38,7 @@ scripts/phowhisper.sh down      # đóng tunnel + dừng máy chủ
 scripts/phowhisper.sh status
 ```
 
-`exec` lấy token bằng `ssh gpu-host 'cat ~/vflow-phowhisper/token'` thẳng vào biến môi trường `VFLOW_REMOTE_TOKEN` của tiến trình con: không in, không ghi đĩa trên Mac.
+`exec` lấy token bằng `ssh gpu-host 'cat ~/vflow-phowhisper/token'` (`gpu-host` = alias SSH của máy GPU, đổi bằng `VFLOW_GPU_HOST`) thẳng vào biến môi trường `VFLOW_REMOTE_TOKEN` của tiến trình con: không in, không ghi đĩa trên Mac.
 
 Báo cáo ghi vào `<bộ>/reports/compare-<thời điểm>.md` + `.json` (đổi bằng `--out`). Nội dung:
 - văn bản thô và sau `engine/post` (mặc định `--mode normal`; từ điển = **chỉ hạt giống** `config/dictionary.seed.json`, chạy trên bản sao tạm nên không đụng `~/.vflow/dictionary.json`; `--dictionary <tệp>` để dùng từ điển khác, cũng qua bản sao);

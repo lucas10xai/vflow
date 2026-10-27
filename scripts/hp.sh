@@ -1,20 +1,22 @@
 #!/usr/bin/env bash
-# hp.sh — đồng bộ repo vflow sang HP Windows và chạy lệnh ở đó (chạy từ Mac).
+# hp.sh — đồng bộ repo vflow sang một máy Windows (qua SSH) và chạy lệnh ở đó (chạy từ Mac). "hp" là tên lịch sử
+# của máy dựng Windows đầu tiên; script không còn gắn với máy nào — host và thư mục đều lấy từ biến môi trường.
 #
-#   scripts/hp.sh status                    thông tin máy HP (không ghi gì lên HP)
-#   scripts/hp.sh sync                      mirror repo -> C:\Users\example\dev\vflow
+#   scripts/hp.sh status                    thông tin máy Windows (không ghi gì lên đó)
+#   scripts/hp.sh sync                      mirror repo -> thư mục VFLOW_HP_ROOT trên máy Windows
 #   scripts/hp.sh run [--force] [--] CMD…   sync rồi chạy CMD trong thư mục đó, trả đúng mã thoát
 #   scripts/hp.sh install [--force]         run npm install (bỏ qua nếu không có package.json)
 #   scripts/hp.sh test [--force]            run npm test
 #   scripts/hp.sh bench [--force] [--] CMD… như run, kèm RAM trống trước/sau và thời gian chạy
 #
 # Biến môi trường (tuỳ chọn):
-#   VFLOW_HP_HOST          host SSH (mặc định windows-host)
+#   VFLOW_HP_HOST          host SSH của máy Windows (mặc định windows-host — đặt alias này trong ~/.ssh/config hoặc truyền tên thật)
+#   VFLOW_HP_ROOT          thư mục repo trên máy Windows (mặc định %USERPROFILE%\dev\vflow)
 #   VFLOW_HP_MIN_FREE_MB   ngưỡng RAM trống tối thiểu để chạy (mặc định 1500)
-#   VFLOW_HP_NODE_OPTIONS  NODE_OPTIONS trên HP (mặc định --max-old-space-size=1536)
+#   VFLOW_HP_NODE_OPTIONS  NODE_OPTIONS trên máy Windows (mặc định --max-old-space-size=1536)
 #
-# Mã thoát của chính script: 2 sai cú pháp, 3 HP thiếu RAM, 255 lỗi SSH,
-# 250 lỗi nội bộ phía HP; còn lại là mã thoát của lệnh từ xa.
+# Mã thoát của chính script: 2 sai cú pháp, 3 máy Windows thiếu RAM, 255 lỗi SSH,
+# 250 lỗi nội bộ phía máy Windows; còn lại là mã thoát của lệnh từ xa.
 #
 # Mọi lệnh Windows chạy qua `powershell -NoProfile -EncodedCommand <bootstrap>`;
 # bootstrap đọc script thật (base64 UTF-8) và dữ liệu từ stdin, nên không có
@@ -22,6 +24,10 @@
 set -euo pipefail
 
 HOST="${VFLOW_HP_HOST:-windows-host}"
+HP_ROOT="${VFLOW_HP_ROOT:-}"
+if [[ "$HP_ROOT" == *'"'* || "$HP_ROOT" == *'$'* || "$HP_ROOT" == *'`'* || "$HP_ROOT" == *'@'* || "$HP_ROOT" == *'&'* ]]; then
+  printf 'hp.sh: VFLOW_HP_ROOT không được chứa " $ ` @ &\n' >&2; exit 2
+fi
 MIN_FREE_MB="${VFLOW_HP_MIN_FREE_MB:-1500}"
 NODE_OPTS="${VFLOW_HP_NODE_OPTIONS:---max-old-space-size=1536}"
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -40,9 +46,11 @@ b64() { base64 | tr -d '\n'; }
 BOOT='$ErrorActionPreference="Stop";$ProgressPreference="SilentlyContinue";[Console]::OutputEncoding=New-Object Text.UTF8Encoding $false;$l=@($input|ForEach-Object {"$_".TrimEnd("`r")});$s=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String((($l|Where-Object {$_.StartsWith("#")}|ForEach-Object {$_.Substring(1)}) -join "")));$r=@($l|Where-Object {$_ -ne "" -and -not $_.StartsWith("#")});try{& ([scriptblock]::Create($s)) @r}catch{[Console]::Error.WriteLine("hp.sh (phía HP): "+$_);exit 250};exit 0'
 BOOT_ENC="$(printf '%s' "$BOOT" | iconv -f UTF-8 -t UTF-16LE | b64)"
 
-# Phần chung cho mọi script phía HP: thư mục gốc cố định + kiểm tra đường dẫn.
+# Phần chung cho mọi script phía máy Windows: thư mục gốc cố định (VFLOW_HP_ROOT, mặc định %USERPROFILE%\dev\vflow) + kiểm tra đường dẫn.
 PS_COMMON='
-$root = "C:\Users\example\dev\vflow"
+$root = "@@HP_ROOT@@"
+if ($root -eq "") { $root = Join-Path $env:USERPROFILE "dev\vflow" }
+$rootExpected = $root
 $protected = @(".git","node_modules","models",".vflow")
 function Get-FreeMB {
   try { $v = (Get-CimInstance Win32_PerfFormattedData_PerfOS_Memory).AvailableMBytes; if ($null -ne $v) { return [int64]$v } } catch {}
@@ -53,7 +61,7 @@ function Test-Reparse([string]$p) {
   return ((Get-Item -LiteralPath $p -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0
 }
 function Assert-Root {
-  if ($root -ne "C:\Users\example\dev\vflow") { throw "thư mục gốc sai: $root" }
+  if ($root -ne $rootExpected) { throw "thư mục gốc sai: $root" }
   if ((Test-Path -LiteralPath $root) -and (Test-Reparse $root)) { throw "TỪ CHỐI: $root là reparse point/junction" }
 }
 # Trả đường dẫn tuyệt đối an toàn cho một đường dẫn tương đối; ném lỗi nếu nằm ngoài $root.
@@ -79,13 +87,13 @@ function Dec([string]$s) { return [Text.Encoding]::UTF8.GetString([Convert]::Fro
 # remote_ps SCRIPT — chạy SCRIPT (PowerShell) trên HP; stdin của hàm = các dòng tham số.
 remote_ps() {
   local script="$1"
-  { printf '%s\n%s' "$PS_COMMON" "$script" | base64 -b 76 | sed 's/^/#/'; cat; } |
+  { printf '%s\n%s' "${PS_COMMON//@@HP_ROOT@@/$HP_ROOT}" "$script" | base64 -b 76 | sed 's/^/#/'; cat; } |
     "${SSH[@]}" "powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $BOOT_ENC"
 }
 
 # Gọi remote_ps khi không cần dữ liệu riêng; lỗi SSH (255) báo rõ.
 ssh_fail() {
-  die 255 "lỗi SSH tới '$HOST' (mã $1). Kiểm tra Tailscale/HP đang bật và khoá SSH (BatchMode, không hỏi mật khẩu)."
+  die 255 "lỗi SSH tới '$HOST' (mã $1). Kiểm tra máy Windows đang bật, đường mạng tới nó (VPN/Tailscale nếu có) và khoá SSH (BatchMode, không hỏi mật khẩu)."
 }
 
 # ---------------------------------------------------------------- status
@@ -285,8 +293,8 @@ check_ram() { # $1 = force (0|1)
     die 3 "không xác định được RAM trống trên HP; từ chối chạy (dùng --force để bỏ qua)."
   fi
   if (( free < MIN_FREE_MB )); then
-    [[ "$1" == 1 ]] && { echo "hp.sh: HP chỉ còn $free MB RAM trống (< $MIN_FREE_MB MB); --force nên vẫn chạy." >&2; return 0; }
-    die 3 "HP chỉ còn $free MB RAM trống (< $MIN_FREE_MB MB). Từ chối chạy để các dịch vụ khác còn mượt; dùng --force nếu thật sự cần."
+    [[ "$1" == 1 ]] && { echo "hp.sh: Máy Windows chỉ còn $free MB RAM trống (< $MIN_FREE_MB MB); --force nên vẫn chạy." >&2; return 0; }
+    die 3 "Máy Windows chỉ còn $free MB RAM trống (< $MIN_FREE_MB MB). Từ chối chạy để không làm các dịch vụ khác trên máy đó thiếu RAM; dùng --force nếu thật sự cần."
   fi
 }
 
@@ -320,7 +328,7 @@ cmd_run() { # $1 = bench (0|1), rồi [--force] [--] CMD…
   exit "$rc"
 }
 
-usage() { sed -n '2,9p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,16p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
 # Cho phép `source scripts/hp.sh` (gỡ lỗi) mà không chạy lệnh con.
 if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then return 0; fi

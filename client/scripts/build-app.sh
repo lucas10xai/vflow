@@ -1,23 +1,35 @@
 #!/bin/bash
 # Dựng client/build/VFlow.app (bản release), ký (dùng danh tính ổn định "vflow Local Signing" nếu
 # có trong keychain — xem make-signing-identity.sh — ngược lại ký ad-hoc) và kiểm chữ ký.
-# Dùng: client/scripts/build-app.sh [--clean] [--no-bundle]
+# Dùng: client/scripts/build-app.sh [--clean] [--no-bundle] [--no-model]
 #   --clean       xoá .build trung gian sau khi dựng
 #   --no-bundle   bỏ qua bundle-engine.sh (dựng nhanh khi phát triển; app sẽ cần repo + Node hệ
 #                 thống như trước M4b, không tự đủ)
+#   --no-model    (hoặc VFLOW_BUNDLE_MODEL=0) bản CÔNG KHAI: KHÔNG kèm model zipformer-vi-30m (giấy phép
+#                 CC-BY-NC-ND-4.0 cấm phát hành lại). Vẫn kèm engine + LICENSES. App xin tải model (có đồng
+#                 ý giấy phép) khi ~/.vflow/models chưa có; đã có thì chạy ngay. MẶC ĐỊNH (không cờ) = KÈM
+#                 model như trước — đây là bản dùng cá nhân, không phát hành.
 set -euo pipefail
 
 CLIENT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 APP="$CLIENT_DIR/build/VFlow.app"
 BUNDLE_ENGINE=1
+MODEL_ID="zipformer-vi-30m"
+# Mặc định KÈM model (bản chủ dự án dùng — không đổi). VFLOW_BUNDLE_MODEL=0 hoặc --no-model ⇒ KHÔNG kèm.
+BUNDLE_MODEL="${VFLOW_BUNDLE_MODEL:-1}"
+case "$BUNDLE_MODEL" in 0|1) ;; *) echo "LỖI: VFLOW_BUNDLE_MODEL chỉ nhận 0 hoặc 1 (nhận: $BUNDLE_MODEL)" >&2; exit 64 ;; esac
 CLEAN=0
 for arg in "$@"; do
   case "$arg" in
     --no-bundle) BUNDLE_ENGINE=0 ;;
+    --no-model) BUNDLE_MODEL=0 ;;
     --clean) CLEAN=1 ;;
     *) echo "LỖI: cờ không rõ: $arg" >&2; exit 64 ;;
   esac
 done
+if [ "$BUNDLE_MODEL" = "0" ]; then
+  echo "• --no-model: bản KHÔNG kèm model (phát hành công khai)"
+fi
 cd "$CLIENT_DIR"
 # shellcheck source=./lib-signing.sh
 source "$CLIENT_DIR/scripts/lib-signing.sh"
@@ -75,6 +87,7 @@ SIGN_STATE="$(vflow_signing_state)"
 SIGN_IDENTITY="$(vflow_signing_codesign_arg "$SIGN_STATE")"
 
 if [ "$BUNDLE_ENGINE" = "1" ]; then
+  export VFLOW_BUNDLE_MODEL="$BUNDLE_MODEL"
   "$CLIENT_DIR/scripts/bundle-engine.sh" "$APP" "$SIGN_IDENTITY"
 else
   echo "• --no-bundle: bỏ qua đóng gói engine (app cần repo + Node hệ thống như trước M4b)"
@@ -91,4 +104,12 @@ if [ "$CLEAN" = "1" ]; then
   rm -rf "$CLIENT_DIR/.build"
   echo "• đã xoá client/.build"
 fi
-echo "Xong: $APP ($(du -sh "$APP" | cut -f1))"
+APP_SIZE="$(du -sh "$APP" | cut -f1 | tr -d " ")"
+if [ -f "$APP/Contents/Resources/models/$MODEL_ID/manifest.json" ]; then
+  MODEL_SIZE="$(du -sh "$APP/Contents/Resources/models" | cut -f1 | tr -d " ")"
+  echo "Xong: $APP ($APP_SIZE) — BẢN KÈM MODEL ($MODEL_ID, $MODEL_SIZE trong Resources/models): chỉ để dùng cá nhân, KHÔNG phát hành công khai (giấy phép model CC-BY-NC-ND-4.0)."
+elif [ "$BUNDLE_ENGINE" = "1" ]; then
+  echo "Xong: $APP ($APP_SIZE) — BẢN KHÔNG KÈM MODEL (công khai): model được tải về ~/.vflow/models sau khi người dùng đồng ý giấy phép; nếu ~/.vflow/models/$MODEL_ID đã có thì chạy ngay, không tải lại."
+else
+  echo "Xong: $APP ($APP_SIZE) — BẢN --no-bundle (không kèm engine, không kèm model; chỉ để phát triển)."
+fi

@@ -1,0 +1,77 @@
+name: Báo lỗi
+description: vflow chạy sai, treo, chèn sai chữ, không nhận phím…
+title: "[Lỗi] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Cảm ơn bạn đã báo lỗi. **Đây là issue công khai — đừng dán** âm thanh, văn bản giọng nói thật của bạn, token, khoá API, hay đường dẫn/tên máy cá nhân. Hãy dùng câu ví dụ bịa để tái hiện.
+        **Lỗ hổng bảo mật:** đừng mở issue ở đây, xem `SECURITY.md`.
+  - type: textarea
+    id: what
+    attributes:
+      label: Chuyện gì đã xảy ra?
+      description: Bạn thấy gì, và bạn kỳ vọng thấy gì?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Các bước tái hiện
+      placeholder: |
+        1. Mở ứng dụng …
+        2. Giữ ⌥ trái và nói (một câu ví dụ bịa) …
+        3. …
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Phiên bản vflow
+      description: Cài đặt › Nâng cao › Phiên bản, hoặc tên tệp zip đã tải.
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: input
+    id: macos
+    attributes:
+      label: Phiên bản macOS và chip
+      placeholder: "macOS 15.1, Apple M2"
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: Cách cài
+      options:
+        - Tải bản dựng sẵn từ Releases
+        - Tự biên dịch từ mã nguồn
+    validations:
+      required: true
+  - type: input
+    id: mode
+    attributes:
+      label: Chế độ và ứng dụng đích (nếu liên quan)
+      placeholder: "Chế độ Tự động, đang dán vào Terminal"
+  - type: checkboxes
+    id: permissions
+    attributes:
+      label: Quyền macOS đã cấp cho vflow (tab Tổng quan cho biết)
+      options:
+        - label: Micro
+        - label: Theo dõi đầu vào (Input Monitoring)
+        - label: Trợ năng (Accessibility)
+  - type: textarea
+    id: logs
+    attributes:
+      label: Thông báo lỗi / chẩn đoán (đã che thông tin riêng)
+      description: Chép thông báo lỗi hiện trong app. Nếu cần, xem lại kỹ trước khi dán đầu ra chẩn đoán của engine — nó không chứa văn bản giọng nói, token hay khoá, nhưng hãy tự kiểm.
+      render: text
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Xác nhận
+      options:
+        - label: Tôi đã che mọi thông tin riêng tư, token, khoá và không đính kèm âm thanh thật.
+          required: true

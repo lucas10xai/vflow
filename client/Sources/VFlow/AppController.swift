@@ -94,7 +94,7 @@ final class AppController: NSObject {
     private(set) var engineState: EngineState = .stopped
     private(set) var configError: ClientError?
     private(set) var lastError: String?
-    /// Trạng thái chép model lần đầu từ bundle (M4b/Phần 2); `nil` = không có gì đáng nói (xem `ModelBootstrap`).
+    /// Trạng thái chép/tải model (M4b/Phần 2, O1); `nil` = không có gì đáng nói (xem `ModelProvisioning`).
     private(set) var modelBootstrapStatus: String?
 
     var mode: DictationMode {
@@ -389,33 +389,116 @@ final class AppController: NSObject {
     /// Cửa sổ trạng thái gọi mỗi 2 giây khi đang hiện: quyền có thể vừa được cấp trong System Settings.
     func refreshPermissionsNow() { refreshUI() }
 
-    // MARK: model lần đầu (M4b/Phần 2 — bản dựng tự đủ kèm model trong bundle)
+    // MARK: model (M4b/Phần 2 — bản kèm model; O1 — bản công khai KHÔNG kèm model)
 
-    /// Bản dựng `--no-bundle` hoặc chạy từ repo: không có `Contents/Resources/models` ⇒ bỏ qua êm,
-    /// giữ hành vi cũ (`vflow models pull`). Có bundle model ⇒ chép sang `VFLOW_HOME` nếu CHƯA có,
-    /// KHÔNG BAO GIỜ đè model đã có; hiện trạng thái trung thực ở tab Tổng quan trong lúc chép.
+    /// Quyết định bằng hàm thuần `ModelProvisioning.decide` (chỉ vài lệnh `stat` + đọc manifest, không băm
+    /// model mỗi lần mở app):
+    /// - `<VFLOW_HOME>/models/<id>` đã đủ ⇒ `.ready`: KHÔNG chép, KHÔNG tải, KHÔNG hỏi, KHÔNG hiện gì
+    ///   (đây là trường hợp của bản chủ dự án đang dùng, kể cả khi bản dựng không kèm model);
+    /// - chưa có nhưng bundle có ⇒ chép từ bundle như trước nay (không bao giờ đè model đã có);
+    /// - không có ở đâu ⇒ MỚI hiện màn hình xin tải (cần đồng ý giấy phép CC-BY-NC-ND-4.0).
+    /// Ghi MỘT dòng JSON ra stderr (quyết định, không có gì riêng tư) để kiểm tự động.
     private func runModelBootstrapIfNeeded() {
-        let modelsDir = Bundle.main.bundlePath + "/Contents/Resources/models"
-        guard FileManager.default.fileExists(atPath: modelsDir) else { return }
-        modelBootstrapStatus = "Đang chuẩn bị model lần đầu…"
-        refreshUI()
+        let bundleModels = Bundle.main.bundlePath + "/Contents/Resources/models"
         let home = vflowHome
         Task.detached(priority: .utility) { [weak self] in
-            let outcome = ModelBootstrap.installIfNeeded(vflowHome: home, modelID: "zipformer-vi-30m",
-                                                          bundleModelsDir: modelsDir, fs: .live)
-            await MainActor.run {
-                guard let self else { return }
-                switch outcome {
-                case .alreadyPresent, .noBundledSource:
-                    self.modelBootstrapStatus = nil
-                case .copied:
-                    self.modelBootstrapStatus = nil
-                case .failed(let e):
-                    self.modelBootstrapStatus = "Chép model lần đầu lỗi: \(e)"
+            let decision = ModelProvisioning.decide(home: ModelProvisioning.inspect(modelsDir: home + "/models"),
+                                                    bundle: ModelProvisioning.inspect(modelsDir: bundleModels))
+            FileHandle.standardError.write(Data("{\"event\":\"model_provisioning\",\"decision\":\"\(decision.logLabel)\"}\n".utf8))
+            switch decision {
+            case .ready:
+                return
+            case .copyFromBundle:
+                await MainActor.run { self?.modelBootstrapStatus = "Đang chuẩn bị model lần đầu…"; self?.refreshUI() }
+                let outcome = ModelBootstrap.installIfNeeded(vflowHome: home, modelID: ModelProvisioning.modelID,
+                                                              bundleModelsDir: bundleModels, fs: .live)
+                await MainActor.run {
+                    guard let self else { return }
+                    switch outcome {
+                    case .alreadyPresent, .noBundledSource, .copied:
+                        self.modelBootstrapStatus = nil
+                    case .failed(let e):
+                        self.modelBootstrapStatus = "Chép model lần đầu lỗi: \(e)"
+                    }
+                    self.refreshUI()
                 }
-                self.refreshUI()
+            case .needsDownload(let reason):
+                await MainActor.run { self?.offerModelDownload(reason) }
             }
         }
+    }
+
+    private var modelDownloader: ModelDownloader?
+    private var modelDownloadWindow: ModelDownloadWindowController?
+    /// Còn thiếu model và có thể mở màn hình tải (nil = không có gì phải làm).
+    private(set) var modelDownloadReason: ModelProvisioning.DownloadReason?
+
+    var canOpenModelDownload: Bool { modelDownloadReason != nil && modelDownloadWindow != nil }
+
+    func openModelDownload() {
+        refreshUI()
+        modelDownloadWindow?.show()
+    }
+
+    private func offerModelDownload(_ reason: ModelProvisioning.DownloadReason) {
+        guard let spec = engineSpec else {
+            modelBootstrapStatus = "Chưa có model nhận dạng giọng nói, và cấu hình engine đang lỗi nên chưa tải được."
+            refreshUI()
+            return
+        }
+        modelDownloadReason = reason
+        let downloader = ModelDownloader(spec: spec, home: vflowHome)
+        let vm = ModelDownloadViewModel(reason: reason)
+        vm.onAccept = { [weak downloader] in downloader?.start() } // CHỈ chạy khi người dùng bấm "Đồng ý và tải"
+        vm.onCancel = { [weak downloader] in downloader?.cancel() }
+        vm.onClose = { [weak self] in self?.modelDownloadWindow?.close() }
+        downloader.onState = { [weak self, weak vm] s in
+            vm?.state = s
+            self?.modelDownloadStateChanged(s)
+        }
+        modelDownloader = downloader
+        modelDownloadWindow = ModelDownloadWindowController(viewModel: vm)
+        modelBootstrapStatus = "Chưa có model nhận dạng giọng nói — cần tải một lần (mở từ mục Hệ thống)."
+        refreshUI()
+        modelDownloadWindow?.show()
+    }
+
+    private func modelDownloadStateChanged(_ s: ModelDownloadState) {
+        switch s {
+        case .idle:
+            break
+        case .downloading(let p):
+            if let p {
+                let total = p.totalMB.map { String(format: " / %.1f", $0) } ?? ""
+                modelBootstrapStatus = String(format: "Đang tải model… %.1f", p.doneMB) + total + " MB"
+            } else {
+                modelBootstrapStatus = "Đang tải model… (đang kết nối)"
+            }
+        case .verifying:
+            modelBootstrapStatus = "Đang kiểm mã băm model…"
+        case .done:
+            modelBootstrapStatus = nil
+            modelDownloadReason = nil
+            restartEngine() // engine nạp model vừa tải
+        case .cancelled:
+            modelBootstrapStatus = "Đã huỷ tải model — chưa đọc chính tả được (mở lại từ mục Hệ thống)."
+        case .failed(let message):
+            modelBootstrapStatus = "Tải model lỗi: \(message)"
+        }
+        refreshUI()
+    }
+
+    /// `--render-offscreen modeldownload[:tiendo|:loi|:xong]`: chụp màn hình xin tải KHÔNG hiện cửa sổ.
+    func captureModelDownloadOffscreen(variant: String, to path: String) {
+        let state: ModelDownloadState
+        switch variant {
+        case "tiendo": state = .downloading(ModelPullOutput.Progress(doneMB: 11.3, totalMB: 25.2))
+        case "loi": state = .failed("Không tải được model — lỗi mạng hoặc máy chủ (fetch failed). Kiểm tra kết nối rồi thử lại.")
+        case "xong": state = .done
+        default: state = .idle
+        }
+        let vm = ModelDownloadViewModel(reason: .notInstalled, state: state)
+        ModelDownloadWindowController(viewModel: vm).captureOffscreen(to: path)
     }
 
     // MARK: engine

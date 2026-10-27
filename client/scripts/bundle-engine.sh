@@ -1,6 +1,7 @@
 #!/bin/bash
-# Đóng gói Node 22 + mã engine + node_modules (chỉ darwin-arm64) + model zipformer-vi-30m + LICENSES
-# vào VFlow.app/Contents/Resources/ để app TỰ ĐỦ (không cần repo hay Node hệ thống trên máy chạy).
+# Đóng gói Node 22 + mã engine + node_modules (chỉ darwin-arm64) + model zipformer-vi-30m (trừ khi
+# VFLOW_BUNDLE_MODEL=0) + LICENSES vào VFlow.app/Contents/Resources/ để app TỰ ĐỦ (không cần repo hay
+# Node hệ thống trên máy chạy).
 # Dùng: client/scripts/bundle-engine.sh <đường-dẫn-VFlow.app> [danh tính ký, mặc định "-" = ad-hoc]
 # Gọi từ build-app.sh (mặc định có bundle); build-app.sh --no-bundle bỏ qua script này.
 set -euo pipefail
@@ -89,6 +90,12 @@ cp "$NODE_EXTRACT_DIR/bin/node" "$ENGINE_DEST/node/bin/node"
 chmod +x "$ENGINE_DEST/node/bin/node"
 
 # ── 5. Model zipformer-vi-30m từ ~/.vflow/models (đã kiểm checksum theo manifest; KHÔNG tải lại) ──
+# VFLOW_BUNDLE_MODEL=0 (build-app.sh --no-model): bản công khai KHÔNG kèm model (giấy phép CC-BY-NC-ND-4.0
+# cấm phát hành lại/thương mại) — bỏ cả bước này nên máy dựng không cần có sẵn ~/.vflow/models.
+if [ "${VFLOW_BUNDLE_MODEL:-1}" != "1" ]; then
+  echo "• model ${MODEL_ID}: KHÔNG đóng gói (VFLOW_BUNDLE_MODEL=0 — bản công khai; app sẽ xin tải khi cần)"
+  rm -rf "$RES/models"
+else
 echo "• model ${MODEL_ID}…"
 SRC_MODEL="$HOME/.vflow/models/$MODEL_ID"
 if [ ! -f "$SRC_MODEL/manifest.json" ]; then
@@ -112,6 +119,7 @@ for role, f in m["files"].items():
         sys.exit(1)
 print(f"  sha256 OK: {len(m['files'])} tệp")
 PYEOF
+fi
 
 # ── 6. LICENSES/ ────────────────────────────────────────────────────────────────────────────────
 echo "• LICENSES…"
@@ -131,6 +139,13 @@ https://creativecommons.org/licenses/by-nc-nd/4.0/
 CHỈ DÙNG CÁ NHÂN, PHI THƯƠNG MẠI. Không được sửa đổi/phân phối lại dưới giấy phép khác
 (ND = NoDerivatives). Xem manifest.json cạnh model trong bundle để biết checksum/nguồn gốc từng tệp.
 EOF
+if [ "${VFLOW_BUNDLE_MODEL:-1}" != "1" ]; then
+  cat >> "$LIC/MODEL-ZIPFORMER-VI-30M.txt" <<'EOF'
+
+BẢN DỰNG NÀY KHÔNG KÈM MODEL. Model KHÔNG nằm trong gói phát hành của vflow; app chỉ tải nó về máy của
+người dùng (~/.vflow/models) SAU KHI người dùng đọc giấy phép ở trên và bấm đồng ý.
+EOF
+fi
 
 # ── 7. Ký MỌI nhị phân lồng nhau (cùng danh tính truyền vào — ổn định nếu có, ad-hoc nếu không) ──
 echo "• ký nhị phân lồng nhau (danh tính: $SIGN_IDENTITY)…"

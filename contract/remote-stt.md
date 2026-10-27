@@ -1,8 +1,8 @@
 # Hợp đồng STT từ xa (v0.1)
 
-Máy chủ STT từ xa (ví dụ PhoWhisper trên `gpu-host`) chỉ làm một việc: nhận âm thanh, trả chữ thô. Từ điển, chế độ, viết lại do engine vflow trên Mac làm.
+Máy chủ STT từ xa (ví dụ PhoWhisper trên một máy GPU `gpu-host`) chỉ làm một việc: nhận âm thanh, trả chữ thô. Từ điển, chế độ, viết lại do engine vflow trên Mac làm.
 
-- Chỉ nghe `127.0.0.1` trên máy chủ từ xa. Mac gọi qua **SSH tunnel** (`ssh -N -L 7612:127.0.0.1:7612 gpu-host`), không mở cổng ra Internet, không dùng Tailscale/Cloudflare tunnel.
+- Chỉ nghe `127.0.0.1` trên máy chủ từ xa. Mac gọi qua **SSH tunnel** (`ssh -N -L 7612:127.0.0.1:7612 gpu-host`, với `gpu-host` là alias SSH của máy chủ), không mở cổng ra Internet, không dùng Tailscale/Cloudflare tunnel.
 - Xác thực: header `Authorization: Bearer <token>`; token do người dùng đặt khi chạy server (biến môi trường `VFLOW_REMOTE_TOKEN` hoặc tệp quyền 0600), không nằm trong repo/log.
 
 ## GET /healthz
