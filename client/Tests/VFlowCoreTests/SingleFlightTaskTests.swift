@@ -9,10 +9,25 @@ import Testing
 @Suite struct SingleFlightTaskTests {
     /// Cổng điều khiển tay: `resume()` mới cho tác vụ bên trong `operation` hoàn tất — mô phỏng
     /// "lượt cũ chậm trả lời, lượt mới bấm trước" mà không cần `Task.sleep` thật (nhanh, không cờ).
+    /// Bằng chứng đỏ (đã ĐO THẬT — không suy đoán): bản trước lưu CHỈ một `continuation?` — nếu
+    /// `resume()` được gọi TRƯỚC khi `wait()` kịp chạy (đúng thứ tự xảy ra ở
+    /// `isRunningReflectsInFlightState` dưới: `resume()` gọi NGAY sau `t.run(...)` trong khi Task
+    /// mới tạo còn chưa được lên lịch chạy nên `wait()` chưa gọi tới), tín hiệu đó bị MẤT (continuation
+    /// còn `nil` nên `resume()` không làm gì) — `wait()` chạy SAU sẽ tạo continuation MỚI và treo mãi vì
+    /// không còn ai resume nó nữa. Treo một test `@MainActor` làm toàn bộ `swift test` không bao giờ
+    /// thoát (đã tái hiện: `swift test --filter SingleFlightTaskTests` treo > 3 phút, CPU ~0%, main
+    /// thread kẹt ở `mach_msg2_trap`/idle run loop — xem báo cáo V6). Phải nhớ tín hiệu "đến trước"
+    /// bằng cờ `signaled`, giống semaphore một chỗ chứa, không phải Optional continuation trần.
     final class Gate: @unchecked Sendable {
         private var continuation: CheckedContinuation<Void, Never>?
-        func wait() async { await withCheckedContinuation { self.continuation = $0 } }
-        func resume() { continuation?.resume(); continuation = nil }
+        private var signaled = false
+        func wait() async {
+            if signaled { signaled = false; return }
+            await withCheckedContinuation { self.continuation = $0 }
+        }
+        func resume() {
+            if let c = continuation { continuation = nil; c.resume() } else { signaled = true }
+        }
     }
 
     @Test func deliversResultWhenNotCancelled() async {

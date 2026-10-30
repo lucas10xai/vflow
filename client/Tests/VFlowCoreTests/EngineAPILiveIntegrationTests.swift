@@ -38,12 +38,25 @@ struct EngineAPILiveIntegrationTests {
         _ = try EngineAPI.parseDictionarySuggestions(status: status, data: data).get()
     }
 
+    /// Bằng chứng đỏ (V6, đo thật): bản trước kiểm `!text.contains("\"token\"")` trên TOÀN văn bản
+    /// export — vỡ THẬT khi chạy với engine thật vì `config/dictionary.seed.json` có mục từ điển hợp
+    /// lệ `{"term":"token",...}` (từ vựng kỹ thuật bình thường, như "access token" — không phải khoá
+    /// bí mật). Chuỗi "token" trong NỘI DUNG do người dùng tự thêm vào từ điển/lịch sử là dữ liệu hợp
+    /// lệ, không phải rò rỉ — khoá bí mật chỉ có thể lộ qua trường CẤU HÌNH (`settings`), không bao
+    /// giờ qua từ điển/snippets/lịch sử. Kiểm đúng chỗ: `settings` không có khoá nào tên `token`/chứa
+    /// `key`, và object GỐC không có trường `token` (đúng hình dạng export thật đã xác nhận bằng tay).
     @Test func exportIsValidAndContainsNoSecrets() async throws {
         let (data, status) = try await LiveEngine.get("/v1/export?include_history=1")
         let saved = try EngineAPI.validateExportResponse(status: status, data: data).get()
         let text = String(decoding: saved, as: UTF8.self).lowercased()
         #expect(!text.contains("rewrite.key"))
-        #expect(!text.contains("\"token\""))
+        let obj = try #require(try JSONSerialization.jsonObject(with: saved) as? [String: Any])
+        #expect(obj["token"] == nil, "object gốc không được có trường token")
+        let settings = try #require(obj["settings"] as? [String: Any])
+        for key in settings.keys {
+            #expect(!key.lowercased().contains("token") && !key.lowercased().contains("key"),
+                     "settings không được có khoá liên quan bí mật: \(key)")
+        }
     }
 
     @Test func importRejectsWholePackageWhenOnePartIsBroken() async throws {
