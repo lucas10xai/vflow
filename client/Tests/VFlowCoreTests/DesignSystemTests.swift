@@ -38,7 +38,7 @@ import Testing
     // MARK: ModeCloudLabel — khớp contract/engine-api.md (tidy, email gửi đám mây; còn lại trong máy)
 
     @Test func modeCloudLabelMatchesContractForEachMode() {
-        let expectedCloud: Set<DictationMode> = [.tidy, .email]
+        let expectedCloud: Set<DictationMode> = [.tidy, .email, .translate]
         for m in DictationMode.allCases {
             let expected = expectedCloud.contains(m) ? ModeCloudLabel.cloud : ModeCloudLabel.local
             #expect(ModeCloudLabel.text(m) == expected, "chế độ \(m) phải có nhãn \"\(expected)\"")

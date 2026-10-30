@@ -101,7 +101,14 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         for m in DictationMode.allCases {
             let it = action(m.title, symbol: m.sendsTextToCloud ? "cloud" : "lock.fill") { [weak controller] in controller?.mode = m }
             it.state = model.mode == m ? .on : .off
+            if let reason = ModeAvailability.disabledReason(m, cloudLlm: controller.cachedSettings.cloudLlm) {
+                it.isEnabled = false
+                it.toolTip = reason
+            }
             menu.addItem(it)
+        }
+        if !controller.cachedSettings.cloudLlm {
+            menu.addItem(action("Bật dịch ở Cài đặt…", symbol: "gearshape") { [weak controller] in controller?.openSettingsWindow(tab: .advanced) })
         }
         menu.addItem(.separator())
 

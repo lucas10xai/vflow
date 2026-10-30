@@ -18,6 +18,9 @@ struct VoiceSettingsTab: View {
     @State private var cloudLlm = true
     @State private var contextSymbols = true
     @State private var actionsEnabled = true
+    @State private var sttLanguage: SpeechLanguage = .vietnamese
+    @State private var supportedLanguages: [String]? = nil
+    @State private var autoDetect: Bool? = nil
     @State private var holdKey: HoldModifierKey = .leftOption
     @State private var commandKey: HoldModifierKey = .leftControl
     @State private var reinsertPreset: ReinsertChordPreset = .optionCommandV
@@ -54,6 +57,17 @@ struct VoiceSettingsTab: View {
     }
 
     @ViewBuilder private var form: some View {
+        Section("Ngôn ngữ khi nói") {
+            Picker("Ngôn ngữ khi nói", selection: $sttLanguage) {
+                ForEach(SpeechLanguage.allCases, id: \.self) { language in
+                    Text(language.title).tag(language).disabled(!languageEnabled(language))
+                }
+            }
+            .onChange(of: sttLanguage) { _, value in Task { await save(.init(sttLanguage: value)) } }
+            if let reason = disabledLanguageReason {
+                Text(reason).font(.footnote).foregroundStyle(Theme.warningText)
+            }
+        }
         Section("Lệnh dấu câu bằng giọng") {
             Toggle("Ra lệnh dấu câu bằng giọng", isOn: $voicePunctuation)
                 .onChange(of: voicePunctuation) { _, v in Task { await save(.init(voicePunctuation: v)) } }
@@ -132,6 +146,18 @@ struct VoiceSettingsTab: View {
         cloudLlm = s.cloudLlm
         contextSymbols = s.contextSymbols
         actionsEnabled = s.actionsEnabled
+        sttLanguage = s.sttLanguage
+        supportedLanguages = controller.engineLanguages
+        autoDetect = controller.engineAutoDetect
+    }
+
+    private func languageEnabled(_ language: SpeechLanguage) -> Bool {
+        SpeechLanguageAvailability.isEnabled(language, supportedLanguages: supportedLanguages, autoDetect: autoDetect)
+    }
+
+    private var disabledLanguageReason: String? {
+        SpeechLanguageAvailability.disabledReason(.english, supportedLanguages: supportedLanguages, autoDetect: autoDetect)
+            ?? SpeechLanguageAvailability.disabledReason(.automatic, supportedLanguages: supportedLanguages, autoDetect: autoDetect)
     }
 
     private func save(_ patch: SettingsPatch) async {

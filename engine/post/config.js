@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
-export const MODES = ['normal', 'clean', 'email', 'tidy', 'dev', 'auto'];
+export const MODES = ['normal', 'clean', 'email', 'tidy', 'translate', 'dev', 'auto'];
 
 /** Chế độ hợp lệ cho auto.apps (không bao gồm "auto" — tránh đệ quy). */
 const AUTO_TARGET_MODES = ['normal', 'clean', 'email', 'tidy', 'dev'];

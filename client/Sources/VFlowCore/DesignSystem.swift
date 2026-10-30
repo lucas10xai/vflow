@@ -63,10 +63,27 @@ public enum ContrastText: Sendable {
 /// tay danh sách chế độ nào gửi đám mây.
 public enum ModeCloudLabel {
     public static let local = "Trong máy"
-    public static let cloud = "Gửi chữ qua 9Router"
+    public static let cloud = "Gửi chữ qua máy chủ của bạn"
 
     public static func text(_ mode: DictationMode) -> String {
         mode.sendsTextToCloud ? cloud : local
+    }
+}
+
+/// Chế độ nào bị VÔ HIỆU HOÁ (không cho chọn, kể cả im lặng) khi `cloud_llm` tắt — nguồn DUY NHẤT
+/// dùng ở cả `OverviewView` (lưới chế độ) và `StatusMenu` (menu thanh trạng thái/Dock) để hai nơi
+/// không bao giờ lệch nhau. CHỈ `translate`: khác với `tidy`/`email` (vẫn CHỌN được, chỉ rơi về kết
+/// quả cục bộ kèm `degraded_reason:"cloud_disabled"` — xem contract), Dịch không có bản cục bộ nào
+/// hợp lý khi tắt đám mây nên phải chặn NGAY ở UI, không để người dùng chọn rồi mới báo lỗi.
+public enum ModeAvailability {
+    /// `nil` ⇒ chọn được bình thường; chuỗi ⇒ lý do vô hiệu hoá (hiện cạnh ô chọn/tooltip).
+    public static func disabledReason(_ mode: DictationMode, cloudLlm: Bool) -> String? {
+        guard mode == .translate, !cloudLlm else { return nil }
+        return "Đám mây đang tắt — bật ở Cài đặt › Nâng cao"
+    }
+
+    public static func isDisabled(_ mode: DictationMode, cloudLlm: Bool) -> Bool {
+        disabledReason(mode, cloudLlm: cloudLlm) != nil
     }
 }
 

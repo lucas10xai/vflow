@@ -10,10 +10,10 @@ import path from 'node:path';
  *   sha256: string|null, sha256Source: string|null, size?: number,
  * }} SourceFile
  * @typedef {{
- *   id: string, kind: 'local', engine: 'offline-transducer'|'online-transducer',
+ *   id: string, kind: 'local', engine: 'offline-transducer'|'online-transducer'|'whisper'|'sense-voice',
  *   title: string, license: string, homepage: string,
  *   source: { type: 'archive', file: SourceFile, root: string } | { type: 'files', files: SourceFile[] },
- *   files: Record<'encoder'|'decoder'|'joiner'|'tokens', RegExp>,
+ *   files: Record<string, RegExp>, languages?: string[], autoDetect?: boolean,
  *   keepDirs?: string[],
  * }} LocalModelSpec
  * @typedef {{ id: string, kind: 'remote', title: string, configKey: string, defaultUrl: string }} RemoteModelSpec
@@ -92,6 +92,35 @@ export const LOCAL_MODELS = [
     },
     files: { encoder: /^encoder.*\.onnx$/, decoder: /^decoder.*\.onnx$/, joiner: /^joiner.*\.onnx$/, tokens: /^tokens\.txt$/ },
   },
+  {
+    id: 'whisper-tiny-multilingual', kind: 'local', engine: 'whisper',
+    title: 'Whisper tiny đa ngôn ngữ (sherpa-onnx, CPU)', license: 'MIT (OpenAI Whisper)',
+    homepage: 'https://k2-fsa.github.io/sherpa/onnx/pretrained_models/whisper/tiny.html',
+    languages: ['vi', 'en', 'ja', 'ko', 'zh', 'fr', 'de', 'es', 'th'], autoDetect: true,
+    source: { type: 'archive', root: 'sherpa-onnx-whisper-tiny', file: {
+      name: 'sherpa-onnx-whisper-tiny.tar.bz2', url: `${SHERPA_RELEASE}/sherpa-onnx-whisper-tiny.tar.bz2`, size: 116204861,
+      // GitHub không công bố digest cho asset này (đã kiểm qua API releases, trường `digest` = null).
+      // vflow tự tải và băm ở revision ghim trên (xem báo cáo E5); không có checksum gốc để đối chiếu.
+      sha256: 'c46116994e539aa165266d96b325252728429c12535eb9d8b6a2b10f129e66b1',
+      sha256Source: 'vflow-pinned (không có checksum gốc)',
+    } },
+    files: { encoder: /encoder.*\.onnx$/, decoder: /decoder.*\.onnx$/, tokens: /tokens\.txt$/ },
+    keepDirs: ['test_wavs'],
+  },
+  {
+    id: 'sense-voice-multilingual', kind: 'local', engine: 'sense-voice',
+    title: 'SenseVoice zh/en/ja/ko/yue (sherpa-onnx, CPU)', license: 'Apache-2.0 (FunASR SenseVoice)',
+    homepage: 'https://k2-fsa.github.io/sherpa/onnx/sense-voice/pretrained.html',
+    languages: ['en', 'ja', 'ko', 'zh', 'yue'], autoDetect: true,
+    source: { type: 'archive', root: 'sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17', file: {
+      name: 'sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17.tar.bz2', url: `${SHERPA_RELEASE}/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17.tar.bz2`, size: 1047870769,
+      // GitHub không công bố digest (đã kiểm qua API releases). Gói ~1 GB: vượt giới hạn RAM/thời
+      // gian an toàn để tự tải và băm trong phiên này (xem báo cáo E5) ⇒ chưa có checksum đã xác
+      // minh. `models pull` phải từ chối model này cho đến khi ai đó tải và ghim hash thật.
+      sha256: null, sha256Source: 'upstream_digest_unavailable',
+    } },
+    files: { model: /^model.*\.onnx$/, tokens: /tokens\.txt$/ },
+  },
 ];
 
 /** @type {RemoteModelSpec[]} */
@@ -110,6 +139,16 @@ export const DEFAULT_MODEL = 'zipformer-vi-30m';
 /** @param {string} id */
 export function findModel(id) {
   return LOCAL_MODELS.find((m) => m.id === id) ?? REMOTE_MODELS.find((m) => m.id === id) ?? null;
+}
+
+/**
+ * Model cục bộ chỉ được `models pull` khi MỌI tệp nguồn có sha256 đã biết (gốc upstream hoặc
+ * vflow tự băm và ghim). Thiếu checksum ⇒ không tải, để không bỏ qua kiểm toàn vẹn.
+ * @param {LocalModelSpec} spec
+ */
+export function hasVerifiedChecksum(spec) {
+  const files = spec.source.type === 'archive' ? [spec.source.file] : spec.source.files;
+  return files.every((f) => typeof f.sha256 === 'string' && f.sha256.length > 0);
 }
 
 export const ALL_MODEL_IDS = [...LOCAL_MODELS, ...REMOTE_MODELS].map((m) => m.id);

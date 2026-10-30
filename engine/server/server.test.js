@@ -43,16 +43,37 @@ function fakeProviders() {
   return { calls, factory };
 }
 
-function fakePost({ rewriteFails = false } = {}) {
+/** Dịch giả: văn bản điều khiển kịch bản qua các chuỗi đánh dấu (xin-…), không gọi mạng thật. */
+function fakeTranslate({ cloudLlm = true } = {}) {
+  return async ({ text, target }) => {
+    if (!cloudLlm) return { text: null, error: 'cloud_disabled' };
+    if (text.includes('xin-timeout')) return { text: null, error: 'timeout' };
+    if (text.includes('xin-loi')) return { text: null, error: 'http_500' };
+    if (text.includes('xin-guard')) return { text: null, error: 'translate_guard' };
+    return { text: `[${target}] ${text}`, error: null };
+  };
+}
+
+function fakePost({ rewriteFails = false, cloudLlm = true } = {}) {
   const state = { entries: [{ term: 'deploy', spoken: ['đi plôi'] }], lastReplace: null };
+  const translate = fakeTranslate({ cloudLlm });
   return {
     state,
     async process({ textRaw, mode }) {
       const text = textRaw.replace('đi plôi', 'deploy');
       const applied = text === textRaw ? [] : [{ type: 'dictionary', from: 'đi plôi', to: 'deploy' }];
       if (mode === 'email' && rewriteFails) return { text, mode, applied, rewrite: { used: false, error: 'timeout' } };
+      if (mode === 'translate') {
+        const r = await translate({ text, target: 'en' });
+        if (r.error !== null) {
+          const degradedReason = r.error === 'translate_guard' || r.error === 'cloud_disabled' ? r.error : (r.error === 'timeout' ? 'llm_timeout' : 'llm_error');
+          return { text: '', mode, applied, rewrite: { used: false, error: r.error }, degraded: true, degraded_reason: degradedReason };
+        }
+        return { text: r.text, mode, applied, rewrite: { used: true, error: null }, degraded: false, degraded_reason: null };
+      }
       return { text, mode, applied, rewrite: { used: false, error: null } };
     },
+    translate: async ({ text, target, formality }) => translate({ text, target, formality }),
     dictionary: {
       list: () => ({ entries: state.entries }),
       replaceAll: (entries) => {
@@ -161,7 +182,13 @@ test('GET /healthz không cần token; model chưa dùng được luôn có reas
   assert.equal(r.json.ok, true);
   assert.equal(r.json.version, '0.1.0');
   const local = r.json.models.find((m) => m.id === 'zipformer-vi-30m');
-  assert.deepEqual(local, { id: 'zipformer-vi-30m', kind: 'local', loaded: false, reason: 'not_downloaded' });
+  assert.deepEqual(local, { id: 'zipformer-vi-30m', kind: 'local', loaded: false, reason: 'not_downloaded', languages: ['vi'], auto_detect: false });
+  const whisper = r.json.models.find((m) => m.id === 'whisper-tiny-multilingual');
+  assert.deepEqual(whisper.languages.slice(0, 2), ['vi', 'en']);
+  assert.equal(whisper.auto_detect, true);
+  assert.equal(whisper.reason, 'not_downloaded', 'whisper có checksum đã xác minh nên chỉ thiếu bước tải, không bị chặn');
+  const senseVoice = r.json.models.find((m) => m.id === 'sense-voice-multilingual');
+  assert.equal(senseVoice.reason, 'checksum_unverified', 'chưa có checksum đã xác minh ⇒ không gợi ý pull như bình thường');
   const remote = r.json.models.find((m) => m.id === 'phowhisper-large');
   assert.equal(remote.reason, 'missing_token');
   for (const m of r.json.models) if (!m.loaded) assert.ok(m.reason, `${m.id} thiếu reason`);
@@ -479,6 +506,55 @@ test('GET/PUT /v1/settings: chuyển tiếp, hiệu lực ngay, kiểm giá tr�
   assert.equal(notObject.status, 400);
   // Đặt lại để không ảnh hưởng các test command phía dưới.
   await request(fullPort, { method: 'PUT', path: '/v1/settings', headers: auth(), body: JSON.stringify({ llm_timeout_ms: 8000, cloud_llm: true }) });
+});
+
+test('POST /v1/translate: thành công, bad_request (thiếu trường/target sai/formality sai), 401 không token, cloud_disabled, guard/timeout/lỗi ⇒ 200 degraded', async (t) => {
+  const stt = createStt({ home: tmp, providerFactory: fakes.factory, config: { default_model: 'fake' } });
+  const srv = createServer({ stt, post: fakePost(), token, log: () => {} });
+  const p = await listen(srv, 0);
+  t.after(() => new Promise((r) => srv.close(r)));
+
+  const ok = await request(p, { method: 'POST', path: '/v1/translate', headers: auth(), body: JSON.stringify({ text: 'xin chào', target: 'en' }) });
+  assert.equal(ok.status, 200, ok.text);
+  assert.deepEqual(ok.json, { text: '[en] xin chào', degraded: false, degraded_reason: null });
+
+  for (const body of [{}, { text: '' }, { text: 'a' }, { text: 'a', target: '' }, { text: 'a', target: 'english' }, { text: 'a', target: 'en', formality: 'angry' }]) {
+    const r = await request(p, { method: 'POST', path: '/v1/translate', headers: auth(), body: JSON.stringify(body) });
+    assert.equal(r.status, 400, JSON.stringify(body));
+    assert.equal(r.json.error.code, 'bad_request', JSON.stringify(body));
+  }
+
+  const noToken = await request(p, { method: 'POST', path: '/v1/translate', body: JSON.stringify({ text: 'a', target: 'en' }) });
+  assert.equal(noToken.status, 401);
+
+  const guard = await request(p, { method: 'POST', path: '/v1/translate', headers: auth(), body: JSON.stringify({ text: 'xin-guard', target: 'en' }) });
+  assert.equal(guard.status, 200);
+  assert.deepEqual(guard.json, { text: null, degraded: true, degraded_reason: 'translate_guard' });
+
+  const to = await request(p, { method: 'POST', path: '/v1/translate', headers: auth(), body: JSON.stringify({ text: 'xin-timeout', target: 'en' }) });
+  assert.equal(to.status, 200);
+  assert.deepEqual(to.json, { text: null, degraded: true, degraded_reason: 'llm_timeout' });
+
+  const err = await request(p, { method: 'POST', path: '/v1/translate', headers: auth(), body: JSON.stringify({ text: 'xin-loi', target: 'en' }) });
+  assert.deepEqual(err.json, { text: null, degraded: true, degraded_reason: 'llm_error' });
+
+  const stt2 = createStt({ home: tmp, providerFactory: fakes.factory, config: { default_model: 'fake' } });
+  const srvOff = createServer({ stt: stt2, post: fakePost({ cloudLlm: false }), token, log: () => {} });
+  const pOff = await listen(srvOff, 0);
+  t.after(() => new Promise((r) => srvOff.close(r)));
+  const disabled = await request(pOff, { method: 'POST', path: '/v1/translate', headers: auth(), body: JSON.stringify({ text: 'a', target: 'en' }) });
+  assert.equal(disabled.status, 503);
+  assert.equal(disabled.json.error.code, 'cloud_disabled');
+});
+
+test('POST /v1/transcribe?mode=translate: text qua từ điển rồi dịch; lỗi dịch ⇒ text rỗng (KHÔNG chèn nguyên văn), degraded đúng', async () => {
+  const before = fakes.calls.length;
+  const ok = await request(port, { method: 'POST', path: '/v1/transcribe?mode=translate', headers: { ...auth(), 'content-type': 'audio/wav' }, body: wav(16000, 1) });
+  assert.equal(ok.status, 200, ok.text);
+  assert.equal(ok.json.mode, 'translate');
+  assert.equal(ok.json.text, '[en] anh deploy bản mới nhé');
+  assert.equal(ok.json.post.degraded, false);
+  assert.equal(fakes.calls.length, before + 1);
 });
 
 test('POST /v1/command: edit khi có selection, draft khi không, mã lỗi CommandError ⇒ HTTP đúng bảng, lỗi khác ⇒ internal không lộ chi tiết', async () => {

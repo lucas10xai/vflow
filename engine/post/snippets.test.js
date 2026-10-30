@@ -50,6 +50,21 @@ test('cụm trigger dài nhất thắng khi có nhiều trigger là tiền tố 
   assert.equal(r2.text, `${LINK_X.text} nhé`);
 });
 
+test('trigger tiếng Anh (vd STT đa ngôn ngữ): khớp cả câu và "chèn <trigger>", không phân biệt hoa/thường', (t) => {
+  const STANDUP = { trigger: 'standup link', text: 'https://meet.example/standup' };
+  const { path } = setup(t, [STANDUP]);
+  const store = createSnippetStore({ path });
+  for (const spoken of ['standup link', 'Standup Link', 'STANDUP LINK']) {
+    const r = store.expand(spoken);
+    assert.equal(r.matched, true, spoken);
+    assert.equal(r.text, STANDUP.text, spoken);
+  }
+  assert.equal(store.expand('Please chèn Standup Link before the call').text, `Please ${STANDUP.text} before the call`);
+  // Dính liền chữ khác (không phải một từ riêng) ⇒ không mở rộng.
+  const noExpand = store.expand('standuplink please');
+  assert.equal(noExpand.matched, false);
+});
+
 test('không mở rộng ở dạng khác: trigger là một phần câu (không "chèn", không trùng cả câu), hoặc dính liền chữ khác', (t) => {
   const { path } = setup(t, [LINK]);
   const store = createSnippetStore({ path });

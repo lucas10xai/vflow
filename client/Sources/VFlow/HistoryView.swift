@@ -31,6 +31,7 @@ struct HistoryView: View {
     @State private var acceptedTerms: Set<String> = []
     @State private var selection: String?
     @State private var addDictionaryFor: HistoryEntry?
+    @State private var translatingEntry: HistoryEntry?
 
     private var groups: [HistoryGrouping.DayGroup] {
         HistoryGrouping.grouped(entries: entries, now: Date())
@@ -57,6 +58,7 @@ struct HistoryView: View {
         .sheet(item: $addDictionaryFor) { entry in
             AddToDictionarySheet(controller: controller, prefill: entry.text) { addDictionaryFor = nil }
         }
+        .sheet(item: $translatingEntry) { entry in TranslationSheet(controller: controller, entry: entry) { translatingEntry = nil } }
         .alert("Xoá toàn bộ lịch sử?", isPresented: $confirmClearAll) {
             Button("Xoá", role: .destructive) { clearAll() }
             Button("Huỷ", role: .cancel) {}
@@ -111,6 +113,7 @@ struct HistoryView: View {
                                 .contextMenu {
                                     Button("Sao chép") { copy(entry.text) }
                                     Button("Sửa…") { beginEdit(entry) }
+                                    Button("Dịch câu này…") { translatingEntry = entry }
                                     Button("Thêm vào từ điển…") { addDictionaryFor = entry }
                                     if entry.hasAudio {
                                         Button("Xoá âm thanh của câu này") { deleteAudio(entry) }

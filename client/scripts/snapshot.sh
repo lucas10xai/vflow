@@ -122,6 +122,10 @@ echo "==> Chụp (ngoài màn hình — xem client/README.md)…"
 for appearance in light dark; do
   capture "$HOME_FULL"  granted tongquan            "$appearance" "overview_permissions-ok_$appearance"
   capture "$HOME_EMPTY" denied  tongquan            "$appearance" "overview_permissions-missing_$appearance"
+  # V5: lưới chế độ với Dịch đã chọn + ô chọn ngôn ngữ đích/mức trang trọng (chỉ hiện ở chế độ Dịch).
+  capture "$HOME_FULL"  granted "tongquan:dich"     "$appearance" "overview_translate_$appearance"
+  # V5: sheet "Dịch câu này" dựng độc lập (không qua .sheet thật — xem AppController.captureTranslationSheetOffscreen).
+  capture "$HOME_FULL"  granted "dich-sheet"        "$appearance" "translate_sheet_$appearance"
   capture "$HOME_FULL"      granted thongke         "$appearance" "stats_with-data_$appearance"
   capture "$HOME_EMPTY"     granted thongke         "$appearance" "stats_empty_$appearance"
   capture "$HOME_STATS_OFF" granted thongke         "$appearance" "stats_disabled_$appearance"
@@ -137,11 +141,12 @@ for appearance in light dark; do
   capture "$HOME_FULL"  granted "caidat:data"            "$appearance" "settings_data_$appearance"
   capture "$HOME_FULL"  granted "caidat:advanced"        "$appearance" "settings_advanced_$appearance"
   capture "$HOME_EMPTY" denied  welcome             "$appearance" "welcome_$appearance"
-  capture_overlay ghi  "$appearance" "hud_listening_$appearance"
-  capture_overlay khoa "$appearance" "hud_locked_$appearance"
-  capture_overlay dich "$appearance" "hud_transcribing_$appearance"
-  capture_overlay xong "$appearance" "hud_done_$appearance"
-  capture_overlay loi  "$appearance" "hud_error_$appearance"
+  capture_overlay ghi      "$appearance" "hud_listening_$appearance"
+  capture_overlay khoa     "$appearance" "hud_locked_$appearance"
+  capture_overlay dich-nghe "$appearance" "hud_translate-listening_$appearance"
+  capture_overlay dich     "$appearance" "hud_transcribing_$appearance"
+  capture_overlay xong     "$appearance" "hud_done_$appearance"
+  capture_overlay loi      "$appearance" "hud_error_$appearance"
 done
 
 echo "==> Tự kiểm: không tiến trình VFlow nào còn sống, không cửa sổ on-screen (xem log từng ảnh ở trên — mỗi lần chụp tự in VFLOW_OFFSCREEN_CHECK)."

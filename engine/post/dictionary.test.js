@@ -182,6 +182,23 @@ test('hạt giống: biến thể một âm tiết không trùng từ tiếng Vi
   }
 });
 
+test('khớp văn bản tiếng Anh (vd STT đa ngôn ngữ như Whisper trả đúng chữ Anh), không phân biệt hoa/thường, không phá từ', async (t) => {
+  const entries = [
+    ...ENTRIES,
+    { term: 'Kubernetes', spoken: ['kubernetes', 'k8s'] },
+    { term: 'pull request', spoken: ['pull request', 'pr'] },
+  ];
+  const { p } = setup(t, entries);
+  // Hoa toàn bộ (kiểu Whisper): vẫn khớp, đầu câu viết hoa theo thuật ngữ.
+  assert.equal((await p.process({ textRaw: 'KUBERNETES cluster is ready' })).text, 'Kubernetes cluster is ready');
+  // Biến thể viết tắt, hoa lẫn với số: K8s vẫn khớp.
+  assert.equal((await p.process({ textRaw: 'deploy to K8s now' })).text, 'deploy to Kubernetes now');
+  // Nhiều từ, chữ thường.
+  assert.equal((await p.process({ textRaw: 'please review the pr' })).text, 'please review the pull request');
+  // KHÔNG phá từ: "kubernetes-cli"/"pr." (dính URL) hay "pr" là một phần của từ khác không bị thay nhầm.
+  assert.equal((await p.process({ textRaw: 'kubernetes-cli and reporting are different things' })).text, 'kubernetes-cli and reporting are different things');
+});
+
 test('applyPreview: thay đúng như apply() nhưng KHÔNG tăng uses/last_used, KHÔNG ghi tệp (dùng cho /v1/partial)', (t) => {
   const { p, dictionaryPath } = setup(t, ENTRIES);
   const before = readFileSync(dictionaryPath, 'utf8');

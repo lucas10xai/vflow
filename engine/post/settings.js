@@ -29,6 +29,9 @@ export const DEFAULT_SETTINGS = Object.freeze({
   audio_history: false,
   audio_history_mb: 200,
   audio_history_days: 7,
+  stt_language: 'vi',
+  translate_target: 'en',
+  translate_formality: 'neutral',
 });
 
 const SETTINGS_KEYS = Object.keys(DEFAULT_SETTINGS);
@@ -39,6 +42,7 @@ export const BUNDLE_ID_RE = /^[A-Za-z][A-Za-z0-9]*(\.[A-Za-z0-9][A-Za-z0-9_-]*)+
 /** Chế độ hợp lệ cho một luật app_rules (không có "auto" — tránh đệ quy). */
 export const APP_RULE_MODES = ['normal', 'clean', 'dev', 'tidy', 'email'];
 export const TONES = ['neutral', 'formal', 'casual'];
+export const STT_LANGUAGES = ['vi', 'en', 'auto'];
 
 export class SettingsError extends Error {
   /** @param {string} message */
@@ -96,6 +100,9 @@ function validateValues(v) {
   if (!Number.isInteger(v.audio_history_days) || v.audio_history_days < 1 || v.audio_history_days > 90) {
     throw new SettingsError('audio_history_days phải là số nguyên 1–90');
   }
+  if (!STT_LANGUAGES.includes(v.stt_language)) throw new SettingsError(`stt_language phải là một trong: ${STT_LANGUAGES.join(', ')}`);
+  if (typeof v.translate_target !== 'string' || !/^[a-z]{2,3}$/i.test(v.translate_target)) throw new SettingsError('translate_target phải là mã ISO 2–3 chữ cái');
+  if (!TONES.includes(v.translate_formality)) throw new SettingsError(`translate_formality phải là một trong: ${TONES.join(', ')}`);
   return v;
 }
 

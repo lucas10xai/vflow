@@ -2,7 +2,7 @@
  * Bộ quản lý STT: chọn provider theo id model, tải lười, báo trạng thái cho /healthz.
  * Model yêu cầu không dùng được ⇒ `model_unavailable` có lý do; KHÔNG tự chuyển sang model khác.
  */
-import { DEFAULT_MODEL, LOCAL_MODELS, REMOTE_MODELS, findModel } from './registry.js';
+import { DEFAULT_MODEL, LOCAL_MODELS, REMOTE_MODELS, findModel, hasVerifiedChecksum } from './registry.js';
 import { createLocalProvider, loadSherpa } from './local.js';
 import { createRemoteProvider } from './remote.js';
 import { resolveModelFiles } from './models.js';
@@ -74,9 +74,21 @@ export function createStt({ home, config = {}, env = process.env, fetchImpl, she
 
     /**
      * @param {string} id
-     * @param {{ pcm: Int16Array|Float32Array, sampleRate: number }} input
+     * @param {{ pcm: Int16Array|Float32Array, sampleRate: number, language?: string }} input
      */
     async transcribe(id, input) {
+      // Kiểm năng lực ngôn ngữ TRƯỚC khi tải model (ensure) — model không khai
+      // `languages`/`autoDetect` thì coi như chỉ nói được tiếng Việt. Một nơi duy nhất, áp cho
+      // MỌI provider (local/remote/giả trong test), và không lãng phí tải model khi ngôn ngữ sai.
+      const spec = findModel(id);
+      const language = input.language ?? 'vi';
+      const languages = spec?.languages ?? ['vi'];
+      const autoDetect = spec?.autoDetect === true;
+      if (language === 'auto') {
+        if (!autoDetect) throw new SttError('bad_request', `Model "${id}" không hỗ trợ tự nhận ngôn ngữ (auto). Hãy chọn ngôn ngữ cụ thể hoặc đổi model.`);
+      } else if (!languages.includes(language)) {
+        throw new SttError('bad_request', `Model "${id}" không hỗ trợ ngôn ngữ "${language}". Hãy đổi model.`);
+      }
       const p = await ensure(id);
       return p.transcribe(input);
     },
@@ -85,15 +97,20 @@ export function createStt({ home, config = {}, env = process.env, fetchImpl, she
     async status() {
       const out = [];
       for (const spec of LOCAL_MODELS) {
+        const capabilities = { languages: spec.languages ?? ['vi'], auto_detect: spec.autoDetect === true };
         const p = providers.get(spec.id);
-        if (p?.loaded) { out.push({ id: spec.id, kind: 'local', loaded: true }); continue; }
+        if (p?.loaded) { out.push({ id: spec.id, kind: 'local', loaded: true, ...capabilities }); continue; }
         const err = lastError.get(spec.id);
-        if (err) { out.push({ id: spec.id, kind: 'local', loaded: false, reason: err.reason }); continue; }
+        if (err) { out.push({ id: spec.id, kind: 'local', loaded: false, reason: err.reason, ...capabilities }); continue; }
         try {
           await resolveModelFiles(home, spec.id);
-          out.push({ id: spec.id, kind: 'local', loaded: false, reason: 'not_loaded' });
+          out.push({ id: spec.id, kind: 'local', loaded: false, reason: 'not_loaded', ...capabilities });
         } catch (e) {
-          out.push({ id: spec.id, kind: 'local', loaded: false, reason: /** @type {any} */ (e).reason ?? 'internal' });
+          // 'not_downloaded' thường gợi ý chạy `models pull`; nếu model còn thiếu checksum đã xác
+          // minh thì pull sẽ bị chặn ngay, nên báo đúng lý do đó để khỏi gây hiểu lầm.
+          const reason = /** @type {any} */ (e).reason === 'not_downloaded' && !hasVerifiedChecksum(spec)
+            ? 'checksum_unverified' : (/** @type {any} */ (e).reason ?? 'internal');
+          out.push({ id: spec.id, kind: 'local', loaded: false, reason, ...capabilities });
         }
       }
       for (const spec of REMOTE_MODELS) {

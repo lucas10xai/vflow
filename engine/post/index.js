@@ -9,6 +9,7 @@ import { applyVoicePunctuation } from './punctuation.js';
 import { applyContextSymbols } from './contextsymbols.js';
 import { rewriteEmail } from './rewrite.js';
 import { tidyText } from './tidy.js';
+import { translateText } from './translate.js';
 import { runCommand } from './command.js';
 import { suggestCorrections } from './learn.js';
 import { MODES, validateConfig, expandHome } from './config.js';
@@ -102,6 +103,8 @@ export function createPostProcessor({
       context_symbols: s.context_symbols ?? true,
       tone: s.tone ?? 'neutral',
       learn_from_edits: s.learn_from_edits ?? true,
+      translate_target: s.translate_target ?? 'en',
+      translate_formality: s.translate_formality ?? 'neutral',
     };
   }
 
@@ -190,6 +193,16 @@ export function createPostProcessor({
         return { text: r.text, mode: effective, applied: fallbackApplied, rewrite: { used: true, error: null }, actions: act.actions, degraded: false, degraded_reason: null };
       }
 
+      if (effective === 'translate') {
+        const c = cleanRules(vp.text);
+        const r = await translateText({ text: c.text, target: s.translate_target, formality: s.translate_formality, rewrite: cfg.rewrite, settings: s, fetchImpl });
+        if (r.error !== null) {
+          log({ event: 'translate_failed', code: r.error });
+          return { text: '', mode: effective, applied: [...d.applied, ...cs.applied, ...vp.applied, ...c.applied], rewrite: { used: false, error: r.error }, actions: act.actions, degraded: true, degraded_reason: r.error === 'translate_guard' ? 'translate_guard' : mapDegradedReason(r.error) };
+        }
+        return { text: r.text, mode: effective, applied: [...d.applied, ...cs.applied, ...vp.applied, ...c.applied], rewrite: { used: true, error: null }, actions: act.actions, degraded: false, degraded_reason: null };
+      }
+
       // email
       const r = await rewriteEmail({ text: vp.text, rewrite: cfg.rewrite, settings: s, fetchImpl });
       if (r.error !== null) {
@@ -208,6 +221,15 @@ export function createPostProcessor({
     async command({ instruction, selection = '', context = '' }) {
       const s = currentSettings();
       return runCommand({ instruction, selection, context, rewrite: cfg.rewrite, settings: s, fetchImpl });
+    },
+
+    /** Dịch lại một câu lịch sử; không có fallback nguyên văn để tránh chèn bản dịch sai. */
+    async translate({ text, target, formality }) {
+      if (typeof text !== 'string' || text.trim() === '') throw new PostError('text phải là chuỗi không rỗng');
+      const s = currentSettings();
+      const r = await translateText({ text: text.normalize('NFC'), target: target ?? s.translate_target, formality: formality ?? s.translate_formality, rewrite: cfg.rewrite, settings: s, fetchImpl });
+      if (r.error !== null) return { text: null, error: r.error };
+      return r;
     },
 
     dictionary: {

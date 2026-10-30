@@ -34,13 +34,17 @@ export function loadSherpa() {
 }
 
 /**
- * Model zipformer-vi xuất token chữ HOA (bảng token không phân biệt hoa/thường).
- * Đổi về chữ thường để dùng được khi đọc chính tả; không đổi gì khác.
+ * Model transducer (zipformer) xuất token chữ HOA (bảng token không phân biệt hoa/thường) ⇒ đổi về
+ * chữ thường để dùng được khi đọc chính tả. Whisper/SenseVoice đã tự trả hoa/thường và dấu câu
+ * đúng (như bản gốc Whisper) cho MỌI ngôn ngữ kể cả tiếng Việt — không được đụng vào, kể cả khi
+ * `language` yêu cầu là "vi" (bug đã gặp: khoá theo `language` thay vì theo loại engine làm mất
+ * hoa/dấu câu Whisper trả cho câu tiếng Việt).
  * @param {string} text
+ * @param {boolean} rawTransducer `true` khi văn bản đến từ engine transducer thô (zipformer).
  */
-export function normalizeModelText(text) {
+export function normalizeModelText(text, rawTransducer = true) {
   const t = String(text ?? '').replace(/\s+/g, ' ').trim();
-  return t.toLocaleLowerCase('vi');
+  return rawTransducer ? t.toLocaleLowerCase('vi') : t;
 }
 
 const defaultThreads = () => Math.max(1, Math.min(4, Math.floor(os.availableParallelism() / 2)));
@@ -75,15 +79,25 @@ export function createLocalProvider({ home, numThreads = defaultThreads(), sherp
       const { files } = await resolveModelFiles(home, id);
       const lib = sherpa();
       const t0 = performance.now();
-      const modelConfig = {
-        transducer: { encoder: files.encoder, decoder: files.decoder, joiner: files.joiner },
-        tokens: files.tokens, numThreads, provider: 'cpu', debug: 0,
-      };
+      /** @type {any} */
+      const modelConfig = { tokens: files.tokens, numThreads, provider: 'cpu', debug: 0 };
+      if (s.engine === 'offline-transducer' || s.engine === 'online-transducer') {
+        modelConfig.transducer = { encoder: files.encoder, decoder: files.decoder, joiner: files.joiner };
+      } else if (s.engine === 'whisper') {
+        // sherpa-onnx (OfflineWhisperGreedySearchDecoder) coi "auto" là MỘT MÃ NGÔN NGỮ không hợp
+        // lệ (chỉ nhận chuỗi rỗng để tự nhận ngôn ngữ, hoặc một mã ISO có trong lang2id của model)
+        // ⇒ nếu truyền "auto" addon gọi SHERPA_ONNX_EXIT và TẮT LUÔN tiến trình Node, không ném lỗi
+        // JS bắt được. Chuỗi rỗng để Whisper tự nhận ngôn ngữ MỖI LẦN giải mã theo chính audio đó
+        // (không phải một cấu hình cố định lúc tải model) — đúng cho mọi yêu cầu vi/en/auto.
+        modelConfig.whisper = { encoder: files.encoder, decoder: files.decoder, language: '', task: 'transcribe' };
+      } else if (s.engine === 'sense-voice') {
+        modelConfig.senseVoice = { model: files.model, language: 'auto', useInverseTextNormalization: 1 };
+      }
       const featConfig = { sampleRate: TARGET_RATE, featureDim: 80 };
       try {
-        recognizer = s.engine === 'offline-transducer'
-          ? await lib.OfflineRecognizer.createAsync({ featConfig, modelConfig, decodingMethod: 'greedy_search' })
-          : new lib.OnlineRecognizer({ featConfig, modelConfig, decodingMethod: 'greedy_search', enableEndpoint: 0 });
+        recognizer = s.engine === 'online-transducer'
+          ? new lib.OnlineRecognizer({ featConfig, modelConfig, decodingMethod: 'greedy_search', enableEndpoint: 0 })
+          : await lib.OfflineRecognizer.createAsync({ featConfig, modelConfig, decodingMethod: 'greedy_search' });
       } catch (err) {
         recognizer = null;
         throw modelUnavailable('load_failed', `Không tải được model "${id}": ${/** @type {Error} */ (err).message}`, err);
@@ -95,11 +109,18 @@ export function createLocalProvider({ home, numThreads = defaultThreads(), sherp
     },
 
     /**
-     * @param {{ pcm: Int16Array|Float32Array, sampleRate: number }} input
+     * @param {{ pcm: Int16Array|Float32Array, sampleRate: number, language?: string }} input
      * @returns {Promise<{ text: string, audio_ms: number, stt_ms: number }>}
      */
-    async transcribe({ pcm, sampleRate }) {
+    async transcribe({ pcm, sampleRate, language = 'vi' }) {
       if (!recognizer || !spec) throw modelUnavailable('not_loaded', 'Chưa tải model (gọi loadModel trước).');
+      // Chốt chặn thứ hai (createStt() đã kiểm năng lực ngôn ngữ trước khi gọi tới đây); giữ ở đây
+      // để provider vẫn an toàn nếu được gọi trực tiếp, không qua stt.transcribe().
+      if (language === 'auto') {
+        if (spec.autoDetect !== true) throw new SttError('bad_request', `Model "${spec.id}" không hỗ trợ tự nhận ngôn ngữ (auto). Hãy chọn ngôn ngữ cụ thể hoặc đổi model.`);
+      } else if (!(spec.languages ?? ['vi']).includes(language)) {
+        throw new SttError('bad_request', `Model "${spec.id}" không hỗ trợ ngôn ngữ "${language}". Hãy đổi model.`);
+      }
       if (spec.engine === 'online-transducer') {
         const s = provider.createSession();
         s.accept(pcm, sampleRate);
@@ -111,7 +132,7 @@ export function createLocalProvider({ home, numThreads = defaultThreads(), sherp
         const stream = recognizer.createStream();
         stream.acceptWaveform({ samples: chunk, sampleRate: TARGET_RATE });
         const result = await recognizer.decodeAsync(stream);
-        return normalizeModelText(result?.text);
+        return normalizeModelText(result?.text, spec.engine === 'offline-transducer');
       };
       const text = samples.length > CHUNK_THRESHOLD_SECONDS * TARGET_RATE
         ? await transcribeChunked(samples, TARGET_RATE, decodeOnce, { chunkSeconds: DEFAULT_CHUNK_SECONDS, overlapSeconds: DEFAULT_OVERLAP_SECONDS })

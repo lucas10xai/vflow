@@ -7,6 +7,7 @@ public enum OverlayState: Equatable, Sendable {
     case listeningLocked(level: Float)
     /// Đang ghi lệnh (Command Mode, ⌥+⌃).
     case listeningCommand(level: Float)
+    case listeningTranslate(target: String, level: Float)
     case transcribing
     case done
     case notice(String)
@@ -51,6 +52,9 @@ public enum OverlayText {
                          showsLevel: true, autoHide: nil, isError: false)
         case .listeningCommand:
             return .init(symbol: "command", text: "Đang nghe lệnh", accessibilityLabel: "vflow đang nghe lệnh",
+                         showsLevel: true, autoHide: nil, isError: false)
+        case .listeningTranslate(let target, _):
+            return .init(symbol: "translate", text: "Dịch → \(target)", accessibilityLabel: "vflow đang dịch sang \(target)",
                          showsLevel: true, autoHide: nil, isError: false)
         case .transcribing:
             return .init(symbol: "waveform", text: "Đang dịch", accessibilityLabel: "vflow đang dịch giọng nói",

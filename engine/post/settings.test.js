@@ -54,12 +54,37 @@ test('update: kiểm kiểu/giá trị, từ chối khoá lạ, không ghi gì n
     { app_rules: Object.fromEntries(Array.from({ length: 101 }, (_, i) => [`com.example.app${i}`, 'clean'])) },
     { rewrite: { model: 'm' } },
     { unknown_key: 1 },
+    { stt_language: 'fr' },
+    { stt_language: 'VI' },
+    { stt_language: 1 },
+    { translate_target: 'english' },
+    { translate_target: '' },
+    { translate_target: 1 },
+    { translate_formality: 'angry' },
+    { translate_formality: 1 },
   ];
   for (const patch of bad) {
     assert.throws(() => store.update(patch), { code: 'bad_request' }, JSON.stringify(patch));
   }
   assert.equal(readFileSync(configPath, 'utf8'), before);
   assert.equal(store.get().cloud_llm, false);
+});
+
+test('stt_language/translate_target/translate_formality: mặc định đúng, giá trị hợp lệ được lưu và đọc lại', (t) => {
+  const configPath = join(tmp(t), 'config.json');
+  const store = createSettingsStore({ configPath });
+  assert.equal(store.get().stt_language, 'vi');
+  assert.equal(store.get().translate_target, 'en');
+  assert.equal(store.get().translate_formality, 'neutral');
+  for (const lang of ['vi', 'en', 'auto']) {
+    assert.equal(store.update({ stt_language: lang }).stt_language, lang, lang);
+  }
+  for (const target of ['fr', 'JA', 'zh']) {
+    assert.equal(store.update({ translate_target: target }).translate_target, target, target);
+  }
+  for (const formality of ['neutral', 'formal', 'casual']) {
+    assert.equal(store.update({ translate_formality: formality }).translate_formality, formality, formality);
+  }
 });
 
 test('app_rules: luật hợp lệ được lưu và đọc lại đúng', (t) => {

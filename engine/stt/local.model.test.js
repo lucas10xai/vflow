@@ -26,8 +26,10 @@ async function availability(id) {
 
 const offlineSkip = await availability('zipformer-vi-30m');
 const streamingSkip = await availability('zipformer-vi-30m-streaming');
+const whisperSkip = await availability('whisper-tiny-multilingual');
 if (offlineSkip) console.log(`# ${offlineSkip}`);
 if (streamingSkip) console.log(`# ${streamingSkip}`);
+if (whisperSkip) console.log(`# ${whisperSkip}`);
 
 const testWavs = () => {
   const dir = path.join(home, 'models', 'zipformer-vi-30m', 'test_wavs');
@@ -109,4 +111,22 @@ test('zipformer-vi-30m-streaming: phiên streaming phát chữ tạm tăng dần
   assert.ok(partials.length >= 2, `chỉ có ${partials.length} sự kiện chữ tạm`);
   for (let i = 1; i < partials.length; i++) assert.ok(partials[i].audio_ms >= partials[i - 1].audio_ms);
   assert.throws(() => s.accept(new Float32Array(10), 16000), { code: 'bad_request' });
+});
+
+// Bug đã gặp khi vận hành thật (E5): sherpa-onnx chỉ nhận "" (tự nhận ngôn ngữ) hoặc một mã ISO
+// có trong lang2id của whisper — KHÔNG nhận literal "auto". Nếu local.js lỡ truyền lại "auto",
+// addon gọi SHERPA_ONNX_EXIT và tắt LUÔN tiến trình Node (không phải lỗi JS bắt được) — test này
+// phải tải model thật mới lộ ra, test thuần JS với sherpa giả không bắt được.
+test('whisper-tiny-multilingual: tải model và nhận dạng tiếng Anh thật không làm crash tiến trình (language=en/auto)', { skip: whisperSkip ?? false }, async () => {
+  const p = createLocalProvider({ home });
+  await p.loadModel('whisper-tiny-multilingual');
+  const dir = path.join(home, 'models', 'whisper-tiny-multilingual', 'test_wavs');
+  const w = parseWav(fs.readFileSync(path.join(dir, '0.wav')));
+  for (const language of ['en', 'auto']) {
+    const r = await p.transcribe({ pcm: w.samples, sampleRate: w.sampleRate, language });
+    assert.ok(r.text.length > 0, `language=${language} ra rỗng`);
+    assert.match(r.text, /[A-Za-z]/, `language=${language} phải có chữ Latin`);
+  }
+  // Ngôn ngữ model không khai (xem registry.js languages) vẫn bị chặn rõ ràng, không crash.
+  await assert.rejects(p.transcribe({ pcm: w.samples, sampleRate: w.sampleRate, language: 'th-TH-khong-hop-le' }), { code: 'bad_request' });
 });

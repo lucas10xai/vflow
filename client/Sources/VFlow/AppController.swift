@@ -174,6 +174,16 @@ final class AppController: NSObject {
                            modelBootstrapStatus: modelBootstrapStatus, menuBarIconReminder: menuBarIconReminderMessage())
     }
 
+    /// Khả năng engine hiện tại; `nil` khi chưa đọc được, để UI không đoán là model hỗ trợ thêm tiếng.
+    var engineLanguages: [String]? {
+        if case .running(_, let health) = engineState { return health.languages }
+        return nil
+    }
+    var engineAutoDetect: Bool? {
+        if case .running(_, let health) = engineState { return health.autoDetect }
+        return nil
+    }
+
     private func conflictWarning() -> String? {
         ConflictText.warning(for: conflictDetector.detect(runningBundleIDs: runningApps.runningBundleIDs()))
     }
@@ -352,6 +362,20 @@ final class AppController: NSObject {
     func captureSettingsWindowOffscreen(tab: SettingsCategory, to path: String) {
         refreshUI()
         settingsWindow.captureOffscreen(tab: tab, to: path)
+    }
+
+    /// `--render-offscreen dich-sheet`: sheet "Dịch câu này" dựng ĐỘC LẬP — KHÔNG qua `.sheet` thật
+    /// đính vào cửa sổ chính (`NSWindow.beginSheet` cần cửa sổ cha `isVisible`, không an toàn khi
+    /// chụp ngoài màn hình — xem giới hạn đã ghi ở `captureDictionaryAddInvalidOffscreen`). Thay vào
+    /// đó chụp thẳng cây SwiftUI của `TranslationSheet` bằng `OffscreenRender.capture`, giống HUD
+    /// (`OverlayPanel.captureOffscreen`) — câu mẫu không có tên riêng/khoá thật.
+    func captureTranslationSheetOffscreen(to path: String) {
+        let entry = HistoryEntry(at: Date(), mode: "normal", model: "zipformer-vi-30m",
+                                 textRaw: "hôm nay tôi học xong bài về cấu trúc dữ liệu",
+                                 text: "Hôm nay tôi học xong bài về cấu trúc dữ liệu.")
+        OffscreenRender.capture(TranslationSheet(controller: self, entry: entry, dismiss: {}),
+                                size: CGSize(width: 480, height: 1), fixedHeight: false,
+                                colorScheme: OffscreenRender.colorScheme, to: path)
     }
 
     /// `--render-offscreen`: chụp nội dung tờ Chào mừng mà KHÔNG BAO GIỜ hiện lên màn hình.
@@ -605,7 +629,9 @@ final class AppController: NSObject {
         switch machine.phase {
         case .recordingLocked: return .listeningLocked(level: 0)
         case .recordingCommand: return .listeningCommand(level: 0)
-        default: return .listening(level: 0)
+        default:
+            if mode == .translate { return .listeningTranslate(target: TranslationTarget.title(for: cachedSettings.translateTarget), level: 0) }
+            return .listening(level: 0)
         }
     }
 
@@ -938,6 +964,11 @@ final class AppController: NSObject {
             updateTicking()
             refreshUI()
         }
+    }
+
+    /// Sheet dịch lại dùng cùng đường dán an toàn với dictation; không lưu hay gửi lại văn bản.
+    func insertTranslationText(_ text: String) async -> PasteOutcome {
+        await makeInserter().insert(text)
     }
 
     private func send(pcm: Data, mode: DictationMode, app: String?) {
@@ -1343,6 +1374,22 @@ final class AppController: NSObject {
         } catch {
             return .failure(.network(error.localizedDescription))
         }
+    }
+
+    func translateHistory(text: String, target: String, formality: Tone) async -> Result<TranslationResult, ClientError> {
+        guard TranslationValidation.isValidISOCode(target) else { return .failure(.engine(status: 400, code: "bad_request", message: "Mã ISO không hợp lệ")) }
+        switch (resolvedPort(), readToken()) {
+        case (.success(let port), .success(let token)):
+            return await Self.requestTranslate(session: session, port: port, token: token, text: text, target: target, formality: formality)
+        case (.failure(let error), _), (_, .failure(let error)): return .failure(error)
+        }
+    }
+
+    nonisolated static func requestTranslate(session: URLSession, port: Int, token: String, text: String, target: String, formality: Tone) async -> Result<TranslationResult, ClientError> {
+        do {
+            let (data, response) = try await session.data(for: EngineAPI.translateRequest(port: port, token: token, text: text, target: target, formality: formality))
+            return EngineAPI.parseTranslate(status: (response as? HTTPURLResponse)?.statusCode ?? 0, data: data)
+        } catch { return .failure(.network(error.localizedDescription)) }
     }
 
     // MARK: đăng nhập

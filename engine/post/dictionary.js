@@ -265,8 +265,13 @@ function matchAt(toks, i, text, patterns) {
   return null;
 }
 
+/** Gạch nối ở biên ngoài cụm khớp: coi như dính vào định danh ghép, giống "kubernetes-cli". */
+const BOUNDARY_HYPHENS = '-‐‑–';
+
 /**
- * Không thay khi cụm dính vào định danh/đường dẫn/URL: x_pút, a.pút, /pút, pút_x, pút.js, pút@…
+ * Không thay khi cụm dính vào định danh/đường dẫn/URL: x_pút, a.pút, /pút, pút_x, pút.js, pút@…,
+ * kubernetes-cli (gạch nối ở biên — khác gạch nối NẰM GIỮA các từ của chính cụm khớp, cho phép
+ * ở `JOINER_RE`/`matchAt`).
  * @param {string} text
  * @param {number} start
  * @param {number} end
@@ -274,8 +279,8 @@ function matchAt(toks, i, text, patterns) {
 function boundaryOk(text, start, end) {
   const before = text[start - 1] ?? '';
   const after = text[end] ?? '';
-  if (/[_@/\\.]/.test(before)) return false;
-  if (/[_@/\\]/.test(after)) return false;
+  if (/[_@/\\.]/.test(before) || (before !== '' && BOUNDARY_HYPHENS.includes(before))) return false;
+  if (/[_@/\\]/.test(after) || (after !== '' && BOUNDARY_HYPHENS.includes(after))) return false;
   if (after === '.' && /[\p{L}\p{N}]/u.test(text[end + 1] ?? '')) return false;
   return true;
 }

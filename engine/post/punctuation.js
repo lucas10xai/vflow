@@ -107,7 +107,9 @@ export function applyVoicePunctuation(text) {
     const stripBefore = LEFT_ONLY.has(hit.to) || BOTH_SIDES.has(hit.to);
     const stripAfter = RIGHT_ONLY.has(hit.to) || BOTH_SIDES.has(hit.to);
     const before = stripBefore ? text.slice(cursor, start).replace(/[ \t]+$/u, '') : text.slice(cursor, start);
-    out += before + hit.to;
+    // Whisper thường đã trả dấu câu. Không nhân đôi đúng cùng dấu khi người nói vẫn đọc lệnh.
+    const duplicate = LEFT_ONLY.has(hit.to) && before.endsWith(hit.to);
+    out += before + (duplicate ? '' : hit.to);
     if (SENTENCE_END.has(hit.to)) boundaries.push(out.length);
     applied.push({ type: 'voice_punctuation', from: text.slice(start, end), to: hit.to });
     if (stripAfter) {

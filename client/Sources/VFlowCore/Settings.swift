@@ -14,6 +14,51 @@ public enum Tone: String, CaseIterable, Sendable {
     }
 }
 
+public enum SpeechLanguage: String, CaseIterable, Sendable {
+    case vietnamese = "vi", english = "en", automatic = "auto"
+    public var title: String { switch self { case .vietnamese: "Tiếng Việt"; case .english: "Tiếng Anh"; case .automatic: "Tự nhận biết" } }
+}
+
+/// Ngôn ngữ khi nói nào CHỌN ĐƯỢC cho model hiện tại — nguồn DUY NHẤT dùng ở Cài đặt › Giọng nói
+/// (`SettingsViewV2.languageEnabled`), tách khỏi SwiftUI để test được. `supportedLanguages`/
+/// `autoDetect` lấy từ `Health.languages`/`Health.autoDetect` (từng model ở `/healthz`, KHÔNG xác
+/// định khi `nil` — model cũ chưa báo, hoặc chưa model nào tải xong) — KHÔNG đoán hỗ trợ thêm tiếng
+/// khi không xác định: `nil` ⇒ coi như model CHỈ tiếng Việt (an toàn — không hứa thứ chưa chắc có).
+public enum SpeechLanguageAvailability {
+    /// `nil` ⇒ chọn được bình thường; chuỗi ⇒ lý do vô hiệu hoá (hiện cạnh Picker).
+    public static func disabledReason(_ language: SpeechLanguage, supportedLanguages: [String]?, autoDetect: Bool?) -> String? {
+        let reason = "Model hiện tại chỉ nhận tiếng Việt — đổi model ở Cài đặt › Nâng cao"
+        switch language {
+        case .vietnamese:
+            // "vi" luôn coi là khả dụng khi KHÔNG xác định (mặc định an toàn) hoặc khi engine liệt
+            // kê đúng "vi"; mảng rỗng/thiếu "vi" (model lạ không nói tiếng Việt) mới chặn.
+            return (supportedLanguages ?? ["vi"]).contains("vi") ? nil : reason
+        case .english:
+            return (supportedLanguages?.contains("en") ?? false) ? nil : reason
+        case .automatic:
+            return (autoDetect == true) ? nil : reason
+        }
+    }
+
+    public static func isEnabled(_ language: SpeechLanguage, supportedLanguages: [String]?, autoDetect: Bool?) -> Bool {
+        disabledReason(language, supportedLanguages: supportedLanguages, autoDetect: autoDetect) == nil
+    }
+}
+
+public enum TranslationTarget: String, CaseIterable, Sendable {
+    case english = "en", japanese = "ja", korean = "ko", chinese = "zh", french = "fr", german = "de", spanish = "es", thai = "th"
+    public var title: String { switch self { case .english: "Tiếng Anh"; case .japanese: "Tiếng Nhật"; case .korean: "Tiếng Hàn"; case .chinese: "Tiếng Trung"; case .french: "Tiếng Pháp"; case .german: "Tiếng Đức"; case .spanish: "Tiếng Tây Ban Nha"; case .thai: "Tiếng Thái" } }
+    public static func title(for code: String) -> String { Self(rawValue: code.lowercased())?.title ?? code.uppercased() }
+}
+
+public enum TranslationValidation {
+    /// Đúng mã engine chấp nhận (`engine/post/settings.js`, `/^[a-z]{2,3}$/i` cho `translate_target`
+    /// VÀ cho `target` của `POST /v1/translate`) — CHỈ 2–3 chữ cái thường/hoa, KHÔNG có tiểu thẻ
+    /// vùng (`en-US`…): phiên bản cũ của hàm này lỏng hơn engine (nhận cả `xx-YY`), khiến ô "Khác…"
+    /// coi là hợp lệ rồi gửi lên bị engine trả `400 bad_request` — SAI pha, đã sửa để khớp.
+    public static func isValidISOCode(_ value: String) -> Bool { value.range(of: "^[a-zA-Z]{2,3}$", options: [.regularExpression]) != nil }
+}
+
 /// Luật `app_rules` (contract mục "Cài đặt người dùng"): bundle id → chế độ, KHÔNG gồm `auto`
 /// (tránh đệ quy) — bảng được engine tra TRƯỚC `auto.apps` (cấu hình cứng) khi người dùng chọn `auto`.
 public enum AppRuleMode: String, CaseIterable, Sendable {
@@ -88,11 +133,15 @@ public struct AppSettings: Equatable, Sendable {
     public var audioHistory: Bool
     public var audioHistoryMb: Int
     public var audioHistoryDays: Int
+    public var sttLanguage: SpeechLanguage
+    public var translateTarget: String
+    public var translateFormality: Tone
 
     public init(cloudLlm: Bool, llmModel: String?, llmTimeoutMs: Int, actionsEnabled: Bool, silenceStopSeconds: Int = 0,
                 statsEnabled: Bool = true, appRules: [AppRule] = [], voicePunctuation: Bool = true, tone: Tone = .neutral,
                 whisperMode: Bool = false, learnFromEdits: Bool = true, livePreview: Bool = true,
-                contextSymbols: Bool = true, audioHistory: Bool = false, audioHistoryMb: Int = 200, audioHistoryDays: Int = 7) {
+                contextSymbols: Bool = true, audioHistory: Bool = false, audioHistoryMb: Int = 200, audioHistoryDays: Int = 7,
+                sttLanguage: SpeechLanguage = .vietnamese, translateTarget: String = "en", translateFormality: Tone = .neutral) {
         self.cloudLlm = cloudLlm
         self.llmModel = llmModel
         self.llmTimeoutMs = llmTimeoutMs
@@ -109,6 +158,9 @@ public struct AppSettings: Equatable, Sendable {
         self.audioHistoryDays = audioHistoryDays
         self.livePreview = livePreview
         self.contextSymbols = contextSymbols
+        self.sttLanguage = sttLanguage
+        self.translateTarget = translateTarget
+        self.translateFormality = translateFormality
     }
 }
 
@@ -130,12 +182,16 @@ public struct SettingsPatch: Sendable {
     public var audioHistory: Bool?
     public var audioHistoryMb: Int?
     public var audioHistoryDays: Int?
+    public var sttLanguage: SpeechLanguage?
+    public var translateTarget: String?
+    public var translateFormality: Tone?
 
     public init(cloudLlm: Bool? = nil, llmModel: String?? = nil, llmTimeoutMs: Int? = nil, actionsEnabled: Bool? = nil,
                 silenceStopSeconds: Int? = nil, statsEnabled: Bool? = nil, appRules: [AppRule]? = nil,
                 voicePunctuation: Bool? = nil, tone: Tone? = nil, whisperMode: Bool? = nil, learnFromEdits: Bool? = nil,
                 livePreview: Bool? = nil, contextSymbols: Bool? = nil,
-                audioHistory: Bool? = nil, audioHistoryMb: Int? = nil, audioHistoryDays: Int? = nil) {
+                audioHistory: Bool? = nil, audioHistoryMb: Int? = nil, audioHistoryDays: Int? = nil,
+                sttLanguage: SpeechLanguage? = nil, translateTarget: String? = nil, translateFormality: Tone? = nil) {
         self.cloudLlm = cloudLlm
         self.llmModel = llmModel
         self.llmTimeoutMs = llmTimeoutMs
@@ -152,6 +208,9 @@ public struct SettingsPatch: Sendable {
         self.audioHistory = audioHistory
         self.audioHistoryMb = audioHistoryMb
         self.audioHistoryDays = audioHistoryDays
+        self.sttLanguage = sttLanguage
+        self.translateTarget = translateTarget
+        self.translateFormality = translateFormality
     }
 
     public var jsonObject: [String: Any] {
@@ -172,6 +231,9 @@ public struct SettingsPatch: Sendable {
         if let v = audioHistory { obj["audio_history"] = v }
         if let v = audioHistoryMb { obj["audio_history_mb"] = v }
         if let v = audioHistoryDays { obj["audio_history_days"] = v }
+        if let v = sttLanguage { obj["stt_language"] = v.rawValue }
+        if let v = translateTarget { obj["translate_target"] = v }
+        if let v = translateFormality { obj["translate_formality"] = v.rawValue }
         return obj
     }
 }

@@ -9,6 +9,7 @@ public enum DegradedText {
         case "llm_error": return "9Router lỗi — đã dùng bản làm sạch trong máy"
         case "guard": return "Bản viết lại bị chặn vì đổi nghĩa — đã dùng bản làm sạch trong máy"
         case "cloud_disabled": return "Đám mây đang tắt — dùng Làm sạch"
+        case "translate_guard": return "Bản dịch không đạt kiểm tra — chưa chèn gì"
         default: return "Đã dùng bản làm sạch trong máy (\(reason))"
         }
     }
@@ -33,6 +34,7 @@ public enum DictationDecision {
                 return Plan(insert: nil, overlay: .notice(OverlayText.heardNothing), clearRetry: true)
             }
             if r.degraded, let reason = r.degradedReason {
+                if reason == "translate_guard" { return Plan(insert: nil, overlay: .notice(DegradedText.message(reason)), clearRetry: true) }
                 return Plan(insert: r.text, overlay: .notice(DegradedText.message(reason)), clearRetry: true)
             }
             if let code = r.rewriteError {

@@ -367,3 +367,54 @@ Dựng: `client/scripts/build-app.sh --no-model` (≈ 146 MB; bản mặc địn
    **KỲ VỌNG:** lỗi đỏ "Không tải được model — lỗi mạng hoặc máy chủ…", nút "Thử lại" dùng được khi bật lại mạng; KHÔNG để lại model dở dang.
 6. (Chỉ để xem) làm hỏng một tệp model đã tải (`echo x >> .../encoder.int8.onnx`) rồi mở lại app.
    **KỲ VỌNG:** vẫn coi là "đủ" (lúc mở chỉ kiểm sự có mặt của tệp, không băm 33 MB mỗi lần — đây là chủ ý để không chậm); mã băm chỉ được kiểm ngay sau khi TẢI. Nếu muốn kiểm tay: `node bin/vflow.js doctor`.
+
+## O. V4/V5: chế độ Dịch (gửi chữ qua máy chủ LLM của bạn, không gửi âm thanh)
+
+Cần `cloud_llm` đang BẬT và một model LLM thật đã cấu hình (Cài đặt › Nâng cao) — không có, các bước dưới vẫn chạy được NHƯNG kết quả dịch sẽ là lỗi (`no_model`/`no_key`), chỉ kiểm được phần vô hiệu hoá/giao diện (bước O4–O6).
+
+**O1. Nói tiếng Việt, nghe lại bằng tiếng Anh**
+1. Tổng quan (hoặc menu thanh trạng thái) › chọn chế độ **Dịch**. Ô "Ngôn ngữ đích" chọn "Tiếng Anh", mức trang trọng để "Trung lập".
+2. Mở TextEdit/Notes, giữ ⌥ trái, nói một câu tiếng Việt bình thường (vd. "Chiều nay tôi có cuộc họp với khách hàng"), nhả phím.
+   **KỲ VỌNG:** thanh trạng thái hiện "Dịch → Tiếng Anh" trong lúc ghi (KHÁC "Đang nghe" của các chế độ khác), rồi "Đang dịch", rồi "Xong"; câu tiếng Anh (không phải tiếng Việt, không phải lời dẫn kiểu "Here is the translation:") được dán vào đúng vị trí con trỏ.
+   **DẤU HIỆU SAI:** dán nguyên câu tiếng Việt; dán kèm lời dẫn; dán chuỗi rỗng mà không báo lỗi gì.
+3. Đổi "Ngôn ngữ đích" sang "Tiếng Nhật", lặp lại bước 2 với câu khác.
+   **KỲ VỌNG:** lần này ra tiếng Nhật, không phải tiếng Anh còn sót từ lần trước (ngôn ngữ đích đổi NGAY, không cần khởi động lại).
+
+**O2. Dịch lại một câu trong Lịch sử**
+1. Tab **Lịch sử**, chuột phải vào một câu tiếng Việt bất kỳ (của chế độ khác, không cần phải là câu Dịch) › **"Dịch câu này…"**.
+   **KỲ VỌNG:** sheet "Dịch câu này" hiện ra với đúng nguyên văn câu đã chọn, ô chọn ngôn ngữ đích (mặc định theo Cài đặt hiện tại) + mức trang trọng, nút "Dịch".
+2. Đổi ngôn ngữ đích sang một ngôn ngữ khác rồi bấm "Dịch".
+   **KỲ VỌNG:** vài giây sau hiện bản dịch trong khung chữ, nút "Sao chép"/"Chèn vào ô đang gõ" bật lên.
+3. Bấm "Dịch" LẦN NỮA ngay khi vừa đổi "Mức trang trọng" (trước khi lần đầu kịp trả lời) — bấm NHIỀU LẦN liên tiếp nhanh.
+   **KỲ VỌNG:** chỉ MỘT kết quả cuối cùng hiện ra (đúng của lần bấm SAU CÙNG, không phải một kết quả cũ "trồi lên" muộn); không crash, không hiện hai kết quả chồng nhau.
+4. Bấm "Huỷ" ngay sau khi bấm "Dịch" (trong lúc còn đang chờ).
+   **KỲ VỌNG:** sheet đóng ngay, không có kết quả nào "trồi lên" sau khi đã đóng (không có thông báo lỗi/kết quả mồ côi xuất hiện sau khi sheet đã tắt).
+5. Bấm "Chèn vào ô đang gõ" (ở bất kỳ câu dịch nào) khi đang focus vào Notes.
+   **KỲ VỌNG:** đúng bản dịch được dán vào Notes, câu GỐC trong Lịch sử KHÔNG đổi (sheet không sửa lịch sử, chỉ đọc).
+
+**O3. Đổi ngôn ngữ đích cho dictation (không qua Lịch sử)**
+1. Ở chế độ Dịch (Tổng quan), đổi "Ngôn ngữ đích" sang "Tiếng Hàn", mở Cài đặt (⌘,) › Giọng nói, quay lại Tổng quan.
+   **KỲ VỌNG:** vẫn còn "Tiếng Hàn" (không rơi về mặc định "Tiếng Anh" khi mở/đóng Cài đặt).
+2. Chọn "Khác…" trong ô Ngôn ngữ đích, gõ `th` (Thái — không có trong danh sách cố định) rồi nhấn Enter.
+   **KỲ VỌNG:** nhận mã `th`, lần dịch tiếp theo ra tiếng Thái.
+3. Thử gõ `english` (chữ, không phải mã ISO) hoặc `en-US` (có tiểu thẻ vùng) vào ô "Khác…".
+   **KỲ VỌNG:** KHÔNG được lưu (không đổi ngôn ngữ đích hiện tại) — cả hai đều không phải mã ISO 2–3 chữ hợp lệ theo đúng mẫu engine chấp nhận.
+
+**O4. `cloud_llm` tắt ⇒ Dịch vô hiệu hoá hẳn**
+1. Cài đặt › Nâng cao: tắt "Cho phép gửi chữ qua máy chủ của bạn" (`cloud_llm`). Quay lại Tổng quan.
+   **KỲ VỌNG:** ô "Dịch" trong lưới chế độ chuyển mờ/không bấm được (không chỉ cảnh báo sau khi chọn); banner "Dịch cần gửi chữ qua máy chủ của bạn. Đám mây đang tắt." hiện kèm nút "Mở Cài đặt". Mở menu thanh trạng thái/Dock: mục "Dịch" cũng bị vô hiệu hoá (tooltip nêu lý do), có thêm mục "Bật dịch ở Cài đặt…".
+   **DẤU HIỆU SAI:** vẫn chọn được Dịch rồi mới báo lỗi SAU khi đã ghi âm xong (phải chặn NGAY, không để ghi âm vô ích).
+2. Nếu app ĐANG ở chế độ Dịch từ trước khi tắt đám mây: thử giữ ⌥ nói.
+   **KỲ VỌNG:** không có gì được dán (không phải bản tiếng Việt gốc, không phải chuỗi rỗng) — lỗi rõ ràng, không "thành công giả".
+3. Bật lại `cloud_llm`.
+   **KỲ VỌNG:** Dịch chọn được lại ngay, banner biến mất.
+
+**O5. Chỉ model đa ngôn ngữ mới cho đổi "Ngôn ngữ khi nói"**
+1. Cài đặt › Giọng nói, xem mục "Ngôn ngữ khi nói" (đầu mục, trước "Lệnh dấu câu bằng giọng").
+   **KỲ VỌNG (model mặc định `zipformer-vi-30m`, chỉ tiếng Việt):** "Tiếng Việt" chọn được, "Tiếng Anh" và "Tự nhận biết" MỜ/không bấm được, kèm dòng chữ cam "Model hiện tại chỉ nhận tiếng Việt — đổi model ở Cài đặt › Nâng cao".
+2. (Nếu có tải model đa ngôn ngữ, vd. `whisper-tiny-multilingual`) đổi model ở Cài đặt › Nâng cao, quay lại mục Giọng nói.
+   **KỲ VỌNG:** "Tiếng Anh"/"Tự nhận biết" giờ chọn được (theo đúng `languages`/`auto_detect` model đó báo ở `/healthz`), dòng chữ cam biến mất.
+
+**O6. Chữ trong giao diện không nói sai "chỉ chạy trong máy" khi Dịch đang bật**
+1. Với Dịch đang chọn, xem lại nhãn ở Tổng quan/menu thanh trạng thái cho MỖI chế độ.
+   **KỲ VỌNG:** Dịch luôn mang nhãn "Gửi chữ qua máy chủ của bạn" (không bao giờ "Trong máy"); các chế độ Thường/Làm sạch/Lập trình/Tự động vẫn đúng "Trong máy" dù Dịch đang được chọn (không bị "lây" nhãn sai).

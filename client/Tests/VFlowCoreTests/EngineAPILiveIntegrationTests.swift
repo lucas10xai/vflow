@@ -9,7 +9,12 @@ import Testing
 ///   VFLOW_HOME=/tmp/vflow-x node bin/vflow.js serve --port 27711
 ///   VFLOW_LIVE_TEST_PORT=27711 VFLOW_LIVE_TEST_TOKEN=$(cat /tmp/vflow-x/token) swift test --filter EngineAPILiveIntegration
 /// Vắng mặt hai biến môi trường ⇒ bỏ qua ÊM (không fail bộ test thường/CI không có engine).
-@Suite(.enabled(if: LiveEngine.isConfigured))
+/// `.serialized` (V5): từ khi có các test Dịch ghi `PUT /v1/settings` (`cloud_llm`/`llm_model`) lên
+/// CÙNG engine tạm dùng chung, chạy song song (mặc định của Swift Testing) làm các test khác đọc
+/// trúng cấu hình đang bị một test kia đổi giữa chừng — đã ĐO ĐƯỢC race thật (xem báo cáo V5: test
+/// trả 200 thay vì 503 vì một test khác vừa bật lại `cloud_llm` cùng lúc). Engine tạm chỉ phục vụ
+/// bộ test này nên chạy nối tiếp không mất gì về tốc độ đáng kể.
+@Suite(.serialized, .enabled(if: LiveEngine.isConfigured))
 struct EngineAPILiveIntegrationTests {
     @Test func healthzReportsMaxAudioSeconds() async throws {
         let (data, status) = try await LiveEngine.get("/healthz", auth: false)
@@ -69,6 +74,75 @@ struct EngineAPILiveIntegrationTests {
         _ = s.appRules
         _ = s.tone
     }
+
+    // MARK: V5 — Dịch: languages/auto_detect THẬT ở /healthz, settings mới, POST /v1/translate thật
+
+    /// Engine THẬT (không mock) phải nêu `languages`/`auto_detect` TỪNG MODEL (contract mục Cấu
+    /// hình) — KHÔNG ở gốc JSON. Test này tái xác nhận hình dạng thật đã đo bằng tay qua curl trước
+    /// khi sửa `EngineAPI.parseHealth` (bằng chứng đỏ: bản cũ đọc `obj["languages"]` ở gốc, luôn ra
+    /// `nil` dù engine thật có báo đúng từng model).
+    @Test func healthzReportsLanguagesPerModelNotAtTopLevel() async throws {
+        let (data, status) = try await LiveEngine.get("/healthz", auth: false)
+        #expect(status == 200)
+        let raw = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(raw["languages"] == nil, "engine THẬT không có trường languages ở gốc — xác nhận bằng chứng đỏ")
+        let models = try #require(raw["models"] as? [[String: Any]])
+        #expect(models.contains { $0["languages"] != nil }, "phải có ÍT NHẤT một model báo languages")
+        let h = try #require(EngineAPI.parseHealth(status: status, data: data))
+        #expect(h.models.contains { $0.languages != nil })
+    }
+
+    @Test func settingsRoundTripsTranslateAndSttLanguageKeys() async throws {
+        let (data, status) = try await LiveEngine.get("/v1/settings")
+        #expect(status == 200)
+        let raw = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(raw["stt_language"] is String)
+        #expect(raw["translate_target"] is String)
+        #expect(raw["translate_formality"] is String)
+        let s = try EngineAPI.parseSettings(status: status, data: data).get()
+        #expect(s.sttLanguage == .vietnamese || s.sttLanguage == .english || s.sttLanguage == .automatic)
+
+        // Ghi rồi đọc lại — đọc-sửa-ghi thật, không phải echo giả.
+        let patch = SettingsPatch(translateTarget: "ja", translateFormality: .formal)
+        let (putData, putStatus) = try await LiveEngine.put("/v1/settings", body: try JSONSerialization.data(withJSONObject: patch.jsonObject))
+        let updated = try EngineAPI.parseSettings(status: putStatus, data: putData).get()
+        #expect(updated.translateTarget == "ja")
+        #expect(updated.translateFormality == .formal)
+        // Dọn lại mặc định để không ảnh hưởng test khác chạy cùng engine tạm này.
+        _ = try await LiveEngine.put("/v1/settings", body: try JSONSerialization.data(withJSONObject: SettingsPatch(translateTarget: "en", translateFormality: .neutral).jsonObject))
+    }
+
+    @Test func translateSucceedsAgainstRealEngineWithFakeLLM() async throws {
+        // Yêu cầu: trước khi chạy, trỏ llm_model sang kịch bản "ok" (xem báo cáo V5 — fake LLM
+        // local dùng field "model" để chọn kịch bản, giống engine/post/rewrite.test.js).
+        _ = try await LiveEngine.put("/v1/settings", body: try JSONSerialization.data(withJSONObject: ["cloud_llm": true, "llm_model": "ok"]))
+        let body = try JSONSerialization.data(withJSONObject: ["text": "Xin chào thế giới", "target": "en"])
+        let (data, status) = try await LiveEngine.post("/v1/translate", body: body)
+        let result = try EngineAPI.parseTranslate(status: status, data: data).get()
+        #expect(!result.text.isEmpty)
+    }
+
+    @Test func translateGuardBlockedReturnsNoText() async throws {
+        _ = try await LiveEngine.put("/v1/settings", body: try JSONSerialization.data(withJSONObject: ["cloud_llm": true, "llm_model": "guard_vi"]))
+        let body = try JSONSerialization.data(withJSONObject: ["text": "Xin chào thế giới", "target": "en"])
+        let (data, status) = try await LiveEngine.post("/v1/translate", body: body)
+        guard case .failure = EngineAPI.parseTranslate(status: status, data: data) else {
+            Issue.record("guard chặn (còn nguyên tiếng Việt) phải là .failure, không trả text"); return
+        }
+        let raw = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(raw["degraded_reason"] as? String == "translate_guard")
+    }
+
+    @Test func translateWithCloudDisabledReturns503WithoutNetworkCall() async throws {
+        _ = try await LiveEngine.put("/v1/settings", body: try JSONSerialization.data(withJSONObject: ["cloud_llm": false]))
+        let body = try JSONSerialization.data(withJSONObject: ["text": "Xin chào thế giới", "target": "en"])
+        let (data, status) = try await LiveEngine.post("/v1/translate", body: body)
+        #expect(status == 503)
+        guard case .failure(.engine(503, "cloud_disabled", _)) = EngineAPI.parseTranslate(status: status, data: data) else {
+            Issue.record("cloud_llm tắt phải trả 503 cloud_disabled"); return
+        }
+        _ = try await LiveEngine.put("/v1/settings", body: try JSONSerialization.data(withJSONObject: ["cloud_llm": true, "llm_model": "ok"]))
+    }
 }
 
 /// Cấu hình đọc từ môi trường — KHÔNG hard-code cổng/token (bí mật không bao giờ vào repo).
@@ -91,6 +165,16 @@ enum LiveEngine {
     static func post(_ path: String, body: Data) async throws -> (Data, Int) {
         var r = URLRequest(url: URL(string: "http://127.0.0.1:\(port)\(path)")!)
         r.httpMethod = "POST"
+        r.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        r.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        r.httpBody = body
+        let (data, resp) = try await URLSession.shared.data(for: r)
+        return (data, (resp as? HTTPURLResponse)?.statusCode ?? 0)
+    }
+
+    static func put(_ path: String, body: Data) async throws -> (Data, Int) {
+        var r = URLRequest(url: URL(string: "http://127.0.0.1:\(port)\(path)")!)
+        r.httpMethod = "PUT"
         r.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         r.setValue("application/json", forHTTPHeaderField: "Content-Type")
         r.httpBody = body

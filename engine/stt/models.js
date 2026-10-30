@@ -9,13 +9,13 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { LOCAL_MODELS, REMOTE_MODELS, findModel, modelDir } from './registry.js';
+import { LOCAL_MODELS, REMOTE_MODELS, findModel, hasVerifiedChecksum, modelDir } from './registry.js';
 import { SttError, modelUnavailable } from './errors.js';
 
 const MANIFEST = 'manifest.json';
 
 /**
- * @typedef {{ encoder: string, decoder: string, joiner: string, tokens: string }} ModelFiles  đường dẫn tuyệt đối
+ * @typedef {Record<string, string>} ModelFiles  đường dẫn tuyệt đối
  */
 
 /**
@@ -39,7 +39,7 @@ export async function resolveModelFiles(home, id) {
   }
   /** @type {any} */
   const files = {};
-  for (const role of /** @type {const} */ (['encoder', 'decoder', 'joiner', 'tokens'])) {
+  for (const role of Object.keys(spec.files)) {
     const rel = manifest?.files?.[role]?.path;
     if (typeof rel !== 'string' || rel.includes('..') || path.isAbsolute(rel)) {
       throw modelUnavailable('manifest_corrupt', `Manifest của model "${id}" thiếu tệp ${role}.`);
@@ -70,10 +70,11 @@ export async function listModels(home) {
         downloaded: true, path: dir, checksum: manifest.checksum_status ?? 'không xác định',
       });
     } catch (err) {
-      out.push({
-        id: spec.id, kind: 'local', title: spec.title, license: spec.license,
-        downloaded: false, reason: /** @type {any} */ (err).reason ?? 'internal',
-      });
+      // 'not_downloaded' thường gợi ý chạy `models pull`; model thiếu checksum đã xác minh thì
+      // pull sẽ bị chặn ngay (xem pullModel), nên báo đúng lý do đó để khỏi gây hiểu lầm.
+      const reason = /** @type {any} */ (err).reason === 'not_downloaded' && !hasVerifiedChecksum(spec)
+        ? 'checksum_unverified' : (/** @type {any} */ (err).reason ?? 'internal');
+      out.push({ id: spec.id, kind: 'local', title: spec.title, license: spec.license, downloaded: false, reason });
     }
   }
   for (const spec of REMOTE_MODELS) out.push({ id: spec.id, kind: 'remote', title: spec.title });
@@ -150,6 +151,9 @@ export async function pullModel(home, id, opts = {}) {
   const spec = findModel(id);
   if (!spec) throw new SttError('bad_request', `Không có model "${id}". Có: ${[...LOCAL_MODELS, ...REMOTE_MODELS].map((m) => m.id).join(', ')}`);
   if (spec.kind !== 'local') throw new SttError('bad_request', `Model "${id}" chạy từ xa, không cần tải.`);
+  if (!hasVerifiedChecksum(spec)) {
+    throw modelUnavailable('checksum_unverified', `Model "${id}" chưa có checksum đã xác minh (upstream không công bố, vflow chưa tự tải để băm); từ chối tải để không bỏ qua kiểm toàn vẹn.`);
+  }
   const modelsRoot = path.join(home, 'models');
   await fsp.mkdir(modelsRoot, { recursive: true });
   const tag = `${id}.${process.pid}.${randomBytes(4).toString('hex')}`;
@@ -167,11 +171,11 @@ export async function pullModel(home, id, opts = {}) {
     const progress = (name) => (done, total) =>
       log(`  ${name}: ${(done / 1048576).toFixed(1)}${total ? ` / ${(total / 1048576).toFixed(1)}` : ''} MB`);
     const check = (f, got) => {
-      if (f.sha256 && got !== f.sha256) {
+      // hasVerifiedChecksum() đã chặn ở trên nếu f.sha256 trống; đến đây luôn có giá trị để đối chiếu.
+      if (got !== f.sha256) {
         throw new SttError('internal', `Sai sha256 cho ${f.name}: mong đợi ${f.sha256}, nhận ${got}. Đã huỷ, không ghi model.`);
       }
-      if (!f.sha256) warnings.push(`${f.name}: không có checksum gốc; đã ghi hash tự tính ${got} vào manifest.`);
-      else if (!/^github|^huggingface/.test(f.sha256Source ?? '')) {
+      if (!/^github|^huggingface/.test(f.sha256Source ?? '')) {
         warnings.push(`${f.name}: không có checksum gốc từ upstream; khớp hash vflow đã ghim (${f.sha256Source}).`);
       }
       sources.push({ name: f.name, url: f.url, sha256: got, sha256_expected: f.sha256, sha256_source: f.sha256Source ?? null });

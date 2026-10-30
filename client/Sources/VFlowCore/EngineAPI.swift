@@ -1,7 +1,7 @@
 import Foundation
 
 public enum DictationMode: String, CaseIterable, Sendable {
-    case auto, normal, clean, email, tidy, dev
+    case auto, normal, clean, email, tidy, dev, translate
 
     public var title: String {
         switch self {
@@ -11,13 +11,14 @@ public enum DictationMode: String, CaseIterable, Sendable {
         case .email: "Thư (viết lại)"
         case .tidy: "Gọn"
         case .dev: "Lập trình"
+        case .translate: "Dịch"
         }
     }
 
     /// `true` ⇒ chế độ này gửi CHỮ (không phải âm thanh) ra 9Router; hiện ở tab Tổng quan/Cài đặt.
     public var sendsTextToCloud: Bool {
         switch self {
-        case .tidy, .email: true
+        case .tidy, .email, .translate: true
         case .auto, .normal, .clean, .dev: false
         }
     }
@@ -31,6 +32,7 @@ public enum DictationMode: String, CaseIterable, Sendable {
         case .email: "Gửi chữ qua 9Router — viết lại thành thư chuyên nghiệp"
         case .tidy: "Gửi chữ qua 9Router — thêm dấu câu, bỏ từ đệm, tự sửa giữa câu"
         case .dev: "Trong máy — đọc kiểu lập trình (gạch dưới, snake_case…)"
+        case .translate: "Gửi chữ qua máy chủ của bạn để dịch sang ngôn ngữ đã chọn"
         }
     }
 }
@@ -134,6 +136,10 @@ public struct ModelStatus: Equatable, Sendable {
     public var kind: String
     public var loaded: Bool
     public var reason: String?
+    /// Khả năng CỦA RIÊNG model này, như engine báo trong từng mục `models[]` ở `/healthz`
+    /// (contract mục Cấu hình: "từng model") — KHÔNG phải một trường chung ở gốc JSON.
+    public var languages: [String]? = nil
+    public var autoDetect: Bool? = nil
 }
 
 public struct Health: Equatable, Sendable {
@@ -142,11 +148,17 @@ public struct Health: Equatable, Sendable {
     /// `max_audio_seconds` ở `/healthz` nếu engine có báo (chưa có trong contract hiện tại ⇒ thường
     /// `nil` — xem `RecordingLimit.resolve`, KHÔNG suy đoán khi vắng mặt).
     public var maxAudioSeconds: Int?
+    /// Khả năng model hiện tại; thiếu/null từ engine cũ là không xác định.
+    public var languages: [String]?
+    public var autoDetect: Bool?
 
-    public init(version: String, models: [ModelStatus], maxAudioSeconds: Int? = nil) {
+    public init(version: String, models: [ModelStatus], maxAudioSeconds: Int? = nil,
+                languages: [String]? = nil, autoDetect: Bool? = nil) {
         self.version = version
         self.models = models
         self.maxAudioSeconds = maxAudioSeconds
+        self.languages = languages
+        self.autoDetect = autoDetect
     }
 }
 
@@ -340,12 +352,16 @@ public enum EngineAPI {
         let audioHistory = obj["audio_history"] as? Bool ?? false
         let audioHistoryMb = obj["audio_history_mb"] as? Int ?? 200
         let audioHistoryDays = obj["audio_history_days"] as? Int ?? 7
+        let sttLanguage = SpeechLanguage(rawValue: obj["stt_language"] as? String ?? "") ?? .vietnamese
+        let translateTarget = obj["translate_target"] as? String ?? "en"
+        let translateFormality = Tone(rawValue: obj["translate_formality"] as? String ?? "") ?? .neutral
         return AppSettings(cloudLlm: cloudLlm, llmModel: llmModel, llmTimeoutMs: llmTimeoutMs,
                            actionsEnabled: actionsEnabled, silenceStopSeconds: silenceStopSeconds,
                            statsEnabled: statsEnabled, appRules: appRules, voicePunctuation: voicePunctuation,
                            tone: tone, whisperMode: whisperMode, learnFromEdits: learnFromEdits,
                            livePreview: livePreview, contextSymbols: contextSymbols,
-                           audioHistory: audioHistory, audioHistoryMb: audioHistoryMb, audioHistoryDays: audioHistoryDays)
+                           audioHistory: audioHistory, audioHistoryMb: audioHistoryMb, audioHistoryDays: audioHistoryDays,
+                           sttLanguage: sttLanguage, translateTarget: translateTarget, translateFormality: translateFormality)
     }
 
     // MARK: Command Mode
@@ -414,11 +430,20 @@ public enum EngineAPI {
               obj["ok"] as? Bool == true,
               let version = obj["version"] as? String,
               let models = obj["models"] as? [[String: Any]] else { return nil }
-        return Health(version: version, models: models.compactMap { m in
+        let modelStatus = models.compactMap { m -> ModelStatus? in
             guard let id = m["id"] as? String else { return nil }
             return ModelStatus(id: id, kind: m["kind"] as? String ?? "?",
-                               loaded: m["loaded"] as? Bool ?? false, reason: m["reason"] as? String)
-        }, maxAudioSeconds: obj["max_audio_seconds"] as? Int)
+                               loaded: m["loaded"] as? Bool ?? false, reason: m["reason"] as? String,
+                               languages: m["languages"] as? [String],
+                               autoDetect: m["auto_detect"] is NSNull ? nil : m["auto_detect"] as? Bool)
+        }
+        // Khả năng ngôn ngữ nằm TỪNG model (contract), không có trường chung ở gốc JSON — lấy theo
+        // model ĐANG TẢI XONG (thật sự dùng được); chưa model nào tải xong ⇒ không xác định (`nil`),
+        // KHÔNG đoán để UI coi là "chỉ tiếng Việt" một cách an toàn (xem `languageEnabled`).
+        let active = modelStatus.first { $0.loaded }
+        return Health(version: version, models: modelStatus,
+                      maxAudioSeconds: obj["max_audio_seconds"] as? Int,
+                      languages: active?.languages, autoDetect: active?.autoDetect)
     }
 
     /// Dòng hiển thị trong menu cho một model.

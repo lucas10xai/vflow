@@ -104,6 +104,17 @@ test('ca nhập nhằng: từ nối đứng xa sau nhiều từ khác không b�
   }
 });
 
+test('câu tiếng Anh dùng "camel case"/"pascal case" như danh từ mô tả (không phải lệnh) ⇒ không nuốt hết câu, từ nối tiếng Anh cũng là điểm dừng', () => {
+  // Bug đã gặp: compound_stop_words chỉ có từ nối tiếng Việt, nên "camel case for props" trong câu
+  // tiếng Anh thuần bị nuốt luôn "for props" và biến câu thành "...uses forProps" (sai hoàn toàn).
+  assert.equal(applyDevspeech('This component uses camel case for props').text, 'This component uses camel case for props');
+  assert.equal(applyDevspeech('We use kebab case in file names').text, 'We use kebab case in file names');
+  // Lệnh thật vẫn hoạt động: dừng đúng tại từ nối tiếng Anh, phần còn lại giữ nguyên văn.
+  const r = applyDevspeech('camel case get set is the style we use here');
+  assert.equal(r.text, 'getSet is the style we use here');
+  assert.deepEqual(r.applied, [{ type: 'devspeech', from: 'camel case get set', to: 'getSet' }]);
+});
+
 test('applied ghi type devspeech', () => {
   const r = applyDevspeech('a gạch dưới b');
   assert.deepEqual(r.applied, [{ type: 'devspeech', from: 'gạch dưới', to: '_' }]);

@@ -181,20 +181,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// (bản đóng gói sau này, hoặc chạy ở nơi khác) ⇒ mở cửa sổ chính (đã có hướng dẫn cấp quyền).
     @objc private func openHelp() { controller?.openHelpDocument() }
 
-    /// `--demo-overlay <ghi|khoa|dich|xong|loi> [--demo-seconds N]`: chỉ hiện thanh trạng thái để
-    /// chụp ảnh — đủ 5 trạng thái của HUD (xem U2 mục D).
+    /// `--demo-overlay <ghi|khoa|dich-nghe|dich|xong|loi> [--demo-seconds N]`: chỉ hiện thanh trạng
+    /// thái để chụp ảnh — đủ 6 trạng thái của HUD (xem U2 mục D; `dich-nghe` thêm ở V4/V5 — HUD
+    /// trong lúc GHI ở chế độ Dịch, KHÁC `dich` vốn là lúc đang xử lý/chuyển văn bản cho MỌI chế độ).
     private func runDemo(_ which: String, args: [String]) {
         let state: OverlayState
         switch which {
         case "ghi": state = .listening(level: 0.7)
         case "khoa": state = .listeningLocked(level: 0.5)
+        case "dich-nghe": state = .listeningTranslate(target: TranslationTarget.title(for: "en"), level: 0.7)
         case "dich": state = .transcribing
         case "xong": state = .done
         case "loi":
             state = .error(ErrorText.message(.engine(status: 503, code: "model_unavailable",
                                                      message: "Model chưa tải được (lý do: tunnel_down)")))
         default:
-            FileHandle.standardError.write(Data("dùng: --demo-overlay ghi|khoa|dich|xong|loi [--demo-seconds N]\n".utf8))
+            FileHandle.standardError.write(Data("dùng: --demo-overlay ghi|khoa|dich-nghe|dich|xong|loi [--demo-seconds N]\n".utf8))
             exit(64)
         }
         let o = OverlayController()
@@ -202,7 +204,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         demo = o
         o.show(state)
         switch state {
-        case .listening, .listeningLocked, .listeningCommand: o.setLevel(0.7)
+        case .listening, .listeningLocked, .listeningCommand, .listeningTranslate: o.setLevel(0.7)
         default: break
         }
         // `--render-offscreen` (U2, sau sự cố chụp màn hình thật): chụp HUD bằng `cacheDisplay`
@@ -240,7 +242,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controller = c
         // Dựng THẲNG đúng mục cần chụp (không phải Tổng quan rồi mới chuyển) — xem
         // `AppController.start(initialTab:)` để biết lý do (List không hiện hàng sau khi chuyển mục).
-        let initialTab: MainTab = (target == "tudien:them-loi") ? .dictionary : (MainTab(flag: target) ?? .overview)
+        let initialTab: MainTab = (target == "tudien:them-loi") ? .dictionary
+            : (target == "tongquan:dich") ? .overview
+            : (MainTab(flag: target) ?? .overview)
         c.start(initialTab: initialTab)
 
         DispatchQueue.main.asyncAfter(deadline: .now() + waitMs / 1000) { Task { @MainActor in
@@ -262,11 +266,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             } else if target == "tudien:them-loi" {
                 c.openStatusWindow(tab: .dictionary)
                 c.captureDictionaryAddInvalidOffscreen(to: outPath)
+            } else if target == "tongquan:dich" {
+                // Chọn thẳng chế độ Dịch TRƯỚC khi chụp — để thấy lưới chế độ đổi viền cam sang
+                // Dịch VÀ ô chọn ngôn ngữ đích/mức trang trọng (chỉ hiện khi mode == .translate).
+                c.mode = .translate
+                c.openStatusWindow(tab: .overview)
+                await c.captureStatusWindowOffscreen(tab: .overview, to: outPath)
+            } else if target == "dich-sheet" {
+                c.captureTranslationSheetOffscreen(to: outPath)
             } else if let tab = MainTab(flag: target) {
                 c.openStatusWindow(tab: tab)
                 await c.captureStatusWindowOffscreen(tab: tab, to: outPath)
             } else {
-                FileHandle.standardError.write(Data("dùng: --render-offscreen tongquan|thongke|lichsu|tudien|tudien:them-loi|snippet|caidat[:general|cloud|hotkeys|historyPrivacy|advanced]|welcome --out <path.png>\n".utf8))
+                FileHandle.standardError.write(Data("dùng: --render-offscreen tongquan|tongquan:dich|thongke|lichsu|tudien|tudien:them-loi|dich-sheet|snippet|caidat[:general|cloud|hotkeys|historyPrivacy|advanced]|welcome --out <path.png>\n".utf8))
                 exit(64)
             }
             OffscreenRender.assertNoOnScreenWindow()

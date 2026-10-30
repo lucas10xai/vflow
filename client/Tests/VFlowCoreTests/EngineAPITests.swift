@@ -231,7 +231,7 @@ private func err(_ code: String, _ msg: String) -> Data { json(#"{"error":{"code
 @Suite struct DictationModeTests {
     /// Danh sách theo hợp đồng (contract/engine-api.md mục Chế độ): chỉ `tidy`/`email` gửi CHỮ qua 9Router;
     /// `auto` mặc định không bao giờ gọi LLM (bất biến 10).
-    static let contractSendsTextToCloud: Set<DictationMode> = [.tidy, .email]
+    static let contractSendsTextToCloud: Set<DictationMode> = [.tidy, .email, .translate]
 
     @Test func sendsTextToCloudMatchesContractList() {
         for m in DictationMode.allCases {

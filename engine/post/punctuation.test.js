@@ -56,3 +56,25 @@ test('applied ghi lại from/to cho mỗi lệnh (không rò nội dung ngoài p
   const r = applyVoicePunctuation('tốt lắm dấu chấm than');
   assert.deepEqual(r.applied, [{ type: 'voice_punctuation', from: 'dấu chấm than', to: '!' }]);
 });
+
+test('văn bản đã có dấu câu sẵn (kiểu Whisper): lệnh dấu câu bằng giọng vẫn chạy, không nhân đôi đúng dấu đã có', () => {
+  // Người nói vẫn đọc lệnh dù Whisper đã tự chấm câu ⇒ không ra "PR.." (hai dấu chấm).
+  assert.equal(t('Please review the PR. dấu chấm'), 'Please review the PR.');
+  // Dấu khác với dấu vừa đọc thì KHÔNG bị coi là trùng, vẫn thêm (ví dụ đã có "," thêm ".").
+  assert.equal(t('Đã xong việc, dấu chấm'), 'Đã xong việc,.');
+  // Lệnh vẫn hoạt động bình thường trên câu đã có dấu câu khi không trùng dấu ngay trước.
+  assert.equal(t('Anh đã deploy xong dấu chấm than'), 'Anh đã deploy xong!');
+});
+
+test('câu tiếng Anh thuần (không có từ khoá lệnh tiếng Việt) ⇒ giữ nguyên hoàn toàn, applied rỗng', () => {
+  const sentences = [
+    'Please review the pull request before you merge it into main.',
+    'The deploy finished at 10:32 PM, and all tests passed.',
+    'Is this ready to ship?',
+  ];
+  for (const s of sentences) {
+    const r = applyVoicePunctuation(s);
+    assert.equal(r.text, s, s);
+    assert.deepEqual(r.applied, [], s);
+  }
+});

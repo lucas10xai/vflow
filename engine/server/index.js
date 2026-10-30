@@ -41,11 +41,11 @@ const MAX_SNIPPET_ENTRIES = 500;
 const COMMAND_FIELD_MAX = 20000;
 /** Giá trị query `mode` client được gửi (contract/engine-api.md, mục Chế độ: gồm cả tidy/dev,
  * không chỉ qua auto+app). */
-const MODES = new Set(['normal', 'clean', 'email', 'tidy', 'dev', 'auto']);
+const MODES = new Set(['normal', 'clean', 'email', 'tidy', 'translate', 'dev', 'auto']);
 /** Chế độ thật có thể xuất hiện trong post.mode của phản hồi: `auto` đã được post/index.js (E1a)
  * phân giải thành một trong các chế độ cụ thể này (không bao giờ còn là "auto"). */
-const RESOLVED_MODES = new Set(['normal', 'clean', 'email', 'tidy', 'dev']);
-const LANGS = new Set(['vi', 'auto']);
+const RESOLVED_MODES = new Set(['normal', 'clean', 'email', 'tidy', 'translate', 'dev']);
+const LANGS = new Set(['vi', 'en', 'auto']);
 
 const STATUS = {
   unauthorized: 401, bad_audio: 400, bad_request: 400, model_unavailable: 503,
@@ -286,6 +286,13 @@ export function createServer({
       const m = /^Bearer\s+(\S+)\s*$/i.exec(auth);
       if (!m || !tokenMatches(m[1], token)) throw new HttpError('unauthorized', 'Thiếu hoặc sai token.');
 
+      if (url.pathname === '/v1/models') {
+        if (req.method !== 'GET') throw new HttpError('bad_request', 'Chỉ hỗ trợ GET.', 405);
+        sendJson(res, 200, { models: await stt.status() });
+        entry.status = 200;
+        return;
+      }
+
       if (url.pathname === '/v1/transcribe') {
         if (req.method !== 'POST') throw new HttpError('bad_request', 'Chỉ hỗ trợ POST.', 405);
         await transcribe(req, res, url, entry);
@@ -357,6 +364,23 @@ export function createServer({
       if (url.pathname === '/v1/command') {
         if (req.method !== 'POST') throw new HttpError('bad_request', 'Chỉ hỗ trợ POST.', 405);
         await command(req, res, entry);
+        return;
+      }
+      if (url.pathname === '/v1/translate') {
+        if (req.method !== 'POST') throw new HttpError('bad_request', 'Chỉ hỗ trợ POST.', 405);
+        const body = await readJson(req, MAX_SETTINGS_JSON_BYTES);
+        if (!body || typeof body.text !== 'string' || body.text.trim() === '' || typeof body.target !== 'string' || !/^[a-z]{2,3}$/i.test(body.target)) {
+          throw new HttpError('bad_request', 'Cần JSON {"text":"…","target":"en","formality?":"neutral|formal|casual"}.');
+        }
+        if (body.formality !== undefined && !['neutral', 'formal', 'casual'].includes(body.formality)) throw new HttpError('bad_request', 'formality phải là neutral, formal hoặc casual.');
+        if (typeof post.translate !== 'function') throw new HttpError('internal', 'Chưa cấu hình dịch cho engine này.');
+        const result = await callPost(() => post.translate({ text: body.text, target: body.target.toLowerCase(), ...(body.formality ? { formality: body.formality } : {}) }));
+        if (result?.error === 'cloud_disabled') throw new HttpError('cloud_disabled', 'Dịch gửi văn bản ra ngoài; hãy bật cloud_llm để tiếp tục.');
+        if (result?.error === 'timeout') sendJson(res, 200, { text: null, degraded: true, degraded_reason: 'llm_timeout' });
+        else if (result?.error === 'translate_guard') sendJson(res, 200, { text: null, degraded: true, degraded_reason: 'translate_guard' });
+        else if (result?.error) sendJson(res, 200, { text: null, degraded: true, degraded_reason: 'llm_error' });
+        else sendJson(res, 200, { text: result.text, degraded: false, degraded_reason: null });
+        entry.status = 200;
         return;
       }
       if (url.pathname === '/v1/stats') {
@@ -529,7 +553,7 @@ export function createServer({
     const q = url.searchParams;
     const model = q.get('model') || stt.defaultModel;
     const mode = q.get('mode') || 'normal';
-    const lang = q.get('lang') || 'vi';
+    const lang = q.get('lang') || settings.get().stt_language || 'vi';
     const app = q.get('app') || undefined;
     if (!MODES.has(mode)) throw new HttpError('bad_request', `mode không hợp lệ: ${mode}`);
     if (!LANGS.has(lang)) throw new HttpError('bad_request', `lang không hợp lệ: ${lang}`);
@@ -559,7 +583,7 @@ export function createServer({
       // STT, hoàn toàn trong máy. Dò im lặng ở TRÊN dùng audio gốc (gain không ảnh hưởng quyết định
       // im lặng vì gain không khuếch đại được im lặng tuyệt đối — xem engine/stt/gain.js).
       const pcm = settings.get().whisper_mode ? applyAutoGain(wave.samples, wave.sampleRate) : wave.samples;
-      const r = await stt.transcribe(model, { pcm, sampleRate: wave.sampleRate });
+      const r = await stt.transcribe(model, { pcm, sampleRate: wave.sampleRate, language: lang });
       return { silent: r.text === '', sttMs: r.stt_ms, textRaw: r.text };
     });
     const r = await withTimeout(work, requestTimeoutMs, 'Nhận dạng quá thời gian.');
@@ -583,7 +607,7 @@ export function createServer({
     /** @type {Record<string, unknown>} */
     const body = {
       // Chế độ thực sự đã áp (auto đã phân giải) nếu hậu xử lý báo; không thì chế độ yêu cầu.
-      id, model, mode: typeof postOut.mode === 'string' && RESOLVED_MODES.has(postOut.mode) ? postOut.mode : mode, language: 'vi',
+      id, model, mode: typeof postOut.mode === 'string' && RESOLVED_MODES.has(postOut.mode) ? postOut.mode : mode, language: lang,
       text_raw: r.textRaw,
       text: postOut.text,
       audio_ms: audioMs,

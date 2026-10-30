@@ -27,7 +27,7 @@ struct OverviewView: View {
 
             HeroCard(model: model, controller: controller)
             ShortcutsCard()
-            ModeCard(mode: model.mode) { controller.mode = $0 }
+            ModeCard(mode: model.mode, controller: controller) { controller.mode = $0 }
             PermissionsCard(permissions: model.permissions)
             TodayCard(controller: controller, historyEnabled: controller.historyEnabled, onOpenStats: onOpenStats)
             SystemDisclosure(model: model, controller: controller)
@@ -248,7 +248,9 @@ private struct Keycap: View {
 
 private struct ModeCard: View {
     let mode: DictationMode
+    let controller: AppController
     let onChange: @MainActor (DictationMode) -> Void
+    @State private var settings: AppSettings?
 
     private let columns = [GridItem(.flexible(), spacing: Theme.Spacing.sm), GridItem(.flexible(), spacing: Theme.Spacing.sm)]
 
@@ -257,11 +259,18 @@ private struct ModeCard: View {
             SectionTitle(text: "Chế độ")
             LazyVGrid(columns: columns, spacing: Theme.Spacing.sm) {
                 ForEach(DictationMode.allCases, id: \.self) { m in
-                    ModeRow(mode: m, selected: m == mode) { onChange(m) }
+                    ModeRow(mode: m, selected: m == mode, disabled: ModeAvailability.isDisabled(m, cloudLlm: settings?.cloudLlm ?? true)) { onChange(m) }
                 }
+            }
+            if mode == .translate {
+                TranslationControls(settings: settings, controller: controller)
+            }
+            if settings?.cloudLlm == false {
+                HStack { Text("Dịch cần gửi chữ qua máy chủ của bạn. Đám mây đang tắt.").font(.footnote).foregroundStyle(Theme.warningText); Spacer(); Button("Mở Cài đặt") { controller.openSettingsWindow(tab: .advanced) } }
             }
         }
         .cardBackground()
+        .task { if case .success(let value) = await controller.fetchSettings() { settings = value } }
     }
 }
 
@@ -270,6 +279,7 @@ private struct ModeCard: View {
 private struct ModeRow: View {
     let mode: DictationMode
     let selected: Bool
+    let disabled: Bool
     let onSelect: () -> Void
 
     private var symbol: String {
@@ -280,6 +290,7 @@ private struct ModeRow: View {
         case .email: "envelope"
         case .tidy: "text.badge.checkmark"
         case .dev: "chevron.left.forwardslash.chevron.right"
+        case .translate: "translate"
         }
     }
 
@@ -311,10 +322,34 @@ private struct ModeRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .disabled(disabled)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(mode.title), \(ModeCloudLabel.text(mode)), \(mode.subtitle)\(selected ? ", đang chọn" : "")")
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
+}
+
+private struct TranslationControls: View {
+    let settings: AppSettings?
+    let controller: AppController
+    @State private var target = "en"
+    @State private var formality: Tone = .neutral
+    @State private var custom = ""
+
+    var body: some View {
+        HStack {
+            Picker("Ngôn ngữ đích", selection: $target) {
+                ForEach(TranslationTarget.allCases, id: \.self) { Text($0.title).tag($0.rawValue) }
+                Text("Khác…").tag("custom")
+            }.onChange(of: target) { _, value in if value != "custom" { save(target: value) } }
+            if target == "custom" { TextField("Mã ISO", text: $custom).frame(width: 75).onSubmit { if TranslationValidation.isValidISOCode(custom) { save(target: custom.lowercased()) } } }
+            Picker("Mức trang trọng", selection: $formality) { ForEach(Tone.allCases, id: \.self) { Text($0.title).tag($0) } }
+                .onChange(of: formality) { _, value in Task { _ = await controller.applySettingsPatch(.init(translateFormality: value)) } }
+        }
+        .font(.footnote)
+        .onAppear { target = settings?.translateTarget ?? "en"; formality = settings?.translateFormality ?? .neutral }
+    }
+    private func save(target: String) { guard TranslationValidation.isValidISOCode(target) else { return }; Task { _ = await controller.applySettingsPatch(.init(translateTarget: target)) } }
 }
 
 private struct CloudBadge: View {

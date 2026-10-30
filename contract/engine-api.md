@@ -11,14 +11,18 @@ Engine là tiến trình Node chạy cục bộ. Client (Swift, CLI, test) chỉ
 ## GET /healthz (không cần token)
 ```json
 { "ok": true, "version": "0.1.0", "max_audio_seconds": 1200,
-  "models": [ { "id": "zipformer-vi-30m", "kind": "local", "loaded": true },
+  "models": [ { "id": "zipformer-vi-30m", "kind": "local", "loaded": true, "languages": ["vi"], "auto_detect": false },
+              { "id": "whisper-tiny-multilingual", "kind": "local", "loaded": false, "reason": "not_downloaded",
+                "languages": ["vi","en","ja","ko","zh","fr","de","es","th"], "auto_detect": true },
+              { "id": "sense-voice-multilingual", "kind": "local", "loaded": false, "reason": "checksum_unverified",
+                "languages": ["en","ja","ko","zh","yue"], "auto_detect": true },
               { "id": "phowhisper-large", "kind": "remote", "loaded": false, "reason": "tunnel_down" } ] }
 ```
-`loaded:false` luôn kèm `reason` (không bao giờ im lặng). `max_audio_seconds` là giới hạn thật của `/v1/transcribe` (mục "Ghi âm dài").
+`loaded:false` luôn kèm `reason` (không bao giờ im lặng; `checksum_unverified` = model chưa có checksum đã xác minh nên `models pull` từ chối tải — xem mục "Model cục bộ"). `max_audio_seconds` là giới hạn thật của `/v1/transcribe` (mục "Ghi âm dài"). Model cục bộ (`kind:"local"`) luôn có `languages` (mã ISO) và `auto_detect` (model có tự nhận ngôn ngữ hay không); model đơn ngữ (như `zipformer-vi-30m`) có `languages:["vi"], auto_detect:false`. `GET /v1/models` (cần token) trả `{ "models": [...] }` với cùng hình dạng từng mục.
 
 ## POST /v1/transcribe
 Body: PCM thô `Content-Type: audio/L16; rate=16000; channels=1` (int16 little-endian) **hoặc** `audio/wav` (PCM 16-bit, mọi tần số; engine tự đổi về 16 kHz mono).
-Query: `model` (mặc định lấy từ cấu hình), `mode=normal|clean|email|auto` (mặc định `normal`), `lang=vi|auto` (mặc định `vi`), `app` (gợi ý ứng dụng đang focus, dùng cho `auto`, ví dụ `com.apple.mail`).
+Query: `model` (mặc định lấy từ cấu hình), `mode=normal|clean|email|tidy|translate|dev|auto` (mặc định `normal`), `lang=vi|en|auto` (mặc định `stt_language`), `app` (gợi ý ứng dụng đang focus, dùng cho `auto`, ví dụ `com.apple.mail`). Model đơn ngữ chỉ nhận `vi`; chọn ngôn ngữ khác trả lỗi rõ ràng, không tự đổi model. `translate` luôn gửi văn bản (không gửi âm thanh) ra endpoint LLM và không bao giờ là đích tự động của `auto`.
 
 Phản hồi 200:
 ```json
@@ -51,10 +55,19 @@ Quy tắc: `text_raw` luôn là chữ gốc do STT trả về, không đổi. `t
 ## Cấu hình (`~/.vflow/config.json`, tất cả có mặc định)
 `default_model`, `rewrite.url` (mặc định `http://127.0.0.1:20128/v1` — cổng mặc định của 9Router, một máy chủ tương thích OpenAI chạy cục bộ và hoàn toàn tuỳ chọn; trỏ sang endpoint OpenAI-compatible khác bằng cách đổi giá trị này), `rewrite.model`, `rewrite.timeout_ms` (mặc định 8000), `rewrite.key_file` (đường dẫn tệp chứa khoá; **không** chứa khoá trực tiếp trong cấu hình), `auto.apps` (bảng ánh xạ `{ "<bundleId>": "normal|clean|email" }` cho chế độ `auto`; có mặc định, sửa được). `remote.phowhisper.url`.
 
+`stt_language`: `vi` (mặc định), `en`, hoặc `auto`; `translate_target`: mã ISO 2–3 chữ (mặc định `en`); `translate_formality`: `neutral|formal|casual` (mặc định `neutral`).
+
+## Model cục bộ (`vflow models pull <id>`)
+Mỗi model cục bộ trong danh mục chỉ được tải khi MỌI tệp nguồn có checksum sha256 đã biết (do upstream công bố, hoặc do vflow tự tải và ghim). Thiếu checksum ⇒ `models pull` từ chối ngay (KHÔNG tải, KHÔNG bỏ qua kiểm toàn vẹn), lỗi `model_unavailable`/`checksum_unverified`: "chưa có checksum đã xác minh". `GET /healthz`/`GET /v1/models` báo model đó `loaded:false, reason:"checksum_unverified"` thay vì `not_downloaded` để không gợi ý chạy `pull` vô ích.
+
+## POST /v1/translate
+Nhận JSON `{ "text": "…", "target": "en", "formality": "neutral" }`; cần token. Luôn gửi **văn bản** ra LLM nên `cloud_llm=false` trả `503 cloud_disabled`, không gọi mạng và không trả nguyên văn. Thành công: `{ "text":"…", "degraded":false,"degraded_reason":null }`. Hết giờ/lỗi/guard: `{ "text":null,"degraded":true,"degraded_reason":"llm_timeout|llm_error|translate_guard" }`; client không chèn gì. Guard chặn rỗng, lời dẫn (vd `Here is the translation`, `Bản dịch:`), tỉ lệ dài bất thường (<0,25 hay >4 lần; CJK <0,12), và đầu ra còn tỷ lệ dấu tiếng Việt >4% khi đích không phải `vi`.
+
 ## Chế độ
 - `normal`: STT + từ điển + **dấu câu bằng giọng** (xem mục riêng dưới).
 - `clean`: như `normal` + bỏ từ đệm (ừm, à, ờ, uh…) và sửa dấu cách/chấm câu cơ bản; thuần quy tắc, không gọi LLM.
 - `email`: STT + từ điển + dấu câu bằng giọng + viết lại thành thư chuyên nghiệp qua endpoint OpenAI-compatible (`/chat/completions`, theo `tone`); chỉ gửi **văn bản** (không âm thanh).
+- `translate`: STT (ngôn ngữ nguồn theo `lang`/`stt_language`) + từ điển + dấu câu bằng giọng + dịch sang `translate_target` qua endpoint OpenAI-compatible (theo `translate_formality`, cùng guard dịch với `POST /v1/translate`). Chỉ gửi **văn bản** (không âm thanh). Lỗi/quá giờ/bị guard chặn ⇒ `text:""` (KHÔNG trả lại nguyên văn ngôn ngữ nguồn — tránh chèn nhầm ngôn ngữ), `rewrite={used:false,error:"<mã>"}`, `degraded:true`, `degraded_reason` (`llm_timeout|llm_error|translate_guard|cloud_disabled`). KHÔNG BAO GIỜ là đích tự động của `auto` (`app_rules`/`auto.apps` không nhận giá trị `translate`, kiểm ở cấu hình/cài đặt).
 - `auto`: tra `app_rules` (cài đặt, item 4) TRƯỚC, rồi `auto.apps` (cấu hình cứng) theo `app`. **Mặc định CHỈ chọn chế độ chạy trong máy, không bao giờ gọi LLM**: terminal/IDE (Terminal, iTerm2, Warp, VS Code, Cursor, Ghostty) → `dev`; ứng dụng thư và nhắn tin (Mail, Outlook, Slack, Telegram, Discord, Tin nhắn, WhatsApp…) → `clean`; còn lại → `normal`. `tidy` và `email` chỉ dùng khi người dùng CHỦ ĐỘNG chọn chúng (hoặc tự ánh xạ trong `app_rules`/`auto.apps`); khi đó văn bản của app đó sẽ được gửi qua LLM — TRỪ khi `cloud_llm` đang tắt, lúc đó `auto` rơi về `clean` NGAY (không thử gọi LLM) và báo `degraded_reason:"cloud_disabled"`.
 - `tidy` ("Gọn"): STT + từ điển + snippets + quy tắc đọc kiểu lập trình + dấu câu bằng giọng + **LLM làm gọn** qua endpoint OpenAI-compatible (theo `tone`): tự thêm dấu câu và viết hoa, bỏ từ đệm, hiểu tự sửa giữa câu (backtrack: "…thứ Sáu, à nhầm, thứ Năm" chỉ giữ "thứ Năm"), định dạng danh sách khi người nói liệt kê. Chỉ gửi **văn bản**. KHÔNG được thêm ý, số, tên hay thuật ngữ không có trong lời nói — guard độc lập với `tone`. Lỗi/quá giờ/bị chặn bởi guard ⇒ `text` = văn bản đã qua từ điển, quy tắc lập trình và `clean` (không LLM), `rewrite = {used:false, error:"<mã>"}` (mã thêm: `guard_rejected`, `cloud_disabled`), `degraded:true`.
 - `dev` ("Lập trình"): như `clean` + quy tắc đọc kiểu lập trình (thuần quy tắc, không LLM, không gửi gì ra ngoài, **KHÔNG** chạy dấu câu bằng giọng): "gạch dưới" → `_`, "gạch ngang" → `-`, "gạch chéo" → `/`, "hai chấm" → `:`, "chấm" giữa hai định danh (hoặc trước đuôi tệp đã biết) → `.`, "viết thường nối gạch dưới a b c" → `a_b_c` (snake_case), "camel case a b c" → `aBC` đúng quy ước, v.v. Chỉ áp dụng ở dạng cụm không nhập nhằng; không đổi từ tiếng Việt thường.
@@ -232,3 +245,4 @@ Luôn gửi `"stream": false`. Máy chủ đã thấy trả luồng SSE (`data: 
 23. `POST /v1/import` không bao giờ bật `audio_history`.
 24. Mục lục `audio/index.json` hỏng/rỗng/sai hình dạng/thiếu mục KHÔNG BAO GIỜ làm mất WAV hợp lệ: engine dựng lại mục lục từ các tệp trên đĩa; chỉ tệp `.wav` không phân tích được header mới bị chuyển vào `audio/quarantine/` (không xoá, không tính ngân sách); chỉ `DELETE /v1/audio` (người dùng) mới xoá quarantine.
 25. `@tên` và `/lệnh` chỉ kèm 1 dấu cách phía sau khi CÒN chữ/số tiếp theo; câu kết thúc hoặc dấu câu theo sau thì KHÔNG dư khoảng trắng.
+26. Dịch luôn gửi văn bản ra ngoài, không bao giờ là đích của `auto`; `cloud_llm=false` không được tạo request LLM. Guard dịch từ chối thì không trả/chèn nguyên văn.
