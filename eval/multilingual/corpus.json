@@ -30,5 +30,9 @@
   {"id":"d-05","voice":"Linh","text":"nốt dê đang chạy ở cổng ba nghìn không trăm"},
   {"id":"d-06","voice":"Linh","text":"ku bơ nét cần thêm một node mới"},
   {"id":"d-07","voice":"Linh","text":"mông gô đê bê cần tạo chỉ mục"},
-  {"id":"d-08","voice":"Linh","text":"ngít húp action chưa chạy xong"}
+  {"id":"d-08","voice":"Linh","text":"ngít húp action chưa chạy xong"},
+  {"id":"e-01","voice":"Linh","text":"Hôm nay tôi cần hoàn thành báo cáo dự án trước buổi họp chiều, sau đó gửi bản tóm tắt cho toàn bộ nhóm để mọi người cùng xem lại trước khi quyết định."},
+  {"id":"e-02","voice":"Samantha","text":"Please send the final report before the meeting tomorrow morning, and make sure to include the updated numbers from the engineering team so everyone has the latest data before we start the discussion."},
+  {"id":"e-03","voice":"Linh","text":"Anh deploy giúp em cái service này lên staging rồi báo lại khi pipeline chạy xong, vì khách hàng đang chờ bản demo trước cuộc họp chiều nay."},
+  {"id":"e-04","voice":"Linh","text":"Cái API này trả lỗi timeout khi gọi đến database, anh kiểm tra lại connection pool và restart container trên server staging trước khi mình deploy lên production."}
 ]

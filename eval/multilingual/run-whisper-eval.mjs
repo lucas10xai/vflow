@@ -11,9 +11,13 @@ import { scoreBoth, aggregate, percentile } from '../metrics.js';
 const require = createRequire(import.meta.url);
 const sherpa = require('sherpa-onnx-node');
 
-function arg(name) {
+/** allowEmpty: chuỗi rỗng là giá trị hợp lệ (ví dụ --language '' = tự nhận biết; xem bẫy addon
+ * ở modelConfig.whisper.language — KHÔNG BAO GIỜ truyền 'auto', addon sẽ kill tiến trình Node). */
+function arg(name, { allowEmpty = false } = {}) {
   const i = process.argv.indexOf(name);
-  if (i < 0 || !process.argv[i + 1]) throw new Error(`Thiếu ${name}`);
+  if (i < 0 || process.argv[i + 1] === undefined) throw new Error(`Thiếu ${name}`);
+  if (!allowEmpty && process.argv[i + 1] === '') throw new Error(`Thiếu ${name}`);
+  if (process.argv[i + 1] === 'auto') throw new Error(`${name} không được là "auto" (addon sherpa-onnx sẽ kill tiến trình Node); dùng chuỗi rỗng '' cho tự nhận biết.`);
   return process.argv[i + 1];
 }
 
@@ -38,7 +42,7 @@ function p95(a) { return percentile(a, 0.95); }
 
 const set = arg('--set');
 const modelDir = arg('--model-dir');
-const language = arg('--language');
+const language = arg('--language', { allowEmpty: true });
 const model = arg('--model');
 const encoder = path.join(modelDir, `${model}-encoder.int8.onnx`);
 const decoder = path.join(modelDir, `${model}-decoder.int8.onnx`);
