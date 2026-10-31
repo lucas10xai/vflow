@@ -20,7 +20,7 @@ import { buildDiagnostics } from '../post/diagnostics.js';
 import { createZipWriter } from '../post/zip.js';
 import { ID_RE as AUDIO_ID_RE } from '../post/audiostore.js';
 
-export const VERSION = '0.1.0';
+export const VERSION = '0.2.0';
 export const DEFAULT_PORT = 7611;
 /** Ghi âm dài (item 10, contract/engine-api.md mục "Ghi âm dài"): tối đa 20 phút. */
 export const MAX_AUDIO_SECONDS = 1200;

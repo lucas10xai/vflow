@@ -4,9 +4,26 @@
 
 ## [Chưa phát hành]
 
-(chưa có thay đổi nào sau 0.1.0)
+(chưa có thay đổi nào sau 0.2.0)
 
-## [0.1.0] - chưa phát hành (điền ngày khi gắn thẻ)
+## [0.2.0] - 2026-10-31
+
+### Nhận dạng đa ngôn ngữ
+- Thêm Whisper (OpenAI, giấy phép **MIT**) làm lựa chọn STT song song với `zipformer-vi-30m`: `whisper-tiny-multilingual` (đã có checksum trong registry) và `whisper-base`/`whisper-small` (thêm vào registry). Màn hình chọn model mới trong app liệt kê từng lựa chọn kèm đánh đổi thật (dung lượng, RAM, độ trễ) để người dùng tự quyết, **không đổi model mặc định**.
+- Gỡ **SenseVoice** khỏi registry: không hỗ trợ tiếng Việt theo tài liệu chính thức, và giấy phép TRỌNG SỐ model (khác giấy phép mã nguồn MIT) mơ hồ về thương mại — xem `eval/reports/2026-10-30-multilingual.md`.
+- Sửa lỗi: tham số `stt_language` (`vi`/`en`/tự nhận biết) của API trước đây chỉ được dùng để kiểm năng lực model, **không hề** đổi hành vi giải mã thật của Whisper (luôn tự nhận biết ngầm). Giờ áp dụng đúng tham số được chọn.
+- Sửa lỗi: Whisper trả dấu câu kép ở một số câu do hậu xử lý cộng thêm dấu câu sẵn có trong văn bản gốc.
+- Sửa lỗi: từ điển cá nhân (phiên âm) không hoạt động trên văn bản đã có dấu câu/viết hoa chuẩn (như Whisper trả về) vì so khớp theo dạng chưa chuẩn hoá.
+
+### Chế độ Dịch
+- Thêm chế độ Dịch: gửi văn bản tiếng Việt ra ngoài máy qua endpoint LLM do người dùng tự cấu hình để dịch sang ngôn ngữ khác, có lựa chọn độ trang trọng. Có bộ chặn (guard) từ chối kết quả là lời bình, quá ngắn/quá dài bất thường, hoặc vẫn còn nguyên tiếng Việt (dịch thất bại âm thầm thay vì trả sai). Chế độ `auto` (theo ứng dụng) **không bao giờ** tự chọn Dịch — phải người dùng chọn tay, vì đây là đường duy nhất chủ động gửi nội dung ra ngoài máy.
+
+### Đã biết / đánh đổi (đọc kỹ trước khi đổi mặc định)
+- **Whisper làm từ điển cá nhân (phiên âm) kém hiệu quả hơn hẳn zipformer**: trên bộ đo 36 câu, từ điển sửa đúng 2/36 câu cho zipformer nhưng 0/36 cho Whisper — lỗi của Whisper (nhận nhầm ngôn ngữ, lặp vô nghĩa) khác bản chất với lỗi phiên âm gần-âm mà từ điển hiện tại được thiết kế để bắt.
+- **Mọi số đo trong `eval/reports/2026-10-30-multilingual.md` là từ giọng TỔNG HỢP** (`say` của macOS), **KHÔNG phải giọng người dùng thật** — WER/CER/RTF/RAM giữa `whisper-tiny/base/small` và `zipformer-vi-30m` trên 36 câu chỉ mang tính tham khảo; quyết định đổi mặc định cần đo lại bằng giọng thật trước.
+- `whisper-base`/`whisper-small` chưa có số đo "sau post-processing/từ điển" qua engine thật (ngoài phạm vi registry hiện tại khi đo); chỉ có số "thô" qua gọi trực tiếp sherpa-onnx.
+
+## [0.1.0] - 2026-10-27
 
 Bản đầu tiên. Tổng hợp từ lịch sử `git log` của repo (các đợt M0–M4, E1–E2, C1–C4, U1–U3, V1–V2, nhóm A và các bản sửa).
 

@@ -180,7 +180,7 @@ test('GET /healthz không cần token; model chưa dùng được luôn có reas
   const r = await request(realPort, { path: '/healthz' });
   assert.equal(r.status, 200);
   assert.equal(r.json.ok, true);
-  assert.equal(r.json.version, '0.1.0');
+  assert.equal(r.json.version, '0.2.0');
   const local = r.json.models.find((m) => m.id === 'zipformer-vi-30m');
   assert.deepEqual(local, { id: 'zipformer-vi-30m', kind: 'local', loaded: false, reason: 'not_downloaded', languages: ['vi'], auto_detect: false });
   const whisper = r.json.models.find((m) => m.id === 'whisper-tiny-multilingual');

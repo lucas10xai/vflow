@@ -237,7 +237,7 @@ test('GET /v1/diagnostics: đủ trường, KHÔNG rò token thật/văn bản d
 
   const d = await request(port, token, { path: '/v1/diagnostics' });
   assert.equal(d.status, 200);
-  assert.equal(d.json.engine_version, '0.1.0');
+  assert.equal(d.json.engine_version, '0.2.0');
   assert.ok(typeof d.json.counts.dictionary === 'number');
   assert.ok(Array.isArray(d.json.recent_errors));
   const dump = JSON.stringify(d.json);
