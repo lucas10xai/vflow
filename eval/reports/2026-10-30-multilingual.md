@@ -221,7 +221,7 @@ $ node --test eval/metrics.test.js
 # fail 0
 
 $ node eval/multilingual/run-whisper-eval.mjs --set /tmp --model-dir /tmp --model tiny --language auto
-file:///Users/nghia/Developer/vflow/eval/multilingual/run-whisper-eval.mjs:20
+file:///<repo>/eval/multilingual/run-whisper-eval.mjs:20
   if (process.argv[i + 1] === 'auto') throw new Error(...)
 Error: --language không được là "auto" (addon sherpa-onnx sẽ kill tiến trình Node); dùng chuỗi rỗng '' cho tự nhận biết.
 Node.js v22.23.2
