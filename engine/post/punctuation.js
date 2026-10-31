@@ -107,14 +107,20 @@ export function applyVoicePunctuation(text) {
     const stripBefore = LEFT_ONLY.has(hit.to) || BOTH_SIDES.has(hit.to);
     const stripAfter = RIGHT_ONLY.has(hit.to) || BOTH_SIDES.has(hit.to);
     const before = stripBefore ? text.slice(cursor, start).replace(/[ \t]+$/u, '') : text.slice(cursor, start);
-    // Whisper thường đã trả dấu câu. Không nhân đôi đúng cùng dấu khi người nói vẫn đọc lệnh.
-    const duplicate = LEFT_ONLY.has(hit.to) && before.endsWith(hit.to);
-    out += before + (duplicate ? '' : hit.to);
+    // Whisper thường đã trả dấu câu. Không nhân đôi đúng cùng dấu khi người nói vẫn đọc lệnh — cả
+    // khi dấu đã có TRƯỚC cụm lệnh (ép vào câu trước) VÀ khi dấu nằm NGAY SAU cụm lệnh (Whisper tự
+    // thêm dấu kết câu ở cuối lời nói, đúng ngay sau từ cuối của lệnh): không dedupe "sau" sẽ ra
+    // "…không?." thay vì "…không?" khi Whisper tự chấm câu trùng với lệnh người dùng vừa đọc.
+    const duplicateBefore = LEFT_ONLY.has(hit.to) && before.endsWith(hit.to);
+    out += before + (duplicateBefore ? '' : hit.to);
     if (SENTENCE_END.has(hit.to)) boundaries.push(out.length);
     applied.push({ type: 'voice_punctuation', from: text.slice(start, end), to: hit.to });
     if (stripAfter) {
       const after = /^[ \t]+/u.exec(text.slice(end));
       if (after) end += after[0].length;
+    } else if (LEFT_ONLY.has(hit.to)) {
+      const afterWs = /^[ \t]*/u.exec(text.slice(end))[0];
+      if (text.slice(end + afterWs.length).startsWith(hit.to)) end += afterWs.length + hit.to.length;
     }
     cursor = end;
     i += hit.length;

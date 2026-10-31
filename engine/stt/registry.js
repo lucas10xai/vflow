@@ -10,7 +10,7 @@ import path from 'node:path';
  *   sha256: string|null, sha256Source: string|null, size?: number,
  * }} SourceFile
  * @typedef {{
- *   id: string, kind: 'local', engine: 'offline-transducer'|'online-transducer'|'whisper'|'sense-voice',
+ *   id: string, kind: 'local', engine: 'offline-transducer'|'online-transducer'|'whisper',
  *   title: string, license: string, homepage: string,
  *   source: { type: 'archive', file: SourceFile, root: string } | { type: 'files', files: SourceFile[] },
  *   files: Record<string, RegExp>, languages?: string[], autoDetect?: boolean,
@@ -108,18 +108,37 @@ export const LOCAL_MODELS = [
     keepDirs: ['test_wavs'],
   },
   {
-    id: 'sense-voice-multilingual', kind: 'local', engine: 'sense-voice',
-    title: 'SenseVoice zh/en/ja/ko/yue (sherpa-onnx, CPU)', license: 'Apache-2.0 (FunASR SenseVoice)',
-    homepage: 'https://k2-fsa.github.io/sherpa/onnx/sense-voice/pretrained.html',
-    languages: ['en', 'ja', 'ko', 'zh', 'yue'], autoDetect: true,
-    source: { type: 'archive', root: 'sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17', file: {
-      name: 'sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17.tar.bz2', url: `${SHERPA_RELEASE}/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17.tar.bz2`, size: 1047870769,
-      // GitHub không công bố digest (đã kiểm qua API releases). Gói ~1 GB: vượt giới hạn RAM/thời
-      // gian an toàn để tự tải và băm trong phiên này (xem báo cáo E5) ⇒ chưa có checksum đã xác
-      // minh. `models pull` phải từ chối model này cho đến khi ai đó tải và ghim hash thật.
-      sha256: null, sha256Source: 'upstream_digest_unavailable',
+    id: 'whisper-base-multilingual', kind: 'local', engine: 'whisper',
+    title: 'Whisper base đa ngôn ngữ (sherpa-onnx, CPU)', license: 'MIT (OpenAI Whisper)',
+    homepage: 'https://k2-fsa.github.io/sherpa/onnx/pretrained_models/whisper/base.html',
+    languages: ['vi', 'en', 'ja', 'ko', 'zh', 'fr', 'de', 'es', 'th'], autoDetect: true,
+    source: { type: 'archive', root: 'sherpa-onnx-whisper-base', file: {
+      name: 'sherpa-onnx-whisper-base.tar.bz2', url: `${SHERPA_RELEASE}/sherpa-onnx-whisper-base.tar.bz2`, size: 207557382,
+      // GitHub không công bố digest cho asset này. sha256 đo bởi phiên đo đa ngôn ngữ trước (xem
+      // eval/reports/2026-10-30-multilingual.md, mục "Bảng số đo đầy đủ") — tự tải từ đúng URL trên
+      // và tự băm trong phiên đó, KHÔNG phải checksum do upstream công bố. Phiên này KHÔNG tự tải
+      // lại để băm lần hai (swap ~10,9/12 GB lúc kiểm, vượt ngưỡng dừng 8 GB) — dùng lại số đã đo.
+      sha256: '911b2083efd7c0dca2ac3b358b75222660dc09fb716d64fbfc417ba6c99ff3de',
+      sha256Source: 'vflow-pinned (đo lại từ eval/reports/2026-10-30-multilingual.md, chưa tự tải lại trong phiên 2026-10-31)',
     } },
-    files: { model: /^model.*\.onnx$/, tokens: /tokens\.txt$/ },
+    files: { encoder: /encoder.*\.onnx$/, decoder: /decoder.*\.onnx$/, tokens: /tokens\.txt$/ },
+    keepDirs: ['test_wavs'],
+  },
+  {
+    id: 'whisper-small-multilingual', kind: 'local', engine: 'whisper',
+    title: 'Whisper small đa ngôn ngữ (sherpa-onnx, CPU)', license: 'MIT (OpenAI Whisper)',
+    homepage: 'https://k2-fsa.github.io/sherpa/onnx/pretrained_models/whisper/small.html',
+    languages: ['vi', 'en', 'ja', 'ko', 'zh', 'fr', 'de', 'es', 'th'], autoDetect: true,
+    source: { type: 'archive', root: 'sherpa-onnx-whisper-small', file: {
+      name: 'sherpa-onnx-whisper-small.tar.bz2', url: `${SHERPA_RELEASE}/sherpa-onnx-whisper-small.tar.bz2`, size: 639387718,
+      // Như whisper-base ở trên: sha256 đo bởi eval/reports/2026-10-30-multilingual.md (tự tải +
+      // băm từ đúng URL trên trong phiên đo đó), không phải checksum upstream công bố, và KHÔNG
+      // được tự tải lại để băm lần hai trong phiên này (cùng lý do RAM/swap).
+      sha256: '486a46afbb7ba798507190ffe02fea2dd726049af212e774537efac6afb210a6',
+      sha256Source: 'vflow-pinned (đo lại từ eval/reports/2026-10-30-multilingual.md, chưa tự tải lại trong phiên 2026-10-31)',
+    } },
+    files: { encoder: /encoder.*\.onnx$/, decoder: /decoder.*\.onnx$/, tokens: /tokens\.txt$/ },
+    keepDirs: ['test_wavs'],
   },
 ];
 

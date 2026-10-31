@@ -187,8 +187,6 @@ test('GET /healthz không cần token; model chưa dùng được luôn có reas
   assert.deepEqual(whisper.languages.slice(0, 2), ['vi', 'en']);
   assert.equal(whisper.auto_detect, true);
   assert.equal(whisper.reason, 'not_downloaded', 'whisper có checksum đã xác minh nên chỉ thiếu bước tải, không bị chặn');
-  const senseVoice = r.json.models.find((m) => m.id === 'sense-voice-multilingual');
-  assert.equal(senseVoice.reason, 'checksum_unverified', 'chưa có checksum đã xác minh ⇒ không gợi ý pull như bình thường');
   const remote = r.json.models.find((m) => m.id === 'phowhisper-large');
   assert.equal(remote.reason, 'missing_token');
   for (const m of r.json.models) if (!m.loaded) assert.ok(m.reason, `${m.id} thiếu reason`);

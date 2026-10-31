@@ -35,10 +35,10 @@ export function loadSherpa() {
 
 /**
  * Model transducer (zipformer) xuất token chữ HOA (bảng token không phân biệt hoa/thường) ⇒ đổi về
- * chữ thường để dùng được khi đọc chính tả. Whisper/SenseVoice đã tự trả hoa/thường và dấu câu
- * đúng (như bản gốc Whisper) cho MỌI ngôn ngữ kể cả tiếng Việt — không được đụng vào, kể cả khi
- * `language` yêu cầu là "vi" (bug đã gặp: khoá theo `language` thay vì theo loại engine làm mất
- * hoa/dấu câu Whisper trả cho câu tiếng Việt).
+ * chữ thường để dùng được khi đọc chính tả. Whisper đã tự trả hoa/thường và dấu câu đúng cho MỌI
+ * ngôn ngữ kể cả tiếng Việt — không được đụng vào, kể cả khi `language` yêu cầu là "vi" (bug đã
+ * gặp: khoá theo `language` thay vì theo loại engine làm mất hoa/dấu câu Whisper trả cho câu
+ * tiếng Việt).
  * @param {string} text
  * @param {boolean} rawTransducer `true` khi văn bản đến từ engine transducer thô (zipformer).
  */
@@ -65,6 +65,27 @@ export function createLocalProvider({ home, numThreads = defaultThreads(), sherp
   /** @type {any} */ let recognizer = null;
   /** @type {import('./registry.js').LocalModelSpec|null} */ let spec = null;
   /** @type {number|null} */ let loadMs = null;
+  // sherpa-onnx nạp `language` của Whisper vào CẤU HÌNH RECOGNIZER (không phải tham số decode đổi
+  // được mỗi câu) ⇒ đổi stt_language giữa chừng phải TẠO LẠI recognizer. `whisperFiles`/`sherpaLib`
+  // giữ lại để nạp lại không cần đọc tệp từ đĩa lần nữa; chỉ nạp lại khi ngôn ngữ THỰC SỰ đổi so với
+  // `whisperLang` hiện tại (không nạp lại mỗi câu khi người dùng vẫn dùng cùng một ngôn ngữ).
+  /** @type {Record<string,string>|null} */ let whisperFiles = null;
+  /** @type {string|null} */ let whisperLang = null;
+  /** @type {any} */ let sherpaLib = null;
+
+  /**
+   * Tạo recognizer Whisper với `language` sherpa-onnx đã được MAP SẴN ('' cho tự nhận biết, mã ISO
+   * cho vi/en/…) — KHÔNG BAO GIỜ gọi với chuỗi "auto" (xem bẫy ở nhánh whisper trong loadModel).
+   * @param {string} language
+   */
+  async function buildWhisperRecognizer(language) {
+    const modelConfig = {
+      tokens: whisperFiles.tokens, numThreads, provider: 'cpu', debug: 0,
+      whisper: { encoder: whisperFiles.encoder, decoder: whisperFiles.decoder, language, task: 'transcribe' },
+    };
+    const featConfig = { sampleRate: TARGET_RATE, featureDim: 80 };
+    return sherpaLib.OfflineRecognizer.createAsync({ featConfig, modelConfig, decodingMethod: 'greedy_search' });
+  }
 
   const provider = {
     kind: 'local',
@@ -81,17 +102,15 @@ export function createLocalProvider({ home, numThreads = defaultThreads(), sherp
       const t0 = performance.now();
       /** @type {any} */
       const modelConfig = { tokens: files.tokens, numThreads, provider: 'cpu', debug: 0 };
+      // sherpa-onnx (OfflineWhisperGreedySearchDecoder) coi "auto" là MỘT MÃ NGÔN NGỮ không hợp lệ
+      // (chỉ nhận chuỗi rỗng để tự nhận ngôn ngữ, hoặc một mã ISO có trong lang2id của model) ⇒ nếu
+      // truyền "auto" addon gọi SHERPA_ONNX_EXIT và TẮT LUÔN tiến trình Node, không ném lỗi JS bắt
+      // được. Nạp lần đầu LUÔN bằng chuỗi rỗng (tự nhận biết, an toàn làm mặc định); transcribe()
+      // nạp lại đúng ngôn ngữ (vi/en/…) khi yêu cầu khác với lần nạp hiện tại — xem buildWhisperRecognizer.
       if (s.engine === 'offline-transducer' || s.engine === 'online-transducer') {
         modelConfig.transducer = { encoder: files.encoder, decoder: files.decoder, joiner: files.joiner };
       } else if (s.engine === 'whisper') {
-        // sherpa-onnx (OfflineWhisperGreedySearchDecoder) coi "auto" là MỘT MÃ NGÔN NGỮ không hợp
-        // lệ (chỉ nhận chuỗi rỗng để tự nhận ngôn ngữ, hoặc một mã ISO có trong lang2id của model)
-        // ⇒ nếu truyền "auto" addon gọi SHERPA_ONNX_EXIT và TẮT LUÔN tiến trình Node, không ném lỗi
-        // JS bắt được. Chuỗi rỗng để Whisper tự nhận ngôn ngữ MỖI LẦN giải mã theo chính audio đó
-        // (không phải một cấu hình cố định lúc tải model) — đúng cho mọi yêu cầu vi/en/auto.
         modelConfig.whisper = { encoder: files.encoder, decoder: files.decoder, language: '', task: 'transcribe' };
-      } else if (s.engine === 'sense-voice') {
-        modelConfig.senseVoice = { model: files.model, language: 'auto', useInverseTextNormalization: 1 };
       }
       const featConfig = { sampleRate: TARGET_RATE, featureDim: 80 };
       try {
@@ -104,6 +123,11 @@ export function createLocalProvider({ home, numThreads = defaultThreads(), sherp
       }
       if (!recognizer) throw modelUnavailable('load_failed', `Không tải được model "${id}".`);
       spec = s;
+      if (s.engine === 'whisper') {
+        whisperFiles = files;
+        whisperLang = '';
+        sherpaLib = lib;
+      }
       loadMs = Math.round(performance.now() - t0);
       return { id, load_ms: loadMs };
     },
@@ -120,6 +144,21 @@ export function createLocalProvider({ home, numThreads = defaultThreads(), sherp
         if (spec.autoDetect !== true) throw new SttError('bad_request', `Model "${spec.id}" không hỗ trợ tự nhận ngôn ngữ (auto). Hãy chọn ngôn ngữ cụ thể hoặc đổi model.`);
       } else if (!(spec.languages ?? ['vi']).includes(language)) {
         throw new SttError('bad_request', `Model "${spec.id}" không hỗ trợ ngôn ngữ "${language}". Hãy đổi model.`);
+      }
+      if (spec.engine === 'whisper') {
+        // Map 'auto' -> '' TRƯỚC khi chạm tới sherpa-onnx (xem bẫy ở loadModel) — "auto" không bao
+        // giờ được truyền xuống addon. Chỉ nạp lại khi ngôn ngữ thực sự khác lần nạp hiện tại.
+        const sherpaLang = language === 'auto' ? '' : language;
+        if (sherpaLang !== whisperLang) {
+          let next;
+          try {
+            next = await buildWhisperRecognizer(sherpaLang);
+          } catch (err) {
+            throw modelUnavailable('load_failed', `Không nạp lại được model "${spec.id}" cho ngôn ngữ "${language}": ${/** @type {Error} */ (err).message}`, err);
+          }
+          recognizer = next;
+          whisperLang = sherpaLang;
+        }
       }
       if (spec.engine === 'online-transducer') {
         const s = provider.createSession();

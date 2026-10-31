@@ -66,6 +66,17 @@ test('văn bản đã có dấu câu sẵn (kiểu Whisper): lệnh dấu câu b
   assert.equal(t('Anh đã deploy xong dấu chấm than'), 'Anh đã deploy xong!');
 });
 
+test('văn bản kiểu Whisper: dấu câu Whisper tự thêm NGAY SAU cụm lệnh (cuối lời nói) không bị nhân đôi', () => {
+  // Bug đã gặp: test ở trên (dòng 60-67) chỉ kiểm dấu đã có TRƯỚC cụm lệnh; nếu Whisper tự chấm
+  // câu ngay SAU từ cuối của lệnh (phổ biến khi lệnh đứng cuối câu, vì Whisper luôn kết câu), bản cũ
+  // ra "…không?." (hai dấu, một do lệnh một do Whisper) — SAI, phải gộp thành một "?".
+  assert.equal(t('Xin chào Dấu phẩy anh khỏe không Dấu hỏi chấm?'), 'Xin chào, anh khỏe không?');
+  assert.equal(t('ok Dấu phẩy, tiếp theo'), 'ok, tiếp theo');
+  // Dấu KHÁC với dấu lệnh vừa tạo thì KHÔNG coi là trùng, vẫn giữ cả hai (như test dòng 64) — ở đây
+  // là trường hợp đối xứng: dấu lạ nằm SAU lệnh (Whisper tự chấm câu bằng dấu khác lệnh).
+  assert.equal(t('Anh đã deploy xong Dấu chấm than.'), 'Anh đã deploy xong!.');
+});
+
 test('câu tiếng Anh thuần (không có từ khoá lệnh tiếng Việt) ⇒ giữ nguyên hoàn toàn, applied rỗng', () => {
   const sentences = [
     'Please review the pull request before you merge it into main.',

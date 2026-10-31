@@ -170,7 +170,7 @@ public enum EngineAPI {
     }
 
     public static func transcribeRequest(port: Int, token: String, pcm: Data, mode: DictationMode,
-                                         app: String?, timeout: TimeInterval = 150) -> URLRequest {
+                                         app: String?, model: String? = nil, timeout: TimeInterval = 150) -> URLRequest {
         var c = URLComponents()
         c.scheme = "http"
         c.host = host
@@ -178,6 +178,9 @@ public enum EngineAPI {
         c.path = "/v1/transcribe"
         var q = [URLQueryItem(name: "mode", value: mode.rawValue)]
         if let app, !app.isEmpty { q.append(URLQueryItem(name: "app", value: app)) }
+        // Model đang dùng (lựa chọn của người dùng ở Cài đặt › Nâng cao) — vắng mặt ⇒ engine tự lấy
+        // `default_model` từ cấu hình (hành vi cũ, không đổi khi chưa ai chọn model nào).
+        if let model, !model.isEmpty { q.append(URLQueryItem(name: "model", value: model)) }
         c.queryItems = q
         var r = URLRequest(url: c.url!, cachePolicy: .reloadIgnoringLocalAndRemoteCacheData, timeoutInterval: timeout)
         r.httpMethod = "POST"
@@ -423,6 +426,34 @@ public enum EngineAPI {
         })
     }
 
+    /// Giải mã MỘT mục trong `models[]` (dùng chung cho `/healthz` và `GET /v1/models` — cùng hình
+    /// dạng từng mục theo contract/engine-api.md). `nil` nếu thiếu `id`.
+    static func decodeModelStatus(_ m: [String: Any]) -> ModelStatus? {
+        guard let id = m["id"] as? String else { return nil }
+        return ModelStatus(id: id, kind: m["kind"] as? String ?? "?",
+                           loaded: m["loaded"] as? Bool ?? false, reason: m["reason"] as? String,
+                           languages: m["languages"] as? [String],
+                           autoDetect: m["auto_detect"] is NSNull ? nil : m["auto_detect"] as? Bool)
+    }
+
+    /// `GET /v1/models` (cần token) — màn hình chọn model (Cài đặt › Nâng cao).
+    public static func modelsRequest(port: Int, token: String) -> URLRequest {
+        var r = URLRequest(url: baseURL(port: port).appendingPathComponent("v1/models"),
+                           cachePolicy: .reloadIgnoringLocalAndRemoteCacheData, timeoutInterval: 10)
+        r.httpMethod = "GET"
+        r.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        return r
+    }
+
+    public static func parseModelList(status: Int, data: Data) -> Result<[ModelStatus], ClientError> {
+        guard status == 200 else { return .failure(errorFrom(status: status, data: data)) }
+        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let models = obj["models"] as? [[String: Any]] else {
+            return .failure(.badResponse(status: status, detail: "thiếu trường models"))
+        }
+        return .success(models.compactMap(decodeModelStatus))
+    }
+
     /// `nil` ⇒ có gì đó nghe cổng nhưng không phải engine vflow.
     public static func parseHealth(status: Int, data: Data) -> Health? {
         guard status == 200,
@@ -430,13 +461,7 @@ public enum EngineAPI {
               obj["ok"] as? Bool == true,
               let version = obj["version"] as? String,
               let models = obj["models"] as? [[String: Any]] else { return nil }
-        let modelStatus = models.compactMap { m -> ModelStatus? in
-            guard let id = m["id"] as? String else { return nil }
-            return ModelStatus(id: id, kind: m["kind"] as? String ?? "?",
-                               loaded: m["loaded"] as? Bool ?? false, reason: m["reason"] as? String,
-                               languages: m["languages"] as? [String],
-                               autoDetect: m["auto_detect"] is NSNull ? nil : m["auto_detect"] as? Bool)
-        }
+        let modelStatus = models.compactMap(decodeModelStatus)
         // Khả năng ngôn ngữ nằm TỪNG model (contract), không có trường chung ở gốc JSON — lấy theo
         // model ĐANG TẢI XONG (thật sự dùng được); chưa model nào tải xong ⇒ không xác định (`nil`),
         // KHÔNG đoán để UI coi là "chỉ tiếng Việt" một cách an toàn (xem `languageEnabled`).

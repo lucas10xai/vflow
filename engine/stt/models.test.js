@@ -51,6 +51,26 @@ test('pullModel: sai sha256 ⇒ huỷ, không để lại thư mục model hay t
   assert.equal(fs.readFileSync(path.join(old, 'marker'), 'utf8'), 'cũ');
 });
 
+test('registry: whisper-base/small-multilingual có checksum (đo lại từ eval/reports/2026-10-30-multilingual.md, chưa tự tải lại lần hai); pullModel từ chối nếu byte tải về không khớp hash đã ghim', async (t) => {
+  for (const id of ['whisper-base-multilingual', 'whisper-small-multilingual']) {
+    const m = LOCAL_MODELS.find((x) => x.id === id);
+    assert.match(m.source.file.sha256, /^[0-9a-f]{64}$/, `${id}: phải có sha256 thật`);
+    assert.match(m.source.file.sha256Source, /2026-10-30-multilingual/, `${id}: phải ghi rõ nguồn hash là báo cáo đo, không phải upstream`);
+    assert.equal(m.license, 'MIT (OpenAI Whisper)');
+  }
+  const home = tmpHome();
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  // Giả lập: nguồn thật đổi nội dung (hoặc tải hỏng) ⇒ byte tải về KHÔNG khớp hash đã ghim từ báo
+  // cáo 2026-10-30 ⇒ models pull phải từ chối ngay, không được "nới lỏng" để cho qua.
+  const fakeFetch = async () => new Response(new Uint8Array([9, 9, 9, 9]), { status: 200 });
+  await assert.rejects(
+    pullModel(home, 'whisper-small-multilingual', { fetchImpl: /** @type {any} */ (fakeFetch) }),
+    { message: /Sai sha256/ },
+    'hash không khớp ⇒ huỷ, KHÔNG được coi là tín hiệu để sửa lại hash cho khớp',
+  );
+  assert.deepEqual(fs.readdirSync(path.join(home, 'models')), [], 'không để lại thư mục model nào khi bị từ chối');
+});
+
 test('pullModel: HTTP lỗi ⇒ báo lỗi; id lạ hoặc model từ xa ⇒ bad_request', async (t) => {
   const home = tmpHome();
   t.after(() => fs.rmSync(home, { recursive: true, force: true }));
@@ -68,10 +88,6 @@ test('listModels: chưa tải ⇒ downloaded:false kèm reason', async (t) => {
   assert.equal(z.downloaded, false);
   assert.equal(z.reason, 'not_downloaded');
   assert.ok(l.some((m) => m.id === 'phowhisper-large' && m.kind === 'remote'));
-  // Chưa có checksum đã xác minh ⇒ báo đúng lý do (không gợi ý "models pull" vô ích như not_downloaded).
-  const sv = l.find((m) => m.id === 'sense-voice-multilingual');
-  assert.equal(sv.downloaded, false);
-  assert.equal(sv.reason, 'checksum_unverified');
 });
 
 test('local provider: runtime thiếu ⇒ model_unavailable/runtime_missing; addon ném lỗi ⇒ load_failed', async (t) => {
@@ -112,21 +128,10 @@ test('bộ quản lý STT: model được yêu cầu hỏng ⇒ lỗi, KHÔNG d�
   assert.deepEqual(st.find((m) => m.id === 'zipformer-vi-30m-streaming'), { id: 'zipformer-vi-30m-streaming', kind: 'local', loaded: false, reason: 'load_failed', languages: ['vi'], auto_detect: false });
 });
 
-test('registry: whisper tiny có checksum thật (vflow tự tải và băm); sense-voice chưa có nên bị models pull chặn', async (t) => {
+test('registry: whisper tiny có checksum thật (vflow tự tải và băm)', async () => {
   const whisper = LOCAL_MODELS.find((m) => m.id === 'whisper-tiny-multilingual');
   assert.deepEqual(whisper.languages.slice(0, 2), ['vi', 'en']);
   assert.equal(whisper.autoDetect, true);
   assert.match(whisper.source.file.sha256, /^[0-9a-f]{64}$/, 'phải là sha256 thật, không phải ngụy tạo');
   assert.match(whisper.source.file.sha256Source, /vflow-pinned/);
-
-  const senseVoice = LOCAL_MODELS.find((m) => m.id === 'sense-voice-multilingual');
-  assert.equal(senseVoice.source.file.sha256, null, 'gói ~1 GB, chưa tự tải để băm trong giới hạn RAM/thời gian ⇒ chưa có checksum đã xác minh');
-  const home = tmpHome();
-  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
-  await assert.rejects(
-    pullModel(home, 'sense-voice-multilingual'),
-    { code: 'model_unavailable', reason: 'checksum_unverified' },
-    'models pull phải từ chối, không được bỏ qua kiểm toàn vẹn',
-  );
-  assert.ok(!fs.existsSync(path.join(home, 'models')), 'không tạo thư mục/tệp tạm nào khi bị chặn trước khi tải');
 });

@@ -23,9 +23,17 @@ public struct TeachResult: Equatable, Sendable {
 public extension EngineAPI {
     /// Âm thanh CÙNG định dạng/quy tắc `/v1/partial` (PCM 16 kHz mono LE) — không ghi đĩa phía
     /// client (xem `AudioRecorder`), chỉ truyền thẳng vào RAM rồi gửi.
-    static func teachRequest(port: Int, token: String, pcm: Data, timeout: TimeInterval = 20) -> URLRequest {
-        var r = URLRequest(url: baseURL(port: port).appendingPathComponent("v1/teach"),
-                           cachePolicy: .reloadIgnoringLocalAndRemoteCacheData, timeoutInterval: timeout)
+    /// `model`: TUỲ CHỌN (mặc định `default_model` của engine) — màn hình chọn model dùng tham số
+    /// này để "nạp" (ensure) một model cụ thể và thấy lỗi `model_unavailable` ngay, không đợi lần
+    /// đọc chính tả thật đầu tiên mới biết model hỏng.
+    static func teachRequest(port: Int, token: String, pcm: Data, model: String? = nil, timeout: TimeInterval = 20) -> URLRequest {
+        var c = URLComponents()
+        c.scheme = "http"
+        c.host = host
+        c.port = port
+        c.path = "/v1/teach"
+        if let model, !model.isEmpty { c.queryItems = [URLQueryItem(name: "model", value: model)] }
+        var r = URLRequest(url: c.url!, cachePolicy: .reloadIgnoringLocalAndRemoteCacheData, timeoutInterval: timeout)
         r.httpMethod = "POST"
         r.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         r.setValue("audio/L16; rate=16000; channels=1", forHTTPHeaderField: "Content-Type")

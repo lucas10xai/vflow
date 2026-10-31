@@ -411,10 +411,55 @@ Cần `cloud_llm` đang BẬT và một model LLM thật đã cấu hình (Cài 
 
 **O5. Chỉ model đa ngôn ngữ mới cho đổi "Ngôn ngữ khi nói"**
 1. Cài đặt › Giọng nói, xem mục "Ngôn ngữ khi nói" (đầu mục, trước "Lệnh dấu câu bằng giọng").
-   **KỲ VỌNG (model mặc định `zipformer-vi-30m`, chỉ tiếng Việt):** "Tiếng Việt" chọn được, "Tiếng Anh" và "Tự nhận biết" MỜ/không bấm được, kèm dòng chữ cam "Model hiện tại chỉ nhận tiếng Việt — đổi model ở Cài đặt › Nâng cao".
-2. (Nếu có tải model đa ngôn ngữ, vd. `whisper-tiny-multilingual`) đổi model ở Cài đặt › Nâng cao, quay lại mục Giọng nói.
-   **KỲ VỌNG:** "Tiếng Anh"/"Tự nhận biết" giờ chọn được (theo đúng `languages`/`auto_detect` model đó báo ở `/healthz`), dòng chữ cam biến mất.
+   **KỲ VỌNG (model mặc định `zipformer-vi-30m`, chỉ tiếng Việt):** "Tiếng Việt" chọn được, "Tiếng Anh" và "Tự nhận biết" MỜ/không bấm được, kèm dòng chữ cam "Model hiện tại chỉ nhận tiếng Việt — đổi model ở Cài đặt › Nâng cao" và nút "Mở màn hình chọn model…" ngay dưới.
+2. Bấm "Mở màn hình chọn model…" (hoặc Cài đặt › Nâng cao › "Chọn model…"), tải và chọn một model đa ngôn ngữ (xem mục P bên dưới để biết chi tiết từng bước), quay lại mục Giọng nói.
+   **KỲ VỌNG:** "Tiếng Anh"/"Tự nhận biết" giờ chọn được (theo đúng `languages`/`auto_detect` model đó báo ở `/healthz`), dòng chữ cam và nút "Mở màn hình chọn model…" biến mất.
 
 **O6. Chữ trong giao diện không nói sai "chỉ chạy trong máy" khi Dịch đang bật**
 1. Với Dịch đang chọn, xem lại nhãn ở Tổng quan/menu thanh trạng thái cho MỖI chế độ.
    **KỲ VỌNG:** Dịch luôn mang nhãn "Gửi chữ qua máy chủ của bạn" (không bao giờ "Trong máy"); các chế độ Thường/Làm sạch/Lập trình/Tự động vẫn đúng "Trong máy" dù Dịch đang được chọn (không bị "lây" nhãn sai).
+
+## P. F2: màn hình chọn model nhận dạng giọng nói (đa ngôn ngữ)
+
+**Bối cảnh (đọc trước):** `zipformer-vi-30m` (mặc định) chỉ hiểu tiếng Việt, rất nhẹ/nhanh (~270 MB
+RAM, ~0,1 s/câu), giấy phép CC-BY-NC-ND-4.0 (chỉ dùng cá nhân). Các model Whisper (tải thêm) hiểu
+được tiếng Anh/đa ngôn ngữ nhưng nặng hơn nhiều và giấy phép MIT. **Mọi số đo dưới đây lấy từ
+`eval/reports/2026-10-30-multilingual.md`, đo bằng GIỌNG TỔNG HỢP (`say` của macOS) — CHƯA phải
+giọng của anh.** Model `whisper-small-multilingual` MỚI được engine hỗ trợ tải từ 2026-10-31 (610 MB,
+WER đo được: tiếng Việt thuần 9,6%, tiếng Anh thuần 2,5%, Việt xen Anh 50,0%, RAM đỉnh ~1 GB, RTF
+trung vị 0,32 — chậm hơn hẳn zipformer nhưng hiểu được tiếng Anh, điều zipformer không làm được).
+
+**P1. Mở màn hình chọn model**
+1. Cài đặt (⌘,) › Nâng cao, xem mục "Model nhận dạng giọng nói" ở đầu trang.
+   **KỲ VỌNG:** dòng "Đang dùng: Mặc định của engine" (nếu chưa từng đổi model) + nút "Chọn model…".
+2. Bấm "Chọn model…".
+   **KỲ VỌNG:** cửa sổ "Chọn model nhận dạng giọng nói" hiện danh sách MỌI model engine biết (không chỉ model mặc định): `zipformer-vi-30m` (Sẵn sàng, "Dùng model này"), các model khác (Chưa tải, nút "Tải…") — mỗi model có dòng đánh đổi ngắn (vd "Chỉ tiếng Việt · nhanh nhất · 33 MB · chỉ dùng cá nhân") VÀ một dòng nhỏ nhắc "Đo bằng giọng tổng hợp…" ngay dưới.
+
+**P2. Tải `whisper-small-multilingual`**
+1. Ở dòng "Whisper small đa ngôn ngữ", bấm "Tải…".
+   **KỲ VỌNG:** thẻ xin đồng ý hiện ra: dung lượng "610 MB", giấy phép "MIT", tóm tắt "dùng thương mại được", nút "Mở trang giấy phép" (mở trình duyệt tới trang LICENSE của openai/whisper), nút "Đồng ý và tải" + "Huỷ". CHƯA bấm đồng ý thì Activity Monitor › Mạng không thấy tăng.
+2. Bấm "Đồng ý và tải".
+   **KỲ VỌNG:** thanh tiến độ "Đã tải X / … MB" cập nhật dần; nút "Tải…" ở MỌI model khác bị mờ/khoá trong lúc này (chỉ một lượt tải cùng lúc); bấm "Huỷ tải" giữa chừng thì dừng ngay, không để lại thư mục `.tmp-whisper-small-multilingual.*` trong `~/.vflow/models`.
+3. Bấm lại "Tải…" (hoặc "Thử lại") và để tải xong (610 MB — có thể vài phút tuỳ mạng).
+   **KỲ VỌNG:** "Đang kiểm mã băm SHA-256…" rồi dòng trạng thái đổi thành "Đã tải, chưa nạp"/"Sẵn sàng", nút đổi thành "Dùng model này".
+4. Tắt mạng rồi bấm "Tải…" ở một model khác chưa tải.
+   **KỲ VỌNG:** lỗi đỏ rõ ràng ("lỗi mạng hoặc máy chủ…"), nút "Thử lại" dùng được khi bật mạng lại — không "thành công giả", không đứng hình vô thời hạn.
+
+**P3. Đổi sang model vừa tải, so sánh với model cũ**
+1. Bấm "Dùng model này" ở dòng `whisper-small-multilingual`.
+   **KỲ VỌNG:** nút đổi thành "Đang nạp…" vài trăm ms tới vài giây (model ~1 GB RAM, nạp chậm hơn zipformer rõ rệt — đây là "việc nặng" nêu trong mô tả tính năng), rồi dòng đó hiện huy hiệu "Đang dùng"; không đứng hình/treo cửa sổ.
+2. Mở TextEdit/Notes, giữ ⌥ trái, **nói một câu tiếng Anh thuần** (vd. "Please send the final report before the meeting tomorrow morning"), nhả phím.
+   **KỲ VỌNG:** chữ tiếng Anh được dán ra (đúng hoặc gần đúng câu đã nói) — ĐÂY LÀ ĐIỀU `zipformer-vi-30m` KHÔNG LÀM ĐƯỢC (thử lại với model cũ ở bước 5 để thấy khác biệt: zipformer sẽ phiên âm thành chữ Việt vô nghĩa, ví dụ kiểu "cờ lít sờ en thờ phai no report...").
+3. Nói **một câu tiếng Việt xen tiếng Anh** (vd. "deploy lên staging sau khi test xong", hoặc "anh review giúp em cái commit này").
+   **KỲ VỌNG:** nghe được phần lớn câu đúng (có thể vẫn sai vài từ — báo cáo đo cho WER nhóm này ~50%, KHÔNG hoàn hảo, đừng kỳ vọng tuyệt đối đúng). So khớp bằng mắt với báo cáo `eval/reports/2026-10-30-multilingual.md` mục "Ví dụ văn bản THẬT" nếu muốn đối chiếu.
+4. Cài đặt › Giọng nói: xem mục "Ngôn ngữ khi nói".
+   **KỲ VỌNG:** "Tiếng Anh"/"Tự nhận biết" giờ CHỌN ĐƯỢC (không còn mờ); nếu model đang dùng là họ Whisper, thấy thêm dòng chữ nhỏ cảnh báo: "Từ điển cá nhân (phiên âm) có thể kém hiệu quả hơn với model Whisper…" — đây là thật, không phải doạ suông (đo được 2/36 câu đúng với zipformer, 0/36 với Whisper).
+5. Quay lại màn hình chọn model, bấm "Dùng model này" ở `zipformer-vi-30m` để đổi về model cũ, lặp lại bước 2 (câu tiếng Anh) để SO SÁNH trực tiếp.
+   **KỲ VỌNG:** cùng một câu tiếng Anh, zipformer ra chữ vô nghĩa/phiên âm kiểu Việt; whisper-small-multilingual (bước 2) ra đúng tiếng Anh — thấy rõ đánh đổi "chậm hơn nhưng hiểu được tiếng Anh" bằng chính tai mình, không chỉ qua số liệu.
+
+**P4. Không cho xoá model đang dùng; xoá giải phóng đĩa**
+1. Với `zipformer-vi-30m` đang được chọn (từ P3 bước 5), mở màn hình chọn model.
+   **KỲ VỌNG:** dòng `zipformer-vi-30m` KHÔNG có nút "Xoá…" (đang dùng); dòng `whisper-small-multilingual` (đã tải, không đang dùng) CÓ nút "Xoá…".
+2. Bấm "Xoá…" ở `whisper-small-multilingual`.
+   **KỲ VỌNG:** hộp thoại xác nhận "Xoá model đã tải?" hiện ra trước khi xoá thật; xác nhận xong thì dòng đó đổi lại thành "Chưa tải"/"Tải…"; `~/.vflow/models/whisper-small-multilingual` không còn trên đĩa (`ls ~/.vflow/models`).
+3. (Dọn dẹp) nếu không muốn giữ model đã tải thử, lặp lại để xoá các model Whisper khác đã tải trong lúc kiểm tay ở trên.

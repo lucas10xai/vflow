@@ -199,6 +199,21 @@ test('khớp văn bản tiếng Anh (vd STT đa ngôn ngữ như Whisper trả �
   assert.equal((await p.process({ textRaw: 'kubernetes-cli and reporting are different things' })).text, 'kubernetes-cli and reporting are different things');
 });
 
+test('2 ví dụ thật trong eval/reports/2026-10-30-multilingual.md hoạt động với từ điển hạt giống, cả dạng zipformer (chữ thường không dấu câu) VÀ dạng Whisper (viết hoa + dấu câu)', async (t) => {
+  // Báo cáo đo: dictionary sửa đúng 2/36 câu cho zipformer nhưng 0/36 cho Whisper trong phiên đo đó
+  // — nhưng NGUYÊN NHÂN THẬT không phải lỗi chuẩn hoá chữ hoa/dấu câu trong dictionary.js (đã kiểm
+  // trực tiếp: tokenize()/fold() trong text.js đã bỏ dấu câu ở biên và không phân biệt hoa/thường
+  // từ trước). Test này KHOÁ LẠI rằng dictionary.js hoạt động đúng với CẢ HAI dạng văn bản, dùng
+  // đúng từ điển hạt giống thật (không entries tuỳ biến) — không truyền entries ⇒ p dùng DEFAULT_SEED_PATH.
+  const { p } = setup(t, undefined);
+  // "ri ác" -> "React" (d-04 trong báo cáo).
+  assert.equal((await p.process({ textRaw: 'ri ác hiển thị trạng thái không đúng' })).text, 'React hiển thị trạng thái không đúng');
+  assert.equal((await p.process({ textRaw: 'Ri ác hiển thị trạng thái không đúng.' })).text, 'React hiển thị trạng thái không đúng.');
+  // "cu bơ nét" -> "Kubernetes" (báo cáo, mục "Đối chứng thành công của từ điển").
+  assert.equal((await p.process({ textRaw: 'mở cái cu bơ nét lên' })).text, 'mở cái Kubernetes lên');
+  assert.equal((await p.process({ textRaw: 'Mở cái cu bơ nét lên.' })).text, 'Mở cái Kubernetes lên.');
+});
+
 test('applyPreview: thay đúng như apply() nhưng KHÔNG tăng uses/last_used, KHÔNG ghi tệp (dùng cho /v1/partial)', (t) => {
   const { p, dictionaryPath } = setup(t, ENTRIES);
   const before = readFileSync(dictionaryPath, 'utf8');

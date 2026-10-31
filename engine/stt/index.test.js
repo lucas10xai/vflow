@@ -29,10 +29,6 @@ test('createStt.transcribe: kiểm năng lực ngôn ngữ theo registry TRƯỚ
   await stt.transcribe('whisper-tiny-multilingual', input('auto'));
   await assert.rejects(stt.transcribe('whisper-tiny-multilingual', input('th-TH')), { code: 'bad_request' }, 'mã ngôn ngữ không có trong danh sách phải bị chặn');
 
-  // sense-voice-multilingual: KHÔNG khai "vi" trong languages ⇒ bị chặn dù autoDetect=true.
-  await assert.rejects(stt.transcribe('sense-voice-multilingual', input('vi')), { code: 'bad_request' });
-  await stt.transcribe('sense-voice-multilingual', input('auto'));
-
   // Model không có trong registry (vd provider tuỳ ý trong test khác) ⇒ coi như chỉ nói "vi".
   await assert.rejects(stt.transcribe('tuy-y-khong-co-trong-registry', input('en')), { code: 'bad_request' });
   await stt.transcribe('tuy-y-khong-co-trong-registry', input('vi'));

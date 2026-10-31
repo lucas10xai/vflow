@@ -66,6 +66,12 @@ struct VoiceSettingsTab: View {
             .onChange(of: sttLanguage) { _, value in Task { await save(.init(sttLanguage: value)) } }
             if let reason = disabledLanguageReason {
                 Text(reason).font(.footnote).foregroundStyle(Theme.warningText)
+                Button("Mở màn hình chọn model…") { controller.openModelManagement() }
+                    .font(.footnote)
+            }
+            if DictionaryEffectivenessCaveat.appliesTo(modelID: controller.selectedModelID) {
+                Text(DictionaryEffectivenessCaveat.text)
+                    .font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
         }
         Section("Lệnh dấu câu bằng giọng") {

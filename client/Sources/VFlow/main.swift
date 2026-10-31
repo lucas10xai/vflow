@@ -251,6 +251,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if target == "modeldownload" || target.hasPrefix("modeldownload:") {
                 let variant = target.split(separator: ":", maxSplits: 1).dropFirst().first.map(String.init) ?? ""
                 c.captureModelDownloadOffscreen(variant: variant, to: outPath)
+            } else if target == "models" || target.hasPrefix("models:") {
+                let variant = target.split(separator: ":", maxSplits: 1).dropFirst().first.map(String.init) ?? ""
+                await c.captureModelManagementOffscreen(variant: variant, to: outPath)
             } else if target == "welcome" {
                 c.openWelcome()
                 c.captureWelcomeOffscreen(to: outPath)
@@ -278,7 +281,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 c.openStatusWindow(tab: tab)
                 await c.captureStatusWindowOffscreen(tab: tab, to: outPath)
             } else {
-                FileHandle.standardError.write(Data("dùng: --render-offscreen tongquan|tongquan:dich|thongke|lichsu|tudien|tudien:them-loi|dich-sheet|snippet|caidat[:general|cloud|hotkeys|historyPrivacy|advanced]|welcome --out <path.png>\n".utf8))
+                FileHandle.standardError.write(Data("dùng: --render-offscreen tongquan|tongquan:dich|thongke|lichsu|tudien|tudien:them-loi|dich-sheet|snippet|caidat[:general|cloud|hotkeys|historyPrivacy|advanced]|welcome|models[:dangtai]|modeldownload[:tiendo|loi|xong] --out <path.png>\n".utf8))
                 exit(64)
             }
             OffscreenRender.assertNoOnScreenWindow()

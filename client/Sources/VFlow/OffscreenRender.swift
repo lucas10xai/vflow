@@ -99,7 +99,17 @@ enum OffscreenRender {
             FileHandle.standardError.write(Data("VFLOW_OFFSCREEN: bitmapImageRepForCachingDisplay trả nil (\(path))\n".utf8))
             return
         }
-        view.cacheDisplay(in: view.bounds, to: rep)
+        // Phòng hờ: `NSColor` động đọc "current drawing appearance" TẠI THỜI ĐIỂM VẼ, không chỉ
+        // theo `window.appearance` (cùng lý do đã nêu ở `capture()` phía trên) — ép tường minh để
+        // chắc đúng. Lưu ý đã đo thật (Cài đặt › Nâng cao › Model nhận dạng giọng nói): `VStack`/
+        // `Text` SwiftUI thuần đứng NGOÀI `List` ra trắng trống ở chế độ tối dù có dòng này hay
+        // không — CÁCH SỬA THẬT là đưa toàn bộ nội dung vào TRONG `List`/`Form` (xem
+        // `ModelManagementView`), không phải dòng `performAsCurrentDrawingAppearance` này.
+        if let appearance {
+            appearance.performAsCurrentDrawingAppearance { view.cacheDisplay(in: view.bounds, to: rep) }
+        } else {
+            view.cacheDisplay(in: view.bounds, to: rep)
+        }
         guard let data = rep.representation(using: .png, properties: [:]) else {
             FileHandle.standardError.write(Data("VFLOW_OFFSCREEN: không mã hoá được PNG (\(path))\n".utf8))
             return

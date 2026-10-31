@@ -377,9 +377,14 @@ public struct PartialResult: Equatable, Sendable {
 }
 
 public extension EngineAPI {
-    static func partialRequest(port: Int, token: String, pcm: Data, timeout: TimeInterval = 5) -> URLRequest {
-        var r = URLRequest(url: baseURL(port: port).appendingPathComponent("v1/partial"),
-                           cachePolicy: .reloadIgnoringLocalAndRemoteCacheData, timeoutInterval: timeout)
+    static func partialRequest(port: Int, token: String, pcm: Data, model: String? = nil, timeout: TimeInterval = 5) -> URLRequest {
+        var c = URLComponents()
+        c.scheme = "http"
+        c.host = host
+        c.port = port
+        c.path = "/v1/partial"
+        if let model, !model.isEmpty { c.queryItems = [URLQueryItem(name: "model", value: model)] }
+        var r = URLRequest(url: c.url!, cachePolicy: .reloadIgnoringLocalAndRemoteCacheData, timeoutInterval: timeout)
         r.httpMethod = "POST"
         r.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         r.setValue("audio/L16; rate=16000; channels=1", forHTTPHeaderField: "Content-Type")

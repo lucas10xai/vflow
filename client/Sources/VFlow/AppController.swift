@@ -174,14 +174,95 @@ final class AppController: NSObject {
                            modelBootstrapStatus: modelBootstrapStatus, menuBarIconReminder: menuBarIconReminderMessage())
     }
 
-    /// Khả năng engine hiện tại; `nil` khi chưa đọc được, để UI không đoán là model hỗ trợ thêm tiếng.
+    /// Khả năng CỦA MODEL ĐANG DÙNG; `nil` khi chưa đọc được, để UI không đoán là model hỗ trợ thêm
+    /// tiếng. Tra THEO ĐÚNG `selectedModelID` (nếu người dùng đã chọn thẳng ở màn hình chọn model) —
+    /// KHÔNG dùng "model đầu tiên đã nạp" nữa, vì `ensure()` không giải phóng model cũ nên sau khi đổi
+    /// model có thể có NHIỀU model cùng `loaded:true` trong engine (xem `EngineLanguageResolution`).
     var engineLanguages: [String]? {
-        if case .running(_, let health) = engineState { return health.languages }
-        return nil
+        guard case .running(_, let health) = engineState else { return nil }
+        return EngineLanguageResolution.resolve(models: health.models, selectedID: selectedModelID,
+                                                fallbackLanguages: health.languages, fallbackAutoDetect: health.autoDetect).languages
     }
     var engineAutoDetect: Bool? {
-        if case .running(_, let health) = engineState { return health.autoDetect }
-        return nil
+        guard case .running(_, let health) = engineState else { return nil }
+        return EngineLanguageResolution.resolve(models: health.models, selectedID: selectedModelID,
+                                                fallbackLanguages: health.languages, fallbackAutoDetect: health.autoDetect).autoDetect
+    }
+
+    // MARK: màn hình chọn model (Cài đặt › Nâng cao)
+
+    /// Model người dùng đã CHỌN THẲNG để dùng cho dictation — lựa chọn CỤC BỘ của client (không có
+    /// trường `default_model` ghi được qua `PUT /v1/settings` trong hợp đồng; chọn model hoạt động
+    /// bằng cách gửi `?model=<id>` ở từng yêu cầu, xem contract/engine-api.md mục POST /v1/transcribe).
+    /// `nil` = chưa chọn, dùng `default_model` hiện có của engine.
+    var selectedModelID: String? {
+        get { defaults.string(forKey: "selectedModelID") }
+        set { defaults.set(newValue, forKey: "selectedModelID") }
+    }
+
+    /// `GET /v1/models` cho màn hình chọn model — tách khỏi `/healthz` (đang dùng cho vòng lặp trạng
+    /// thái) để màn hình chỉ tải khi mở, không đổi chu kỳ poll chung.
+    func fetchModels() async -> Result<[ModelStatus], ClientError> {
+        switch resolvedPort() {
+        case .failure(let e): return .failure(e)
+        case .success(let port):
+            switch readToken() {
+            case .failure(let e): return .failure(e)
+            case .success(let token):
+                do {
+                    let (data, resp) = try await session.data(for: EngineAPI.modelsRequest(port: port, token: token))
+                    return EngineAPI.parseModelList(status: (resp as? HTTPURLResponse)?.statusCode ?? 0, data: data)
+                } catch {
+                    return .failure(.network(error.localizedDescription))
+                }
+            }
+        }
+    }
+
+    /// "Nạp" (ensure) một model cụ thể NGAY (không đợi lần đọc chính tả đầu tiên) bằng một tiếng ping
+    /// im lặng rất ngắn qua `POST /v1/teach?model=<id>` — route này gọi `stt.ensure(model)` trước khi
+    /// giải mã (xem engine/server/index.js) và KHÔNG ghi history/thống kê/âm thanh, nên dùng để "làm
+    /// nóng" model mà không có tác dụng phụ. Lỗi `model_unavailable`/`timeout` hiện NGAY cho người
+    /// dùng ở màn hình chọn model, thay vì đợi họ đọc chính tả thật rồi mới biết model hỏng.
+    func activateModel(_ id: String) async -> Result<Void, ClientError> {
+        switch resolvedPort() {
+        case .failure(let e): return .failure(e)
+        case .success(let port):
+            switch readToken() {
+            case .failure(let e): return .failure(e)
+            case .success(let token):
+                let pcm = Data(count: 3200) // 100 ms im lặng ở 16 kHz mono int16 LE
+                do {
+                    let (data, resp) = try await session.data(for: EngineAPI.teachRequest(port: port, token: token, pcm: pcm, model: id))
+                    switch EngineAPI.parseTeach(status: (resp as? HTTPURLResponse)?.statusCode ?? 0, data: data) {
+                    case .success: return .success(())
+                    case .failure(let e): return .failure(e)
+                    }
+                } catch {
+                    return .failure(.network(error.localizedDescription))
+                }
+            }
+        }
+    }
+
+    /// Xoá model đã tải khỏi `<VFLOW_HOME>/models/<id>` — THUẦN THAO TÁC ĐĨA, không có endpoint HTTP
+    /// xoá model trong hợp đồng (xem `ModelDeletion`). `loadedIDs`: id các model engine đang báo
+    /// `loaded:true` lúc gọi (chặn xoá model đang nạp trong bộ nhớ).
+    func deleteModel(_ id: String, loadedIDs: Set<String>) -> Result<Void, ModelDeletion.Error> {
+        if let blocked = ModelDeletion.guardDelete(id: id, selectedID: selectedModelID, loadedIDs: loadedIDs) {
+            return .failure(blocked)
+        }
+        return ModelDeletion.delete(modelsDir: vflowHome + "/models", id: id, fs: .live)
+    }
+
+    /// Thư mục model (dùng để tải model mới ở màn hình chọn model — `ModelDownloader(modelID:)`).
+    var modelsDirPath: String { vflowHome + "/models" }
+
+    /// Tạo một `ModelDownloader` cho model TUỲ CHỌN (khác `offerModelDownload`, chỉ dùng cho model
+    /// bắt buộc lúc khởi động) — `nil` nếu chưa resolve được cấu hình engine (chưa biết `node`/`script`).
+    func makeModelDownloader(modelID: String) -> ModelDownloader? {
+        guard let spec = engineSpec else { return nil }
+        return ModelDownloader(spec: spec, home: vflowHome, modelID: modelID)
     }
 
     private func conflictWarning() -> String? {
@@ -525,6 +606,44 @@ final class AppController: NSObject {
         ModelDownloadWindowController(viewModel: vm).captureOffscreen(to: path)
     }
 
+    // MARK: màn hình chọn model (Cài đặt › Nâng cao) — KHÁC `offerModelDownload` (chỉ model bắt buộc
+    // lúc khởi động): cửa sổ này cho xem/tải/chọn/xoá BẤT KỲ model nào engine biết, mở lại nhiều lần.
+
+    private var modelManagementWindow: ModelManagementWindowController?
+    private var modelManagementViewModel: ModelManagementViewModel?
+
+    func openModelManagement() {
+        let vm: ModelManagementViewModel
+        if let existing = modelManagementViewModel {
+            vm = existing
+        } else {
+            vm = ModelManagementViewModel(controller: self)
+            modelManagementViewModel = vm
+            modelManagementWindow = ModelManagementWindowController(viewModel: vm)
+        }
+        modelManagementWindow?.show()
+        Task { await vm.load() } // làm mới mỗi lần mở, không chỉ lần đầu
+    }
+
+    /// `--render-offscreen models[:dangtai]`: chụp màn hình chọn model KHÔNG hiện cửa sổ — dữ liệu
+    /// THẬT từ engine đang chạy (`fetchModels()`), biến thể `dangtai` giả một lượt tải đang chạy trên
+    /// dòng đầu tiên CHƯA tải (không tải thật gì để chụp ảnh).
+    func captureModelManagementOffscreen(variant: String, to path: String) async {
+        let vm = ModelManagementViewModel(controller: self)
+        await vm.load()
+        if variant == "dangtai", let first = vm.rows.first(where: { !$0.availability.isDownloaded }) {
+            vm.downloadingID = first.id
+            vm.downloadState = .downloading(ModelPullOutput.Progress(doneMB: 11.3, totalMB: 25.2))
+        }
+        let window = ModelManagementWindowController(viewModel: vm)
+        // Cửa sổ vừa tạo, chưa từng vẽ lần nào — khác `StatusWindow`/`SettingsWindow` (singleton đã
+        // vẽ nhiều lần suốt vòng đời app trước khi bị chụp). Chờ một nhịp run loop cho chắc trước
+        // khi `cacheDisplay` (phòng hờ, không phải nguyên nhân chính của lỗi "trắng trống ở chế độ
+        // tối" đã gặp — nguyên nhân chính và cách sửa thật nằm ở `ModelManagementView`, xem đó).
+        try? await Task.sleep(for: .milliseconds(300))
+        window.captureOffscreen(to: path)
+    }
+
     // MARK: engine
 
     nonisolated static func probe(session: URLSession, port: Int) async -> HealthProbe {
@@ -746,8 +865,9 @@ final class AppController: NSObject {
         let pcm = recorder.snapshotPCM()
         guard !pcm.isEmpty, case .success(let port) = resolvedPort(), case .success(let token) = readToken() else { return }
         let session = self.session
+        let model = selectedModelID
         let result = await LivePreviewTick.attempt(coordinator, pcm: pcm) { pcm in
-            await Self.requestPartial(session: session, port: port, token: token, pcm: pcm)
+            await Self.requestPartial(session: session, port: port, token: token, pcm: pcm, model: model)
         }
         guard let result, machine.isRecording, livePreview === coordinator else { return }
         if case .success(let p) = result { overlay.setLivePreviewText(p.text) }
@@ -904,7 +1024,7 @@ final class AppController: NSObject {
                 case .failure(let e):
                     result = .failure(e)
                 case .success(let token):
-                    let transcribed = await Self.transcribe(session: session, port: port, token: token, pcm: pcm, mode: .normal, app: app)
+                    let transcribed = await Self.transcribe(session: session, port: port, token: token, pcm: pcm, mode: .normal, app: app, model: self.selectedModelID)
                     switch transcribed {
                     case .failure(let e):
                         result = .failure(e)
@@ -983,7 +1103,7 @@ final class AppController: NSObject {
             case .success(let port):
                 switch readToken() {
                 case .success(let token):
-                    result = await Self.transcribe(session: session, port: port, token: token, pcm: pcm, mode: mode, app: app)
+                    result = await Self.transcribe(session: session, port: port, token: token, pcm: pcm, mode: mode, app: app, model: self.selectedModelID)
                 case .failure(let e):
                     result = .failure(e)
                 }
@@ -1017,8 +1137,8 @@ final class AppController: NSObject {
     }
 
     nonisolated static func transcribe(session: URLSession, port: Int, token: String, pcm: Data,
-                                       mode: DictationMode, app: String?) async -> Result<TranscribeResult, ClientError> {
-        let req = EngineAPI.transcribeRequest(port: port, token: token, pcm: pcm, mode: mode, app: app)
+                                       mode: DictationMode, app: String?, model: String? = nil) async -> Result<TranscribeResult, ClientError> {
+        let req = EngineAPI.transcribeRequest(port: port, token: token, pcm: pcm, mode: mode, app: app, model: model)
         do {
             let (data, resp) = try await session.data(for: req)
             return EngineAPI.parseTranscribe(status: (resp as? HTTPURLResponse)?.statusCode ?? 0, data: data)
@@ -1546,9 +1666,9 @@ final class AppController: NSObject {
 
     // MARK: xem chữ chạy trực tiếp (POST /v1/partial) — V2
 
-    nonisolated static func requestPartial(session: URLSession, port: Int, token: String, pcm: Data) async -> Result<PartialResult, ClientError> {
+    nonisolated static func requestPartial(session: URLSession, port: Int, token: String, pcm: Data, model: String? = nil) async -> Result<PartialResult, ClientError> {
         do {
-            let (data, resp) = try await session.data(for: EngineAPI.partialRequest(port: port, token: token, pcm: pcm))
+            let (data, resp) = try await session.data(for: EngineAPI.partialRequest(port: port, token: token, pcm: pcm, model: model))
             return EngineAPI.parsePartial(status: (resp as? HTTPURLResponse)?.statusCode ?? 0, data: data)
         } catch {
             return .failure(.network(error.localizedDescription))

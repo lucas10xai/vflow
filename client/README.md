@@ -57,7 +57,11 @@ hay "set frontmost"/`activate()` nào.
 `<mục>`: `tongquan`, `thongke` (V2), `lichsu`, `tudien`, `tudien:them-loi` (sheet Thêm mục với lỗi hợp lệ sẵn — GIỚI
 HẠN: ảnh chỉ có cửa sổ chính, sheet không hiện trong ảnh — xem ghi chú ở
 `StatusWindowController.captureDictionaryAddInvalidOffscreen`), `snippet`,
-`caidat[:general|voice|apps|cloud|data|hotkeys|historyPrivacy|advanced]`, `welcome`. HUD (thanh trạng thái 5 trạng thái) dùng
+`caidat[:general|voice|apps|cloud|data|hotkeys|historyPrivacy|advanced]`, `welcome`,
+`models[:dangtai]` (F2, màn hình chọn model — xem mục "Model nhận dạng giọng nói"; `dangtai` giả một
+lượt tải đang chạy trên dòng model CHƯA tải đầu tiên, không tải thật gì), `modeldownload[:tiendo|loi|xong]`
+(màn hình xin tải model BẮT BUỘC lúc khởi động, O1 — khác `models`, chỉ hiện khi bản dựng không kèm
+model). HUD (thanh trạng thái 5 trạng thái) dùng
 `--demo-overlay <ghi|khoa|dich|xong|loi> --render-offscreen --out <path>` (không cần `<mục>`).
 
 ### `client/scripts/snapshot.sh <thư mục đầu ra>`
@@ -92,6 +96,15 @@ client/scripts/snapshot.sh /tmp/vflow-snapshots   # ⇒ 46 ảnh PNG, xem /tmp/v
   `--render-offscreen` (không qua `swift test` CLI thuần) ra đúng màu/vật liệu sáng-tối; nếu tự dựng
   cửa sổ thử trong một tiến trình CLI khác (không qua đường `AppController.start()` đầy đủ) có thể
   không thấy đúng vật liệu — luôn dùng đường `--render-offscreen`/`snapshot.sh` thật, không tự chế.
+- **(F2, đã SỬA ĐƯỢC — khác hai mục trên, nêu lại để ai gặp lại không mất thời gian điều tra lần
+  hai)** `VStack`/`Text` SwiftUI thuần đứng NGOÀI một `List` trong CÙNG cây view, khi chụp bằng
+  `OffscreenRender.captureRealWindow` (`cacheDisplay`) ở `--appearance dark`, ra TRẮNG TRỐNG (không
+  vẽ chữ/nền) dù `List` cạnh đó vẫn đúng tối — `window.appearance`, `.preferredColorScheme`, và
+  `performAsCurrentDrawingAppearance` quanh `cacheDisplay` ĐỀU không sửa được. Mọi màn hình Cài đặt
+  có từ trước đều đặt MỌI THỨ trong `Form`/`List` (NSTableView, tự vẽ đúng theo `window.appearance`)
+  nên chưa ai gặp lỗi này. Cách sửa THẬT (xem `ModelManagementView`): đưa TOÀN BỘ nội dung — kể cả
+  đầu đề, thẻ thông báo tạm — vào TRONG MỘT `List` (dùng `Section` cho phần không phải hàng danh
+  sách) thay vì để `VStack` đứng ngoài.
 
 ## Đóng gói tự đủ & cài đặt (M4b)
 
@@ -225,6 +238,16 @@ CỬA SỔ RIÊNG chuẩn macOS (`SettingsWindow.swift`), KHÔNG còn là mục 
 - **Nâng cao** — đám mây 9Router (giữ nguyên hành vi M4a): công tắc "Cho phép gửi chữ qua 9Router" (`cloud_llm`), ô "Model" (`llm_model`, trống = chưa đặt, kèm cảnh báo Gọn/Thư/Command Mode sẽ không chạy), "Thời gian chờ" (`llm_timeout_ms`, 1–30 s) — đọc/ghi qua `GET/PUT /v1/settings`, hiệu lực ngay, lỗi `bad_request` hiện tiếng Việt, "Đang chờ engine khởi động…" khi chưa sẵn sàng; độ trễ bắt đầu ghi; thông tin kỹ thuật (đường dẫn dữ liệu hiện dùng — tôn trọng `VFLOW_HOME` — + "Mở thư mục dữ liệu", phiên bản vflow).
 
 **Lối vào nút Cài đặt (U4)** — bốn chỗ, tất cả mở CÙNG cửa sổ singleton trên (không nhân bản): (a) nút bánh răng cố định ở CHÂN thanh bên cửa sổ chính (kèm gợi ý "⌘,"); (b) nút bánh răng ở thanh công cụ cửa sổ chính, phía phải (`ToolbarItem(placement: .primaryAction)`); (c) mục "Cài đặt…" trong menu thanh trạng thái VÀ menu Dock (cùng nguồn, xem mục Dock); (d) nút "Mở Cài đặt › Chung" trong thẻ nhắc "biểu tượng thanh menu bị che" ở Tổng quan — ví dụ cụ thể cho yêu cầu "thẻ vấn đề dẫn tới đúng tab liên quan"; các vấn đề KHÁC (engine lỗi, thiếu quyền…) đã có nút hành động riêng từ trước (Khởi động lại engine/Cấp quyền…) nên không thêm liên kết Cài đặt trùng lặp ở đó.
+
+### Model nhận dạng giọng nói (F2) — Cài đặt › Nâng cao › "Chọn model…"
+Màn hình riêng (`ModelManagementWindow.swift`, `openModelManagement()`) liệt kê `GET /v1/models` (mọi model engine biết, KHÔNG riêng model mặc định), gắn thêm chữ "đánh đổi" tĩnh từ `VFlowCore.ModelCatalog` cho các model đã biết (`zipformer-vi-30m`, `whisper-tiny-multilingual`, `whisper-base-multilingual`, `whisper-small-multilingual` — khớp `engine/stt/registry.js`); model lạ (chưa có trong catalog) vẫn hiện (id, ngôn ngữ, đã tải/chưa) kèm nhãn "Chưa có thông tin đánh đổi", KHÔNG bịa số. Mỗi dòng hiện trạng thái thật (`VFlowCore.ModelAvailability`: Sẵn sàng/Đã tải chưa nạp/Chưa tải/Lỗi nạp/Không kết nối được — model từ xa) và nút phù hợp:
+- **Tải…** (model cục bộ chưa có, không bị chặn vì thiếu checksum đã xác minh) → thẻ xin đồng ý giấy phép (dung lượng, tên giấy phép, tóm tắt, cảnh báo nguồn số đo) → **Đồng ý và tải** chạy ĐÚNG cơ chế đã có (`ModelDownloader`/`vflow models pull <id>`, kiểm sha256 sau khi tải) — **chỉ một model tải cùng lúc** (`ModelDownloadCoordination`, nút Tải của model khác bị khoá trong lúc đang tải); huỷ được, lỗi mạng/sai checksum báo rõ kèm nút Thử lại.
+- **Dùng model này** (model đã có tệp) → "nạp" model đó NGAY bằng một tiếng ping im lặng 100 ms qua `POST /v1/teach?model=<id>` (route này gọi `stt.ensure(model)` trước khi giải mã — không ghi history/thống kê/âm thanh) để thấy lỗi `model_unavailable` sớm thay vì đợi lần đọc chính tả thật; thành công mới lưu lựa chọn.
+- **Xoá…** (có xác nhận) — THAO TÁC ĐĨA THUẦN trên `<VFLOW_HOME>/models/<id>` (hợp đồng không có endpoint HTTP xoá model); khoá cứng khi model đang được CHỌN THẲNG hoặc đang NẠP trong bộ nhớ engine (`ModelPickerBuilder.canDelete`) — không cho xoá "model đang dùng" dù người dùng chưa từng bấm chọn nó (có thể đã được nạp từ trước).
+
+**"Model đang dùng" là lựa chọn CỤC BỘ của client** (`AppController.selectedModelID`, UserDefaults — contract không có `default_model` ghi được qua `PUT /v1/settings`, chỉ có tham số `model` TUỲ CHỌN ở từng yêu cầu): khi đã chọn, mọi `/v1/transcribe`/`/v1/partial` gửi kèm `?model=<id>`; chưa chọn ⇒ không gửi, dùng `default_model` hiện có của engine (hành vi cũ, không đổi). Vì `stt.ensure()` của engine KHÔNG giải phóng model cũ (nhiều model có thể cùng `loaded:true` một lúc), khả năng ngôn ngữ hiện ở Cài đặt › Giọng nói tra THEO ĐÚNG `selectedModelID` (`VFlowCore.EngineLanguageResolution`) — KHÔNG còn suy từ "model đầu tiên đã nạp" (sai sau khi đổi sang model thứ hai mà model đầu vẫn còn trong bộ nhớ). Mục "Ngôn ngữ khi nói" khoá tiếng Anh/Tự nhận biết khi model chỉ nói được tiếng Việt, kèm nút "Mở màn hình chọn model…"; chọn model họ Whisper thì hiện thêm cảnh báo ngắn: từ điển cá nhân có thể kém hiệu quả hơn (đo thật: sửa đúng 2/36 câu với model hiện tại, 0/36 với Whisper — xem `eval/reports/2026-10-30-multilingual.md`).
+
+**Số đo "đánh đổi" ở màn hình này lấy TOÀN BỘ từ `eval/reports/2026-10-30-multilingual.md` (đo bằng giọng TỔNG HỢP macOS `say`, CHƯA phải giọng người dùng thật)** — mỗi dòng catalog có `measuredCaveat` nhắc lại điều này ngay dưới chữ đánh đổi, không trình bày như số chắc chắn. `whisper-small-multilingual`/`whisper-base-multilingual` MỚI thêm vào `engine/stt/registry.js` ngày 2026-10-31 (sau báo cáo đo, vốn gọi tắt "whisper-small"/"whisper-base") — catalog khớp đúng id thật này.
 
 ### Chế độ đọc chính tả (7)
 | Chế độ | Trong máy/Đám mây | Mô tả |

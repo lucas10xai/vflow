@@ -140,6 +140,14 @@ for appearance in light dark; do
   capture "$HOME_FULL"  granted "caidat:apps"            "$appearance" "settings_apps_$appearance"
   capture "$HOME_FULL"  granted "caidat:data"            "$appearance" "settings_data_$appearance"
   capture "$HOME_FULL"  granted "caidat:advanced"        "$appearance" "settings_advanced_$appearance"
+  # F2: màn hình chọn model — HOME_FULL chỉ có zipformer-vi-30m tải sẵn (snapshot-seed.mjs không
+  # tải model nào), nên ảnh "models" tự nhiên có CẢ model đã tải (zipformer, Sẵn sàng) LẪN chưa tải
+  # (whisper-*, …) mà không cần chuẩn bị gì thêm. Biến thể "có model đa ngôn ngữ đang NẠP" (Ngôn ngữ
+  # khi nói MỞ KHOÁ) không có ở đây — cần tải/nạp thật một model Whisper (hàng trăm MB, tốn thời
+  # gian/băng thông đáng kể cho MỖI lần chạy script này) nên KHÔNG đưa vào vòng lặp thường xuyên này;
+  # xem README mục "Model nhận dạng giọng nói" cho cách tự chụp riêng khi cần.
+  capture "$HOME_FULL"  granted "models"                  "$appearance" "models_$appearance"
+  capture "$HOME_FULL"  granted "models:dangtai"          "$appearance" "models_downloading_$appearance"
   capture "$HOME_EMPTY" denied  welcome             "$appearance" "welcome_$appearance"
   capture_overlay ghi      "$appearance" "hud_listening_$appearance"
   capture_overlay khoa     "$appearance" "hud_locked_$appearance"

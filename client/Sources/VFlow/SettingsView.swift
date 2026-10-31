@@ -183,6 +183,14 @@ struct AdvancedSettingsTab: View {
 
     var body: some View {
         Form {
+            Section("Model nhận dạng giọng nói") {
+                LabeledContent("Đang dùng") {
+                    Text(controller.selectedModelID ?? "Mặc định của engine").textSelection(.enabled)
+                }
+                Button("Chọn model…") { controller.openModelManagement() }
+                Text("Tải thêm model, đổi model đang dùng, hoặc xoá model đã tải để giải phóng đĩa.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
             cloudBody
             Section("Độ trễ bắt đầu ghi") {
                 LabeledContent("Từ nhấn phím tới khối âm thanh đầu") {
